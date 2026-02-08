@@ -162,9 +162,11 @@ model Order {
   discountTotal  Int
   grandTotal     Int
   status         OrderStatus     @default(AWAITING_MANAGER_APPROVAL)
-  inviteLink     String?
-  inviteSentAt   DateTime?
-  createdAt      DateTime        @default(now())
+  inviteLink          String?
+  inviteSentAt        DateTime?
+  inviteExpiresAt     DateTime?
+  channelMessageId    Int?
+  createdAt           DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
   items          OrderItem[]
@@ -293,4 +295,10 @@ model OrderEvent {
   eventType  String
   payload    String?
   createdAt  DateTime @default(now())
+}
+
+model BotSettings {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }

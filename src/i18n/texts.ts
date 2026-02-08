@@ -271,6 +271,16 @@ export const ManagerTexts = {
   // User Info Display
   userContactInfo: (phone: string | null, address: string | null, lat: number | null, lng: number | null) =>
     `📋 *اطلاعات مشتری:*\nتلفن: ${phone || '—'}\nآدرس: ${address || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : ''}`,
+
+  // Settings
+  settingsMenuTitle: (imageStatus: string, expiryMinutes: number) =>
+    `⚙️ *تنظیمات ربات*\n\n🖼️ تصویر پرداخت: ${imageStatus}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
+  settingsImageUpdated: () => "✅ تصویر پرداخت با موفقیت به‌روزرسانی شد.",
+  settingsImageDeleted: () => "✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود.",
+  settingsImageAsk: () => "🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):",
+  settingsExpiryAsk: () => "⏳ مهلت پرداخت را به دقیقه وارد کنید (مثلاً 60):",
+  settingsExpiryUpdated: (minutes: number) => `✅ مهلت پرداخت به ${minutes} دقیقه تغییر یافت.`,
+  settingsExpiryInvalid: () => "❌ لطفاً یک عدد معتبر (بزرگتر از صفر) وارد کنید.",
 };
 
 export const CourierTexts = {
@@ -315,4 +325,17 @@ export const NotificationTexts = {
   // Invite Worker
   orderApprovedWithInvite: (orderId: number, inviteLink: string) =>
     `سفارش #${orderId} تأیید شد. برای پرداخت وارد کانال شوید: ${inviteLink}`,
+};
+
+// ===========================================
+// CHANNEL TEXTS (posted inside the checkout channel)
+// ===========================================
+
+export const ChannelTexts = {
+  paymentMessage: (orderId: number, grandTotal: number, currency: string) =>
+    `💳 *پرداخت سفارش #${orderId}*\n\n` +
+    `مبلغ قابل پرداخت: *${grandTotal.toLocaleString("fa-IR")} ${currency}*\n\n` +
+    `لطفاً مبلغ فوق را به شماره کارت/حساب ذکر شده واریز کنید ` +
+    `و سپس عکس رسید را در ربات فروشگاه ارسال نمایید.\n\n` +
+    `⏳ این پیام پس از ثبت رسید یا اتمام مهلت پرداخت حذف خواهد شد.`,
 };

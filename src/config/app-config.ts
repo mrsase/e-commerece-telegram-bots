@@ -12,6 +12,8 @@ export interface AppConfig {
   enableQueues: boolean;
   redisUrl?: string;
   checkoutChannelId?: string;
+  checkoutImageFileId?: string;
+  inviteExpiryMinutes: number;
   webhookSecretToken?: string;
 }
 
@@ -28,6 +30,8 @@ const EnvSchema = z.object({
   ENABLE_QUEUES: z.string().optional().default("false"),
   REDIS_URL: z.string().optional(),
   CHECKOUT_CHANNEL_ID: z.string().optional(),
+  CHECKOUT_IMAGE_FILE_ID: z.string().optional(),
+  INVITE_EXPIRY_MINUTES: z.string().optional().default("60"),
   WEBHOOK_SECRET_TOKEN: z.string().optional(),
 });
 
@@ -81,6 +85,8 @@ export function loadAppConfigFromEnv(): AppConfig {
     enableQueues,
     redisUrl: env.REDIS_URL,
     checkoutChannelId: env.CHECKOUT_CHANNEL_ID,
+    checkoutImageFileId: env.CHECKOUT_IMAGE_FILE_ID,
+    inviteExpiryMinutes: Math.max(1, Number(env.INVITE_EXPIRY_MINUTES) || 60),
     webhookSecretToken: env.WEBHOOK_SECRET_TOKEN,
   };
 }

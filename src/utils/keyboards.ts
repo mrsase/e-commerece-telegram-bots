@@ -137,6 +137,7 @@ export const ManagerKeyboards = {
       .text("📊 آمار", "mgr:analytics")
       .text("💬 پشتیبانی", "mgr:support")
       .row()
+      .text("⚙️ تنظیمات", "mgr:settings")
       .text("❓ راهنما", "mgr:help");
   },
 
@@ -299,6 +300,20 @@ export const ManagerKeyboards = {
       .text("🔗 آمار معرفی", "mgr:analytics:referrals")
       .row()
       .text("« بازگشت به منو", "mgr:menu");
+  },
+
+  /** Settings menu */
+  settingsMenu: (hasImage: boolean) => {
+    const kb = new InlineKeyboard()
+      .text("🖼️ تغییر تصویر پرداخت", "mgr:settings:image")
+      .row()
+      .text("⏳ تغییر مهلت پرداخت", "mgr:settings:expiry")
+      .row();
+    if (hasImage) {
+      kb.text("🗑️ حذف تصویر پرداخت", "mgr:settings:image:delete").row();
+    }
+    kb.text("« بازگشت به منو", "mgr:menu");
+    return kb;
   },
 
   /** Confirm dangerous action */

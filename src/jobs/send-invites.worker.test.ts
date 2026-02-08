@@ -7,38 +7,37 @@ import {
   it,
 } from "vitest";
 import { OrderStatus, PrismaClient } from "@prisma/client";
-import {
-  InviteService,
-  type TelegramInviteClient,
-} from "../services/invite-service.js";
-import {
-  processSendInvitesBatch,
-  type TelegramNotificationClient,
-} from "./send-invites.worker.js";
+import { processSendInvitesBatch } from "./send-invites.worker.js";
 
-class FakeTelegramInviteClient implements TelegramInviteClient {
-  public calls: { chatId: string }[] = [];
+/**
+ * Minimal fake that implements the subset of grammy's Api used by the worker.
+ */
+function createFakeBotApi() {
+  const calls = {
+    sendMessage: [] as Array<{ chatId: string | number; text: string }>,
+    sendPhoto: [] as Array<{ chatId: string | number; photo: string }>,
+    createChatInviteLink: [] as Array<{ chatId: string | number }>,
+  };
 
-  constructor(private readonly link: string = "https://t.me/+jobInvite") {}
+  const api = {
+    sendMessage: async (chatId: string | number, text: string) => {
+      calls.sendMessage.push({ chatId, text });
+      return { message_id: 100 + calls.sendMessage.length };
+    },
+    sendPhoto: async (chatId: string | number, photo: string) => {
+      calls.sendPhoto.push({ chatId, photo });
+      return { message_id: 200 + calls.sendPhoto.length };
+    },
+    createChatInviteLink: async (chatId: string | number) => {
+      calls.createChatInviteLink.push({ chatId });
+      return { invite_link: "https://t.me/+jobInvite" };
+    },
+  };
 
-  async createInviteLink(args: { chatId: string }): Promise<{ inviteLink: string }> {
-    this.calls.push({ chatId: args.chatId });
-    return { inviteLink: this.link };
-  }
-}
-
-class FakeNotificationClient implements TelegramNotificationClient {
-  public messages: { chatId: string | number; text: string }[] = [];
-
-  async sendMessage(chatId: string | number, text: string): Promise<void> {
-    this.messages.push({ chatId, text });
-  }
+  return { api: api as never, calls };
 }
 
 let prisma: PrismaClient;
-let inviteService: InviteService;
-let telegramInviteClient: FakeTelegramInviteClient;
-let notifier: FakeNotificationClient;
 let userId: number;
 
 const TEST_USER_TG_ID = 9100001;
@@ -50,13 +49,6 @@ beforeAll(async () => {
 
   prisma = new PrismaClient();
   await prisma.$connect();
-
-  telegramInviteClient = new FakeTelegramInviteClient();
-  inviteService = new InviteService(
-    prisma,
-    telegramInviteClient,
-    () => new Date("2024-01-01T00:00:00Z"),
-  );
 });
 
 afterAll(async () => {
@@ -87,9 +79,6 @@ beforeEach(async () => {
   await prisma.cartItem.deleteMany({ where: { cart: { userId } } });
   await prisma.cart.deleteMany({ where: { userId } });
   await prisma.product.deleteMany({ where: { title: "Send Invites Job Product" } });
-
-  notifier = new FakeNotificationClient();
-  telegramInviteClient.calls = [];
 });
 
 async function createApprovedOrder(): Promise<{ orderId: number }> {
@@ -135,35 +124,48 @@ async function createApprovedOrder(): Promise<{ orderId: number }> {
 describe("send_invites worker", () => {
   it("processes approved orders without invites and sends notifications", async () => {
     const { orderId } = await createApprovedOrder();
+    const { api, calls } = createFakeBotApi();
 
-    const processedCount = await processSendInvitesBatch({
-      prisma,
-      inviteService,
-      notifier,
-      checkoutChannelId: "@checkout_channel_jobs",
-    },
-    { onlyUserIds: [userId] });
+    const processedCount = await processSendInvitesBatch(
+      {
+        prisma,
+        botApi: api,
+        checkoutChannelId: "@checkout_channel_jobs",
+        inviteExpiryMinutes: 60,
+      },
+      { onlyUserIds: [userId] },
+    );
 
     expect(processedCount).toBe(1);
-    expect(telegramInviteClient.calls).toHaveLength(1);
-    expect(telegramInviteClient.calls[0]?.chatId).toBe("@checkout_channel_jobs");
 
-    expect(notifier.messages).toHaveLength(1);
-    const message = notifier.messages[0];
-    expect(message.chatId).toBe(BigInt(TEST_USER_TG_ID).toString());
-    expect(message.text).toContain(`#${orderId.toString()}`);
+    // Should have posted a text message to channel (no image file id)
+    expect(calls.sendMessage.length).toBeGreaterThanOrEqual(1);
+    const channelMsg = calls.sendMessage.find((m) => m.chatId === "@checkout_channel_jobs");
+    expect(channelMsg).toBeDefined();
+
+    // Should have created an invite link
+    expect(calls.createChatInviteLink).toHaveLength(1);
+    expect(calls.createChatInviteLink[0]?.chatId).toBe("@checkout_channel_jobs");
+
+    // Should have notified the client
+    const clientMsg = calls.sendMessage.find((m) => m.chatId === BigInt(TEST_USER_TG_ID).toString());
+    expect(clientMsg).toBeDefined();
+    expect(clientMsg!.text).toContain(`#${orderId.toString()}`);
 
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.status).toBe(OrderStatus.INVITE_SENT);
     expect(order.inviteLink).toBe("https://t.me/+jobInvite");
+    expect(order.channelMessageId).toBeTruthy();
+    expect(order.inviteExpiresAt).toBeTruthy();
 
     const events = await prisma.orderEvent.findMany({ where: { orderId } });
     expect(events.length).toBe(1);
-    expect(events[0]?.eventType).toBe("invite_created");
+    expect(events[0]?.eventType).toBe("invite_sent");
   });
 
   it("skips orders that already have invites", async () => {
     const { orderId } = await createApprovedOrder();
+    const { api, calls } = createFakeBotApi();
 
     await prisma.order.update({
       where: { id: orderId },
@@ -177,15 +179,15 @@ describe("send_invites worker", () => {
     const processedCount = await processSendInvitesBatch(
       {
         prisma,
-        inviteService,
-        notifier,
+        botApi: api,
         checkoutChannelId: "@checkout_channel_jobs",
+        inviteExpiryMinutes: 60,
       },
       { onlyUserIds: [userId] },
     );
 
     expect(processedCount).toBe(0);
-    expect(telegramInviteClient.calls).toHaveLength(0);
-    expect(notifier.messages).toHaveLength(0);
+    expect(calls.createChatInviteLink).toHaveLength(0);
+    expect(calls.sendMessage).toHaveLength(0);
   });
 });

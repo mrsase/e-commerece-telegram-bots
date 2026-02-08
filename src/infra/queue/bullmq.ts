@@ -2,26 +2,23 @@ import type { PrismaClient } from "@prisma/client";
 import { Queue, Worker } from "bullmq";
 import { Redis as IORedis } from "ioredis";
 import type { AnyBot } from "../telegram/bots.js";
-import {
-  InviteService,
-  type TelegramInviteClient,
-} from "../../services/invite-service.js";
-import {
-  processSendInvitesBatch,
-  type TelegramNotificationClient,
-} from "../../jobs/send-invites.worker.js";
+import { processSendInvitesBatch } from "../../jobs/send-invites.worker.js";
 import { expireIdleCarts } from "../../jobs/cleanup-carts.worker.js";
+import { processExpiredInvites } from "../../jobs/expire-invites.worker.js";
 
 export interface QueueSetupDeps {
   prisma: PrismaClient;
   redisUrl: string;
   clientBot: AnyBot;
   checkoutChannelId: string;
+  checkoutImageFileId?: string;
+  inviteExpiryMinutes: number;
 }
 
 export interface QueueManager {
   sendInvitesQueue: Queue;
   cleanupCartsQueue: Queue;
+  expireInvitesQueue: Queue;
   close(): Promise<void>;
 }
 
@@ -31,30 +28,16 @@ export async function setupQueues(deps: QueueSetupDeps): Promise<QueueManager> {
   const sendInvitesQueue = new Queue("send_invites", { connection });
   const cleanupCartsQueue = new Queue("cleanup_carts", { connection });
 
-  const telegramInviteClient: TelegramInviteClient = {
-    async createInviteLink({ chatId }) {
-      const res = await deps.clientBot.api.createChatInviteLink(chatId as never);
-      return { inviteLink: res.invite_link };
-    },
-  };
-
-  const notifier: TelegramNotificationClient = {
-    async sendMessage(chatId, text) {
-      await deps.clientBot.api.sendMessage(chatId, text);
-    },
-  };
-
-  const inviteService = new InviteService(deps.prisma, telegramInviteClient);
-
   const sendInvitesWorker = new Worker(
     "send_invites",
     async (job) => {
       await processSendInvitesBatch(
         {
           prisma: deps.prisma,
-          inviteService,
-          notifier,
+          botApi: deps.clientBot.api,
           checkoutChannelId: deps.checkoutChannelId,
+          checkoutImageFileId: deps.checkoutImageFileId,
+          inviteExpiryMinutes: deps.inviteExpiryMinutes,
         },
         (job.data?.options as { onlyUserIds?: number[] } | undefined) ?? {},
       );
@@ -77,7 +60,21 @@ export async function setupQueues(deps: QueueSetupDeps): Promise<QueueManager> {
     { connection },
   );
 
-  // Simple repeatable jobs: invites every minute, cart cleanup hourly.
+  const expireInvitesQueue = new Queue("expire_invites", { connection });
+
+  const expireInvitesWorker = new Worker(
+    "expire_invites",
+    async () => {
+      await processExpiredInvites({
+        prisma: deps.prisma,
+        botApi: deps.clientBot.api,
+        checkoutChannelId: deps.checkoutChannelId,
+      });
+    },
+    { connection },
+  );
+
+  // Simple repeatable jobs: invites every minute, cart cleanup hourly, expire check every 2 min.
   await sendInvitesQueue.add(
     "send_invites",
     { options: {} },
@@ -90,15 +87,24 @@ export async function setupQueues(deps: QueueSetupDeps): Promise<QueueManager> {
     { repeat: { every: 60 * 60 * 1000 }, jobId: "cleanup_carts_hourly" },
   );
 
+  await expireInvitesQueue.add(
+    "expire_invites",
+    {},
+    { repeat: { every: 2 * 60_000 }, jobId: "expire_invites_every_2min" },
+  );
+
   return {
     sendInvitesQueue,
     cleanupCartsQueue,
+    expireInvitesQueue,
     async close() {
       await Promise.all([
         sendInvitesWorker.close(),
         cleanupCartsWorker.close(),
+        expireInvitesWorker.close(),
         sendInvitesQueue.close(),
         cleanupCartsQueue.close(),
+        expireInvitesQueue.close(),
         connection.quit(),
       ]);
     },

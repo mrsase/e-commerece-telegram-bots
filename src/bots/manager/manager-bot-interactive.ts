@@ -1,7 +1,7 @@
 import { Bot, Context } from "grammy";
 import type { PrismaClient, Manager } from "@prisma/client";
 import { OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
-import { ManagerTexts, ClientTexts } from "../../i18n/index.js";
+import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 
 import { SessionStore } from "../../utils/session-store.js";
@@ -21,7 +21,9 @@ type SessionState =
   | "user:search"
   | "referral:create:maxuses"
   | "receipt:reject:reason"
-  | "support:reply";
+  | "support:reply"
+  | "settings:image"
+  | "settings:expiry";
 
 interface ManagerSession {
   state: SessionState;
@@ -35,6 +37,8 @@ interface ManagerBotDeps {
   clientBot?: Bot;
   courierBot?: Bot;
   checkoutChannelId?: string;
+  checkoutImageFileId?: string;
+  inviteExpiryMinutes?: number;
 }
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
@@ -42,6 +46,8 @@ import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
 import { ReferralAnalyticsService, formatReferralTree } from "../../services/referral-analytics-service.js";
 import { safeRender } from "../../utils/safe-reply.js";
+import { cleanupChannelForOrder } from "../../services/channel-cleanup-service.js";
+import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
 
 /**
  * Check if user is an authorized manager
@@ -62,8 +68,9 @@ async function getManager(ctx: Context, prisma: PrismaClient): Promise<Manager |
  * Register all interactive handlers for manager bot
  */
 export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): void {
-  const { prisma, clientBot, courierBot, checkoutChannelId } = deps;
+  const { prisma, clientBot, courierBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes = 60 } = deps;
   const notificationService = new NotificationService({ prisma, clientBot, courierBot });
+  const settingsService = new BotSettingsService(prisma);
 
   // ===========================================
   // START COMMAND
@@ -326,6 +333,19 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       return;
     }
+
+    if (session.state === "settings:image") {
+      const photo = ctx.message.photo;
+      const fileId = photo[photo.length - 1].file_id;
+
+      await settingsService.set(SettingKeys.CHECKOUT_IMAGE_FILE_ID, fileId);
+      managerSessions.delete(ctx.from.id);
+
+      await ctx.reply(ManagerTexts.settingsImageUpdated(), {
+        reply_markup: ManagerKeyboards.settingsMenu(true),
+      });
+      return;
+    }
   });
 
   // ===========================================
@@ -382,6 +402,16 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.productUpdated(), {
         reply_markup: ManagerKeyboards.productEdit(productId),
+      });
+      return;
+    }
+
+    if (session.state === "settings:image") {
+      await settingsService.set(SettingKeys.CHECKOUT_IMAGE_FILE_ID, fileId);
+      managerSessions.delete(ctx.from.id);
+
+      await ctx.reply(ManagerTexts.settingsImageUpdated(), {
+        reply_markup: ManagerKeyboards.settingsMenu(true),
       });
       return;
     }
@@ -461,30 +491,34 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // APPROVE ORDER - Send invite to client
+    // APPROVE ORDER - Post to channel, create time-limited invite, notify client
     if (data.startsWith("mgr:approve:")) {
       const orderId = parseInt(parts[2]);
 
       const order = await prisma.order.findUnique({ 
         where: { id: orderId },
-        include: { user: true },
+        include: { user: true, items: { include: { product: true } } },
       });
       if (!order || order.status !== OrderStatus.AWAITING_MANAGER_APPROVAL) {
         await answerCallback({ text: ManagerTexts.orderNotFound(), show_alert: true });
         return;
       }
 
-      // P0-2 Fix: Require checkoutChannelId to be configured before approval
+      // Require checkoutChannelId to be configured before approval
       if (!checkoutChannelId) {
         await answerCallback({ 
-          text: "امکان تأیید نیست: CHECKOUT_CHANNEL_ID تنظیم نشده است.", 
+          text: ManagerTexts.envMissingCheckoutChannel(), 
           show_alert: true 
         });
         return;
       }
 
-      // Update order status to APPROVED first (worker will create invite)
-      // If no worker is running, we create the invite inline
+      if (!clientBot) {
+        await answerCallback({ text: "خطا: ربات مشتری در دسترس نیست.", show_alert: true });
+        return;
+      }
+
+      // 1) Update order status to APPROVED
       await prisma.order.update({
         where: { id: orderId },
         data: {
@@ -499,41 +533,74 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         },
       });
 
-      // Try to create invite link directly using the bot API
-      let inviteLink: string | null = null;
+      // 2) Read runtime settings (DB takes priority over env)
+      const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
+      const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+
+      // 3) Post payment message (image + text) to the checkout channel
+      const paymentCaption = ChannelTexts.paymentMessage(
+        orderId,
+        order.grandTotal,
+        order.items[0]?.product?.currency ?? "IRR",
+      );
+
+      let channelMessageId: number | null = null;
       try {
-        if (clientBot) {
-          const result = await clientBot.api.createChatInviteLink(checkoutChannelId, {
-            member_limit: 1,
-            name: `Order #${orderId}`,
+        if (effectiveImageFileId) {
+          const msg = await clientBot.api.sendPhoto(checkoutChannelId, effectiveImageFileId, {
+            caption: paymentCaption,
+            parse_mode: "Markdown",
           });
-          inviteLink = result.invite_link;
+          channelMessageId = msg.message_id;
+        } else {
+          const msg = await clientBot.api.sendMessage(checkoutChannelId, paymentCaption, {
+            parse_mode: "Markdown",
+          });
+          channelMessageId = msg.message_id;
         }
       } catch (error) {
-        console.error("Failed to create invite link:", error);
-        // Fallback: use channel ID as link if we can't create one
-        inviteLink = `https://t.me/${checkoutChannelId.replace('@', '')}`;
+        console.error("Failed to post payment message to channel:", error);
       }
 
-      // Update order with invite link and status
+      // 4) Create time-limited single-use invite link
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + effectiveExpiryMin * 60 * 1000);
+      const expireUnix = Math.floor(expiresAt.getTime() / 1000);
+
+      let inviteLink: string | null = null;
+      try {
+        const result = await clientBot.api.createChatInviteLink(checkoutChannelId, {
+          member_limit: 1,
+          name: `Order #${orderId}`,
+          expire_date: expireUnix,
+        });
+        inviteLink = result.invite_link;
+      } catch (error) {
+        console.error("Failed to create invite link:", error);
+      }
+
+      // 4) Persist invite details on the order
       await prisma.order.update({
         where: { id: orderId },
         data: {
           status: OrderStatus.INVITE_SENT,
           inviteLink,
-          inviteSentAt: new Date(),
+          inviteSentAt: now,
+          inviteExpiresAt: expiresAt,
+          channelMessageId,
           events: {
             create: {
               actorType: "manager",
               actorId: manager.id,
               eventType: "invite_sent",
+              payload: JSON.stringify({ inviteLink, channelMessageId, expiresAt: expiresAt.toISOString() }),
             },
           },
         },
       });
 
-      // Send message to client via client bot
-      if (clientBot && order.user && inviteLink) {
+      // 5) Send invite link to client via DM
+      if (order.user && inviteLink) {
         try {
           await clientBot.api.sendMessage(
             order.user.tgUserId.toString(),
@@ -553,7 +620,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         }
       } else {
         await answerCallback({ 
-          text: ManagerTexts.orderApproved(orderId),
+          text: inviteLink 
+            ? ManagerTexts.orderApproved(orderId) 
+            : "⚠️ تأیید شد ولی لینک دعوت ایجاد نشد. لطفاً تنظیمات کانال را بررسی کنید.",
           show_alert: true,
         });
       }
@@ -1397,6 +1466,19 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         }),
       ]);
 
+      // Cleanup channel: delete payment message, revoke invite, kick user
+      if (clientBot && checkoutChannelId) {
+        await cleanupChannelForOrder(
+          { prisma, botApi: clientBot.api, checkoutChannelId },
+          {
+            orderId: receipt.orderId,
+            channelMessageId: receipt.order.channelMessageId,
+            inviteLink: receipt.order.inviteLink,
+            userTgId: receipt.order.user.tgUserId,
+          },
+        );
+      }
+
       // Notify client
       await notificationService.notifyClientReceiptApproved(
         receipt.order.user.tgUserId,
@@ -1569,6 +1651,49 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+    // ===========================================
+    // SETTINGS
+    // ===========================================
+    if (data === "mgr:settings") {
+      const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
+      const expiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+      const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
+
+      await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, expiryMin), {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
+      });
+      return;
+    }
+
+    if (data === "mgr:settings:image") {
+      managerSessions.set(ctx.from.id, { state: "settings:image" });
+      await safeRender(ctx, ManagerTexts.settingsImageAsk(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    if (data === "mgr:settings:image:delete") {
+      await settingsService.delete(SettingKeys.CHECKOUT_IMAGE_FILE_ID);
+      await answerCallback({ text: ManagerTexts.settingsImageDeleted(), show_alert: true });
+
+      const expiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+      await safeRender(ctx, ManagerTexts.settingsMenuTitle("❌ تنظیم نشده", expiryMin), {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.settingsMenu(false),
+      });
+      return;
+    }
+
+    if (data === "mgr:settings:expiry") {
+      managerSessions.set(ctx.from.id, { state: "settings:expiry" });
+      await safeRender(ctx, ManagerTexts.settingsExpiryAsk(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
     // HELP
     if (data === "mgr:help") {
       await safeRender(ctx, ManagerTexts.helpMessage(), {
@@ -1646,6 +1771,27 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.receiptRejected(receipt.orderId), {
         reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // Handle settings expiry input
+    if (session?.state === "settings:expiry") {
+      const input = ctx.message.text.trim();
+      const minutes = parseInt(input, 10);
+
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        await ctx.reply(ManagerTexts.settingsExpiryInvalid());
+        return;
+      }
+
+      await settingsService.set(SettingKeys.INVITE_EXPIRY_MINUTES, String(minutes));
+      managerSessions.delete(ctx.from.id);
+
+      await ctx.reply(ManagerTexts.settingsExpiryUpdated(minutes), {
+        reply_markup: ManagerKeyboards.settingsMenu(
+          !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
+        ),
       });
       return;
     }

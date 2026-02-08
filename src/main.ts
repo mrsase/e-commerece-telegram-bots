@@ -26,6 +26,8 @@ async function main(): Promise<void> {
     clientBot,
     courierBot,
     checkoutChannelId: config.checkoutChannelId,
+    checkoutImageFileId: config.checkoutImageFileId,
+    inviteExpiryMinutes: config.inviteExpiryMinutes,
   });
 
   // Register bot command menus with Telegram
@@ -67,6 +69,8 @@ async function main(): Promise<void> {
       redisUrl: config.redisUrl,
       clientBot,
       checkoutChannelId: config.checkoutChannelId,
+      checkoutImageFileId: config.checkoutImageFileId,
+      inviteExpiryMinutes: config.inviteExpiryMinutes,
     });
   }
 
