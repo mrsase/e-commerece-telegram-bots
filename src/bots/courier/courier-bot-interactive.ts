@@ -1,21 +1,24 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { Courier, PrismaClient } from "@prisma/client";
-import { DeliveryStatus } from "@prisma/client";
+import { DeliveryStatus, OrderStatus } from "@prisma/client";
 import { CourierTexts } from "../../i18n/index.js";
 import { CourierKeyboards } from "../../utils/keyboards.js";
 
+import { SessionStore } from "../../utils/session-store.js";
+import { NotificationService } from "../../services/notification-service.js";
+
 type SessionState = "delivery:fail:reason";
 
-const courierSessions = new Map<
-  number,
-  {
-    state: SessionState;
-    deliveryId: number;
-  }
->();
+interface CourierSession {
+  state: SessionState;
+  deliveryId: number;
+}
+
+const courierSessions = new SessionStore<CourierSession>();
 
 interface CourierBotDeps {
   prisma: PrismaClient;
+  clientBot?: Bot;
 }
 
 async function getCourier(ctx: Context, prisma: PrismaClient): Promise<Courier | null> {
@@ -75,7 +78,8 @@ function statusLabel(status: DeliveryStatus): string {
 }
 
 export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): void {
-  const { prisma } = deps;
+  const { prisma, clientBot } = deps;
+  const notificationService = new NotificationService({ prisma, clientBot });
 
   bot.command("start", async (ctx) => {
     const courier = await getCourier(ctx, prisma);
@@ -230,13 +234,40 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
               ? { deliveredAt: now }
               : {};
 
-      await prisma.delivery.update({
+      const updatedDelivery = await prisma.delivery.update({
         where: { id: deliveryId },
         data: {
           status,
           ...timestampUpdate,
         },
+        include: { order: { include: { user: true } } },
       });
+
+      // If delivered, mark order as COMPLETED
+      if (status === DeliveryStatus.DELIVERED) {
+        await prisma.order.update({
+          where: { id: updatedDelivery.orderId },
+          data: {
+            status: OrderStatus.COMPLETED,
+            events: {
+              create: {
+                actorType: "courier",
+                actorId: courier.id,
+                eventType: "delivery_completed",
+              },
+            },
+          },
+        });
+      }
+
+      // Notify client about delivery status change
+      if (updatedDelivery.order.user) {
+        await notificationService.notifyClientDeliveryUpdate(
+          updatedDelivery.order.user.tgUserId,
+          updatedDelivery.orderId,
+          statusLabel(status),
+        );
+      }
 
       await answerCallback(ctx, CourierTexts.updated());
       await render(ctx, CourierTexts.statusUpdated(statusLabel(status)), CourierKeyboards.backToDeliveries());
@@ -260,14 +291,25 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
         return;
       }
 
-      await prisma.delivery.update({
+      const failedDelivery = await prisma.delivery.update({
         where: { id: session.deliveryId },
         data: {
           status: DeliveryStatus.FAILED,
           failedAt: new Date(),
           failureReason: reason,
         },
+        include: { order: { include: { user: true } } },
       });
+
+      // Notify client and managers about delivery failure
+      if (failedDelivery.order.user) {
+        await notificationService.notifyClientDeliveryUpdate(
+          failedDelivery.order.user.tgUserId,
+          failedDelivery.orderId,
+          statusLabel(DeliveryStatus.FAILED),
+        );
+      }
+      await notificationService.notifyManagersDeliveryFailed(failedDelivery.orderId, reason);
 
       courierSessions.delete(Number(courier.tgUserId));
       await ctx.reply(CourierTexts.failureReasonSaved(), {

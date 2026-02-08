@@ -19,6 +19,8 @@ export const ClientKeyboards = {
       .text("💬 پشتیبانی", "client:support")
       .row()
       .text("🔗 معرفی‌ها", "client:referrals")
+      .text("👤 پروفایل", "client:profile")
+      .row()
       .text("❓ راهنما", "client:help");
   },
 
@@ -123,16 +125,18 @@ export const ManagerKeyboards = {
   /** Main menu for managers */
   mainMenu: () => {
     return new InlineKeyboard()
-      .text("📋 سفارش‌ها", "mgr:orders")
+      .text("📋 سفارش‌های جدید", "mgr:orders")
+      .text("📊 همه سفارش‌ها", "mgr:allorders")
+      .row()
       .text("🧾 رسیدها", "mgr:receipts")
-      .row()
       .text("📦 محصولات", "mgr:products")
+      .row()
       .text("👥 کاربران", "mgr:users")
-      .row()
       .text("🔗 معرفی‌ها", "mgr:referrals")
-      .text("📊 آمار", "mgr:analytics")
       .row()
+      .text("📊 آمار", "mgr:analytics")
       .text("💬 پشتیبانی", "mgr:support")
+      .row()
       .text("❓ راهنما", "mgr:help");
   },
 

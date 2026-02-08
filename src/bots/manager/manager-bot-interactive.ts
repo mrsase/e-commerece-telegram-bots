@@ -1,8 +1,10 @@
 import { Bot, Context } from "grammy";
 import type { PrismaClient, Manager } from "@prisma/client";
-import { OrderStatus, ReceiptReviewStatus } from "@prisma/client";
+import { OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ManagerTexts, ClientTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
+
+import { SessionStore } from "../../utils/session-store.js";
 
 // Session state for multi-step flows
 type SessionState = 
@@ -18,70 +20,28 @@ type SessionState =
   | "product:edit:image"
   | "user:search"
   | "referral:create:maxuses"
-  | "receipt:reject:reason";
+  | "receipt:reject:reason"
+  | "support:reply";
 
-const managerSessions = new Map<number, {
+interface ManagerSession {
   state: SessionState;
   data?: Record<string, unknown>;
-}>();
+}
+
+const managerSessions = new SessionStore<ManagerSession>();
 
 interface ManagerBotDeps {
   prisma: PrismaClient;
   clientBot?: Bot;
+  courierBot?: Bot;
   checkoutChannelId?: string;
 }
 
-import crypto from "crypto";
-
-/**
- * P1-4 Fix: Generate a random referral code using crypto for better randomness
- */
-function generateReferralCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const randomBytes = crypto.randomBytes(6);
-  let code = 'MGR_';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(randomBytes[i] % chars.length);
-  }
-  return code;
-}
-
-/**
- * P1-4 Fix: Create referral code with retry on unique constraint violation
- */
-async function createManagerReferralCodeWithRetry(
-  prisma: PrismaClient,
-  managerId: number,
-  maxUses: number | null,
-  maxRetries = 3
-): Promise<string> {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const code = generateReferralCode();
-    try {
-      await prisma.referralCode.create({
-        data: {
-          code,
-          createdByManagerId: managerId,
-          maxUses,
-        },
-      });
-      return code;
-    } catch (error: unknown) {
-      if (
-        error instanceof Error &&
-        'code' in error &&
-        (error as { code: string }).code === 'P2002'
-      ) {
-        if (attempt === maxRetries - 1) {
-          throw new Error('Failed to generate unique referral code after multiple attempts');
-        }
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error('Failed to generate referral code');
-}
+import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
+import { NotificationService } from "../../services/notification-service.js";
+import { orderStatusLabel } from "../../utils/order-status.js";
+import { ReferralAnalyticsService, formatReferralTree } from "../../services/referral-analytics-service.js";
+import { safeRender } from "../../utils/safe-reply.js";
 
 /**
  * Check if user is an authorized manager
@@ -102,7 +62,8 @@ async function getManager(ctx: Context, prisma: PrismaClient): Promise<Manager |
  * Register all interactive handlers for manager bot
  */
 export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): void {
-  const { prisma, clientBot, checkoutChannelId } = deps;
+  const { prisma, clientBot, courierBot, checkoutChannelId } = deps;
+  const notificationService = new NotificationService({ prisma, clientBot, courierBot });
 
   // ===========================================
   // START COMMAND
@@ -299,8 +260,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      // P1-4 Fix: Use retry mechanism for referral code creation
-      const code = await createManagerReferralCodeWithRetry(prisma, manager.id, maxUses);
+      const code = await createReferralCodeWithRetry(prisma, {
+        createdByManagerId: manager.id,
+        maxUses,
+        prefix: "MGR_",
+        length: 6,
+      });
 
       managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.referralCodeCreated(code), {
@@ -364,6 +329,65 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
   });
 
   // ===========================================
+  // DOCUMENT HANDLER - For product images sent as files
+  // ===========================================
+  bot.on("message:document", async (ctx) => {
+    const manager = await getManager(ctx, prisma);
+    if (!manager) return;
+
+    const session = managerSessions.get(ctx.from.id);
+    if (!session) return;
+
+    // Only handle image documents
+    const doc = ctx.message.document;
+    const mime = doc.mime_type ?? "";
+    if (!mime.startsWith("image/")) {
+      if (session.state === "product:add:image" || session.state === "product:edit:image") {
+        await ctx.reply("⚠️ لطفاً یک تصویر ارسال کنید (فرمت JPEG، PNG و…)\n\nبرای رد شدن /skip را ارسال کنید.");
+      }
+      return;
+    }
+
+    const fileId = doc.file_id;
+
+    if (session.state === "product:add:image") {
+      const data = session.data!;
+      await prisma.product.create({
+        data: {
+          title: data.title as string,
+          description: data.description as string | null,
+          price: data.price as number,
+          stock: data.stock as number | null,
+          currency: "IRR",
+          isActive: true,
+          photoFileId: fileId,
+        },
+      });
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.productCreated(data.title as string), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    if (session.state === "product:edit:image") {
+      const productId = session.data?.productId as number;
+
+      await prisma.product.update({
+        where: { id: productId },
+        data: { photoFileId: fileId },
+      });
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.productUpdated(), {
+        reply_markup: ManagerKeyboards.productEdit(productId),
+      });
+      return;
+    }
+  });
+
+  // ===========================================
   // CALLBACK QUERY HANDLERS
   // ===========================================
   bot.on("callback_query:data", async (ctx) => {
@@ -394,7 +418,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         where: { status: OrderStatus.AWAITING_MANAGER_APPROVAL },
       });
 
-      await ctx.editMessageText(
+      await safeRender(ctx, 
         `${ManagerTexts.mainMenuTitle()}\n\n📋 سفارش‌های در انتظار: ${pendingCount}`,
         {
           parse_mode: "Markdown",
@@ -424,14 +448,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (orders.length === 0) {
-        await ctx.editMessageText(ManagerTexts.noPendingOrders(), {
+        await safeRender(ctx, ManagerTexts.noPendingOrders(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await ctx.editMessageText(ManagerTexts.pendingOrdersHeader(), {
+      await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
         reply_markup: ManagerKeyboards.orderList(orders, page, totalPages),
       });
       return;
@@ -542,11 +566,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       if (orders.length === 0) {
-        await ctx.editMessageText(ManagerTexts.noPendingOrders(), {
+        await safeRender(ctx, ManagerTexts.noPendingOrders(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
       } else {
-        await ctx.editMessageText(ManagerTexts.pendingOrdersHeader(), {
+        await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
           reply_markup: ManagerKeyboards.orderList(orders, 0, 1),
         });
       }
@@ -557,7 +581,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data.startsWith("mgr:reject:")) {
       const orderId = parseInt(parts[2]);
 
-      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { user: true },
+      });
       if (!order || order.status !== OrderStatus.AWAITING_MANAGER_APPROVAL) {
         await answerCallback({ text: ManagerTexts.orderNotFound() });
         return;
@@ -577,6 +604,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         },
       });
 
+      // Notify client about rejection
+      if (order.user) {
+        await notificationService.notifyClientOrderRejected(order.user.tgUserId, orderId);
+      }
+
       await answerCallback({ 
         text: ManagerTexts.orderRejected(orderId),
         show_alert: true,
@@ -590,11 +622,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       if (orders.length === 0) {
-        await ctx.editMessageText(ManagerTexts.noPendingOrders(), {
+        await safeRender(ctx, ManagerTexts.noPendingOrders(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
       } else {
-        await ctx.editMessageText(ManagerTexts.pendingOrdersHeader(), {
+        await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
           reply_markup: ManagerKeyboards.orderList(orders, 0, 1),
         });
       }
@@ -602,10 +634,236 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     // ===========================================
+    // ORDER DETAIL
+    // ===========================================
+    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders")) {
+      const orderId = parseInt(parts[2]);
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          items: { include: { product: true } },
+          user: { select: { id: true, username: true, firstName: true, phone: true, address: true, locationLat: true, locationLng: true } },
+          events: { orderBy: { createdAt: "asc" }, take: 10 },
+          receipts: { orderBy: { submittedAt: "desc" }, take: 3 },
+          delivery: { include: { assignedCourier: true } },
+        },
+      });
+
+      if (!order) {
+        await answerCallback({ text: ManagerTexts.orderNotFound() });
+        return;
+      }
+
+      let detailText = `📦 *سفارش #${order.id}*\n`;
+      detailText += `وضعیت: ${orderStatusLabel(order.status)}\n`;
+      detailText += `تاریخ: ${order.createdAt.toISOString().split("T")[0]}\n\n`;
+
+      // User info
+      const u = order.user;
+      detailText += `*مشتری:* ${u.firstName ?? "-"} (@${u.username ?? "-"})\n`;
+      detailText += `تلفن: ${u.phone ?? "-"}\n`;
+      detailText += `آدرس: ${u.address ?? "-"}\n`;
+      if (u.locationLat != null) detailText += `📍 موقعیت ثبت شده\n`;
+      detailText += "\n";
+
+      // Items
+      detailText += `*اقلام:*\n`;
+      order.items.forEach((item) => {
+        detailText += `  ${item.product.title} x${item.qty} = ${item.lineTotal}\n`;
+      });
+      detailText += `\nجمع: ${order.subtotal}\n`;
+      if (order.discountTotal > 0) detailText += `تخفیف: ${order.discountTotal}\n`;
+      detailText += `*نهایی: ${order.grandTotal}*\n`;
+
+      // Receipts
+      if (order.receipts.length > 0) {
+        detailText += `\n🧾 رسیدها: ${order.receipts.length} عدد (آخرین: ${order.receipts[0].reviewStatus})\n`;
+      }
+
+      // Delivery
+      if (order.delivery) {
+        const d = order.delivery;
+        detailText += `\n🚚 ارسال: ${d.status}`;
+        if (d.assignedCourier) detailText += ` (پیک: @${d.assignedCourier.username ?? d.assignedCourier.id})`;
+        detailText += "\n";
+      }
+
+      // Events
+      if (order.events.length > 0) {
+        detailText += `\n📋 *تاریخچه:*\n`;
+        order.events.forEach((e) => {
+          detailText += `  ${e.createdAt.toISOString().split("T")[0]} · ${e.eventType}\n`;
+        });
+      }
+
+      const { InlineKeyboard: DK } = await import("grammy");
+      const detailKb = new DK();
+      if (order.status === OrderStatus.AWAITING_MANAGER_APPROVAL) {
+        detailKb.text("✅ تأیید", `mgr:approve:${orderId}`).text("❌ رد", `mgr:reject:${orderId}`).row();
+      }
+      detailKb.text("« سفارش‌ها", "mgr:orders").text("« منو", "mgr:menu");
+
+      await safeRender(ctx, detailText, {
+        parse_mode: "Markdown",
+        reply_markup: detailKb,
+      });
+      return;
+    }
+
+    // ALL ORDERS WITH STATUS FILTER
+    if (data === "mgr:allorders" || data.startsWith("mgr:allorders:")) {
+      const statusFilter = parts[1] === "allorders" && parts[2] ? parts[2] : null;
+      const page = parts[3] ? parseInt(parts[3]) : 0;
+      const pageSize = 5;
+
+      const where = statusFilter ? { status: statusFilter as OrderStatus } : {};
+
+      const [orders, total] = await Promise.all([
+        prisma.order.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          include: { user: { select: { username: true, firstName: true } } },
+          skip: page * pageSize,
+          take: pageSize,
+        }),
+        prisma.order.count({ where }),
+      ]);
+
+      const totalPages = Math.ceil(total / pageSize);
+
+      let text = `📊 *همه سفارش‌ها* (${total} سفارش)\n`;
+      if (statusFilter) text += `فیلتر: ${orderStatusLabel(statusFilter as OrderStatus)}\n`;
+      text += "\n";
+
+      if (orders.length === 0) {
+        text += "سفارشی یافت نشد.\n";
+      } else {
+        orders.forEach((o) => {
+          const label = o.user.username || o.user.firstName || `#${o.userId}`;
+          text += `#${o.id} · ${label} · ${orderStatusLabel(o.status)} · ${o.grandTotal}\n`;
+        });
+      }
+
+      const { InlineKeyboard: AK } = await import("grammy");
+      const allKb = new AK();
+      // Status filter buttons
+      allKb
+        .text("⏳ در انتظار", "mgr:allorders:AWAITING_MANAGER_APPROVAL:0")
+        .text("✅ تأیید", "mgr:allorders:APPROVED:0")
+        .row()
+        .text("💰 پرداخت", "mgr:allorders:PAID:0")
+        .text("✅ تکمیل", "mgr:allorders:COMPLETED:0")
+        .row()
+        .text("❌ لغو", "mgr:allorders:CANCELLED:0")
+        .text("📋 همه", "mgr:allorders")
+        .row();
+
+      // Pagination
+      if (totalPages > 1) {
+        const filterPart = statusFilter ? `:${statusFilter}` : "";
+        if (page > 0) allKb.text("« قبلی", `mgr:allorders${filterPart}:${page - 1}`);
+        allKb.text(`${page + 1}/${totalPages}`, "noop");
+        if (page < totalPages - 1) allKb.text("بعدی »", `mgr:allorders${filterPart}:${page + 1}`);
+        allKb.row();
+      }
+
+      // Per-order detail buttons
+      orders.forEach((o) => {
+        allKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`).row();
+      });
+
+      allKb.text("« منو", "mgr:menu");
+
+      await safeRender(ctx, text, {
+        parse_mode: "Markdown",
+        reply_markup: allKb,
+      });
+      return;
+    }
+
+    // USER'S ORDERS
+    if (data.startsWith("mgr:user:orders:")) {
+      const userId = parseInt(parts[3]);
+      const userOrders = await prisma.order.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { username: true, firstName: true },
+      });
+      const label = targetUser?.username || targetUser?.firstName || `#${userId}`;
+
+      let text = `📦 *سفارش‌های ${label}*\n\n`;
+      if (userOrders.length === 0) {
+        text += "سفارشی یافت نشد.\n";
+      } else {
+        userOrders.forEach((o) => {
+          text += `#${o.id} · ${orderStatusLabel(o.status)} · ${o.grandTotal}\n`;
+        });
+      }
+
+      const { InlineKeyboard: UK } = await import("grammy");
+      const userKb = new UK();
+      userOrders.forEach((o) => {
+        userKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`).row();
+      });
+      userKb.text("« کاربران", "mgr:users").text("« منو", "mgr:menu");
+
+      await safeRender(ctx, text, {
+        parse_mode: "Markdown",
+        reply_markup: userKb,
+      });
+      return;
+    }
+
+    // USER'S REFERRALS
+    if (data.startsWith("mgr:user:referrals:")) {
+      const userId = parseInt(parts[3]);
+
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { username: true, firstName: true },
+      });
+      const label = targetUser?.username || targetUser?.firstName || `#${userId}`;
+
+      const referralCodes = await prisma.referralCode.findMany({
+        where: { createdByUserId: userId },
+      });
+
+      const referredUsers = await prisma.user.findMany({
+        where: { referredById: userId },
+        select: { id: true, username: true, firstName: true },
+      });
+
+      let text = `🔗 *معرفی‌های ${label}*\n\n`;
+
+      if (referralCodes.length > 0) {
+        text += "*کدهای معرفی:*\n";
+        referralCodes.forEach((c) => {
+          text += `\`${c.code}\` · ${c.usedCount} استفاده\n`;
+        });
+      }
+
+      text += `\n*کاربران معرفی شده:* ${referredUsers.length}\n`;
+      referredUsers.forEach((u) => {
+        text += `  ${u.username || u.firstName || `#${u.id}`}\n`;
+      });
+
+      await safeRender(ctx, text, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // ===========================================
     // PRODUCTS
     // ===========================================
     if (data === "mgr:products") {
-      await ctx.editMessageText(ManagerTexts.productsMenuTitle(), {
+      await safeRender(ctx, ManagerTexts.productsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productManagement(),
       });
@@ -626,14 +884,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (products.length === 0) {
-        await ctx.editMessageText(ManagerTexts.noProducts(), {
+        await safeRender(ctx, ManagerTexts.noProducts(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await ctx.editMessageText(ManagerTexts.productListTitle(), {
+      await safeRender(ctx, ManagerTexts.productListTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productList(products, page, totalPages),
       });
@@ -642,7 +900,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:products:add") {
       managerSessions.set(ctx.from.id, { state: "product:add:title", data: {} });
-      await ctx.editMessageText(ManagerTexts.enterProductTitle());
+      await safeRender(ctx, ManagerTexts.enterProductTitle());
       return;
     }
 
@@ -663,7 +921,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         `🖼️ تصویر: ${product.photoFileId ? 'دارد' : 'ندارد'}\n` +
         `وضعیت: ${product.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
-      await ctx.editMessageText(text, {
+      await safeRender(ctx, text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productEdit(productId, !!product.photoFileId),
       });
@@ -690,7 +948,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           `🖼️ تصویر: ندارد\n` +
           `وضعیت: ${product!.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
-        await ctx.editMessageText(text, {
+        await safeRender(ctx, text, {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.productEdit(productId, false),
         });
@@ -703,11 +961,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         data: { productId },
       });
 
-      if (field === "title") await ctx.editMessageText(ManagerTexts.enterProductTitle());
-      else if (field === "desc") await ctx.editMessageText(ManagerTexts.enterProductDescription());
-      else if (field === "price") await ctx.editMessageText(ManagerTexts.enterProductPrice());
-      else if (field === "stock") await ctx.editMessageText(ManagerTexts.enterProductStock());
-      else if (field === "image") await ctx.editMessageText(ManagerTexts.sendProductImage());
+      if (field === "title") await safeRender(ctx, ManagerTexts.enterProductTitle());
+      else if (field === "desc") await safeRender(ctx, ManagerTexts.enterProductDescription());
+      else if (field === "price") await safeRender(ctx, ManagerTexts.enterProductPrice());
+      else if (field === "stock") await safeRender(ctx, ManagerTexts.enterProductStock());
+      else if (field === "image") await safeRender(ctx, ManagerTexts.sendProductImage());
       return;
     }
 
@@ -739,7 +997,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         `🖼️ تصویر: ${updated!.photoFileId ? 'دارد' : 'ندارد'}\n` +
         `وضعیت: ${updated!.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
-      await ctx.editMessageText(text, {
+      await safeRender(ctx, text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productEdit(productId, !!updated!.photoFileId),
       });
@@ -750,7 +1008,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // USERS
     // ===========================================
     if (data === "mgr:users") {
-      await ctx.editMessageText(ManagerTexts.usersMenuTitle(), {
+      await safeRender(ctx, ManagerTexts.usersMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.userManagement(),
       });
@@ -771,14 +1029,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (users.length === 0) {
-        await ctx.editMessageText(ManagerTexts.noUsers(), {
+        await safeRender(ctx, ManagerTexts.noUsers(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await ctx.editMessageText(ManagerTexts.userListTitle(), {
+      await safeRender(ctx, ManagerTexts.userListTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.userList(users, page, totalPages),
       });
@@ -787,7 +1045,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:users:search") {
       managerSessions.set(ctx.from.id, { state: "user:search" });
-      await ctx.editMessageText(ManagerTexts.enterSearchQuery());
+      await safeRender(ctx, ManagerTexts.enterSearchQuery());
       return;
     }
 
@@ -802,7 +1060,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const orderCount = await prisma.order.count({ where: { userId } });
 
-      await ctx.editMessageText(
+      await safeRender(ctx, 
         ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount),
         {
           parse_mode: "Markdown",
@@ -836,7 +1094,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const updated = await prisma.user.findUnique({ where: { id: userId } });
       const orderCount = await prisma.order.count({ where: { userId } });
 
-      await ctx.editMessageText(
+      await safeRender(ctx, 
         ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount),
         {
           parse_mode: "Markdown",
@@ -850,7 +1108,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // REFERRALS
     // ===========================================
     if (data === "mgr:referrals") {
-      await ctx.editMessageText(ManagerTexts.referralsMenuTitle(), {
+      await safeRender(ctx, ManagerTexts.referralsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.referralManagement(),
       });
@@ -859,7 +1117,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:referrals:create") {
       managerSessions.set(ctx.from.id, { state: "referral:create:maxuses" });
-      await ctx.editMessageText(ManagerTexts.enterReferralMaxUses());
+      await safeRender(ctx, ManagerTexts.enterReferralMaxUses());
       return;
     }
 
@@ -874,7 +1132,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       if (codes.length === 0) {
-        await ctx.editMessageText(ManagerTexts.noReferralCodes(), {
+        await safeRender(ctx, ManagerTexts.noReferralCodes(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
@@ -887,7 +1145,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         text += `${status} \`${c.code}\` - توسط ${creator} - ${c.usedCount}/${c.maxUses || '∞'} استفاده\n`;
       });
 
-      await ctx.editMessageText(text, {
+      await safeRender(ctx, text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.backToMenu(),
       });
@@ -898,7 +1156,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ANALYTICS
     // ===========================================
     if (data === "mgr:analytics") {
-      await ctx.editMessageText(ManagerTexts.analyticsMenuTitle(), {
+      await safeRender(ctx, ManagerTexts.analyticsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.analyticsMenu(),
       });
@@ -918,7 +1176,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       const revenue = revenueResult._sum.grandTotal || 0;
 
-      await ctx.editMessageText(
+      await safeRender(ctx, 
         ManagerTexts.orderAnalytics(total, pending, completed, revenue),
         {
           parse_mode: "Markdown",
@@ -938,7 +1196,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         prisma.user.count({ where: { createdAt: { gte: today } } }),
       ]);
 
-      await ctx.editMessageText(
+      await safeRender(ctx, 
         ManagerTexts.userAnalytics(total, active, newToday),
         {
           parse_mode: "Markdown",
@@ -958,7 +1216,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         where: { isActive: true, stock: { lt: 10, not: null } },
       });
 
-      await ctx.editMessageText(
+      await safeRender(ctx, 
         ManagerTexts.productAnalytics(total, active, lowStock),
         {
           parse_mode: "Markdown",
@@ -982,7 +1240,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         include: { createdByUser: { select: { username: true } } },
       });
 
-      await ctx.editMessageText(
+      const { InlineKeyboard: RK } = await import("grammy");
+      const refKb = new RK();
+      refKb.text("🌳 مشاهده درخت معرفی‌ها", "mgr:analytics:referraltree").row();
+      refKb.text("« بازگشت به منو", "mgr:menu");
+
+      await safeRender(ctx, 
         ManagerTexts.referralAnalytics(
           totalCodes,
           totalUses,
@@ -990,9 +1253,36 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.backToMenu(),
+          reply_markup: refKb,
         }
       );
+      return;
+    }
+
+    // REFERRAL TREE VIEW
+    if (data === "mgr:analytics:referraltree") {
+      const analyticsService = new ReferralAnalyticsService(prisma);
+      const trees = await analyticsService.getManagerReferralTrees();
+
+      let text = "🌳 *درخت معرفی‌ها*\n\n";
+      if (trees.length === 0) {
+        text += "هنوز زنجیره معرفی‌ای ایجاد نشده.\n";
+      } else {
+        trees.forEach((tree) => {
+          text += formatReferralTree(tree);
+          text += "\n";
+        });
+      }
+
+      // Truncate if too long for Telegram
+      if (text.length > 4000) {
+        text = text.substring(0, 3950) + "\n\n... (ادامه دارد)";
+      }
+
+      await safeRender(ctx, text, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
       return;
     }
 
@@ -1018,14 +1308,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (receipts.length === 0) {
-        await ctx.editMessageText(ManagerTexts.noPendingReceipts(), {
+        await safeRender(ctx, ManagerTexts.noPendingReceipts(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await ctx.editMessageText(ManagerTexts.pendingReceiptsTitle(), {
+      await safeRender(ctx, ManagerTexts.pendingReceiptsTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.receiptList(receipts, page, totalPages),
       });
@@ -1083,7 +1373,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      // Update receipt and order status
+      // Update receipt and order status to PAID
       await prisma.$transaction([
         prisma.receipt.update({
           where: { id: receiptId },
@@ -1095,12 +1385,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         prisma.order.update({
           where: { id: receipt.orderId },
           data: { 
-            status: OrderStatus.COMPLETED,
+            status: OrderStatus.PAID,
             events: {
               create: {
                 actorType: "manager",
                 actorId: manager.id,
-                eventType: "receipt_approved_order_completed",
+                eventType: "receipt_approved",
               },
             },
           },
@@ -1108,15 +1398,33 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       // Notify client
-      if (clientBot && receipt.order.user) {
-        try {
-          await clientBot.api.sendMessage(
-            receipt.order.user.tgUserId.toString(),
-            ClientTexts.receiptApproved(receipt.orderId)
-          );
-        } catch (error) {
-          console.error("Failed to notify client of receipt approval:", error);
-        }
+      await notificationService.notifyClientReceiptApproved(
+        receipt.order.user.tgUserId,
+        receipt.orderId,
+      );
+
+      // Auto-assign delivery to first active courier
+      const activeCourier = await prisma.courier.findFirst({
+        where: { isActive: true },
+      });
+
+      if (activeCourier) {
+        await prisma.delivery.create({
+          data: {
+            orderId: receipt.orderId,
+            assignedCourierId: activeCourier.id,
+          },
+        });
+
+        // Notify courier
+        const orderUser = receipt.order.user;
+        await notificationService.notifyCourierNewDelivery(
+          activeCourier.tgUserId,
+          receipt.orderId,
+          `${orderUser.firstName ?? ""} ${orderUser.lastName ?? ""}`.trim() || "-",
+          orderUser.phone ?? "-",
+          orderUser.address ?? "-",
+        );
       }
 
       await answerCallback({ 
@@ -1144,9 +1452,126 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+    // ===========================================
+    // SUPPORT
+    // ===========================================
+    if (data === "mgr:support" || data.startsWith("mgr:support:page:")) {
+      const page = data.startsWith("mgr:support:page:") ? parseInt(data.split(":")[3]) : 0;
+      const pageSize = 10;
+
+      const [conversations, total] = await Promise.all([
+        prisma.supportConversation.findMany({
+          where: { status: SupportConversationStatus.OPEN },
+          include: { user: { select: { id: true, username: true, firstName: true } } },
+          orderBy: { lastMessageAt: "desc" },
+          skip: page * pageSize,
+          take: pageSize,
+        }),
+        prisma.supportConversation.count({
+          where: { status: SupportConversationStatus.OPEN },
+        }),
+      ]);
+
+      if (conversations.length === 0) {
+        await safeRender(ctx, ManagerTexts.noSupportConversations(), {
+          reply_markup: ManagerKeyboards.backToMenu(),
+        });
+        return;
+      }
+
+      const totalPages = Math.ceil(total / pageSize);
+      const items = conversations.map((c) => ({
+        id: c.id,
+        userLabel: c.user.username || c.user.firstName || `کاربر #${c.user.id}`,
+        lastMessageAtLabel: c.lastMessageAt.toISOString().split("T")[0],
+      }));
+
+      await safeRender(ctx, ManagerTexts.supportInboxTitle(), {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.supportInbox(items, page, totalPages),
+      });
+      return;
+    }
+
+    // VIEW SUPPORT CONVERSATION
+    if (data.startsWith("mgr:support:conv:")) {
+      const convId = parseInt(parts[3]);
+      const conversation = await prisma.supportConversation.findUnique({
+        where: { id: convId },
+        include: {
+          user: { select: { id: true, username: true, firstName: true } },
+          messages: {
+            orderBy: { createdAt: "desc" },
+            take: 15,
+          },
+        },
+      });
+
+      if (!conversation) {
+        await answerCallback({ text: "گفتگو یافت نشد" });
+        return;
+      }
+
+      const userLabel = conversation.user.username || conversation.user.firstName || `کاربر #${conversation.user.id}`;
+      let convText = `💬 *گفتگوی پشتیبانی #${convId}*\nکاربر: ${userLabel}\n\n`;
+
+      if (conversation.messages.length > 0) {
+        const sorted = [...conversation.messages].reverse();
+        sorted.forEach((m) => {
+          const sender = m.senderType === SupportSenderType.USER ? "کاربر" : "مدیر";
+          convText += `*${sender}:* ${m.text}\n\n`;
+        });
+      } else {
+        convText += "هنوز پیامی ارسال نشده.\n";
+      }
+
+      await safeRender(ctx, convText, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.supportConversationActions(convId),
+      });
+      return;
+    }
+
+    // SET REPLY SESSION FOR SUPPORT
+    if (data.startsWith("mgr:support:reply:")) {
+      const convId = parseInt(parts[3]);
+      managerSessions.set(ctx.from.id, {
+        state: "support:reply",
+        data: { conversationId: convId },
+      });
+      await safeRender(ctx, ManagerTexts.supportAskReply(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // CLOSE SUPPORT CONVERSATION
+    if (data.startsWith("mgr:support:close:")) {
+      const convId = parseInt(parts[3]);
+      const conversation = await prisma.supportConversation.findUnique({
+        where: { id: convId },
+        include: { user: true },
+      });
+
+      await prisma.supportConversation.update({
+        where: { id: convId },
+        data: { status: SupportConversationStatus.CLOSED },
+      });
+
+      // Notify client
+      if (conversation?.user) {
+        await notificationService.notifyClientSupportClosed(conversation.user.tgUserId);
+      }
+
+      await safeRender(ctx, ManagerTexts.supportConversationClosed(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
     // HELP
     if (data === "mgr:help") {
-      await ctx.editMessageText(ManagerTexts.helpMessage(), {
+      await safeRender(ctx, ManagerTexts.helpMessage(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.backToMenu(),
       });
@@ -1220,6 +1645,48 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.receiptRejected(receipt.orderId), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // Handle support reply text
+    if (session?.state === "support:reply") {
+      const conversationId = session.data?.conversationId as number;
+      const replyText = ctx.message.text.trim();
+      if (!replyText) return;
+
+      const conversation = await prisma.supportConversation.findUnique({
+        where: { id: conversationId },
+        include: { user: true },
+      });
+
+      if (!conversation) {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply("گفتگو یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.supportMessage.create({
+          data: {
+            conversationId,
+            senderType: SupportSenderType.MANAGER,
+            senderManagerId: manager.id,
+            text: replyText,
+          },
+        }),
+        prisma.supportConversation.update({
+          where: { id: conversationId },
+          data: { lastMessageAt: new Date() },
+        }),
+      ]);
+
+      // Notify client
+      await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText);
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.supportReplySent(), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
     }

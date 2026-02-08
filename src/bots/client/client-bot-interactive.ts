@@ -1,10 +1,12 @@
 import { Bot, Context, Keyboard } from "grammy";
 import type { PrismaClient, User } from "@prisma/client";
-import { CartState, OrderStatus, ReceiptReviewStatus } from "@prisma/client";
+import { CartState, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ClientTexts } from "../../i18n/index.js";
 import { ClientKeyboards } from "../../utils/keyboards.js";
 import { OrderService, InsufficientStockError } from "../../services/order-service.js";
 import { DiscountService } from "../../services/discount-service.js";
+
+import { SessionStore } from "../../utils/session-store.js";
 
 // Session state for tracking user interactions
 type SessionState = 
@@ -13,70 +15,30 @@ type SessionState =
   | "checkout_phone"
   | "checkout_location"
   | "checkout_address"
-  | "awaiting_receipt";
+  | "checkout_discount"
+  | "awaiting_receipt"
+  | "support_message";
 
-const userSessions = new Map<number, { 
+interface ClientSession {
   state: SessionState;
   data?: Record<string, unknown>;
   selectedQty?: number;
   orderId?: number;
-}>();
+  supportConversationId?: number;
+}
+
+const userSessions = new SessionStore<ClientSession>();
 
 interface ClientBotDeps {
   prisma: PrismaClient;
+  managerBot?: Bot;
 }
 
-/**
- * P1-4 Fix: Generate a random referral code using crypto for better randomness
- */
-import crypto from "crypto";
-
-function generateReferralCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const randomBytes = crypto.randomBytes(8);
-  let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += chars.charAt(randomBytes[i] % chars.length);
-  }
-  return code;
-}
-
-/**
- * P1-4 Fix: Create referral code with retry on unique constraint violation
- */
-async function createReferralCodeWithRetry(
-  prisma: PrismaClient,
-  userId: number,
-  maxRetries = 3
-): Promise<string> {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const code = generateReferralCode();
-    try {
-      await prisma.referralCode.create({
-        data: {
-          code,
-          createdByUserId: userId,
-          maxUses: 5,
-        },
-      });
-      return code;
-    } catch (error: unknown) {
-      // Check for unique constraint violation (Prisma error code P2002)
-      if (
-        error instanceof Error &&
-        'code' in error &&
-        (error as { code: string }).code === 'P2002'
-      ) {
-        if (attempt === maxRetries - 1) {
-          throw new Error('Failed to generate unique referral code after multiple attempts');
-        }
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error('Failed to generate referral code');
-}
+import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
+import { buildCartDisplay } from "../../utils/cart-display.js";
+import { NotificationService } from "../../services/notification-service.js";
+import { orderStatusLabel } from "../../utils/order-status.js";
+import { safeRender } from "../../utils/safe-reply.js";
 
 /**
  * Get or create user, checking referral status
@@ -170,35 +132,37 @@ async function processCheckout(
   ctx: Context,
   user: User,
   cartId: number,
-  prisma: PrismaClient
+  prisma: PrismaClient,
+  notificationService?: NotificationService,
+  discountCode?: string | null,
 ): Promise<void> {
   const orderService = new OrderService(prisma);
   const discountService = new DiscountService(prisma);
 
   try {
-    // P2-4 Fix: Integrate DiscountService into checkout
-    // Get cart items to calculate discounts
     const cart = await prisma.cart.findUnique({
       where: { id: cartId },
       include: { items: { include: { product: true } } },
     });
 
     if (!cart) {
-      await ctx.reply(ClientTexts.checkoutError(), {
+      await safeRender(ctx, ClientTexts.checkoutError(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
     }
 
-    // Calculate applicable discounts
-    const discountResult = await discountService.calculateDiscounts({
-      userId: user.id,
-      items: cart.items.map(item => ({
-        productId: item.productId,
-        qty: item.qty,
-        unitPrice: item.unitPriceSnapshot,
-      })),
-    });
+    const discountResult = await discountService.calculateDiscounts(
+      {
+        userId: user.id,
+        items: cart.items.map(item => ({
+          productId: item.productId,
+          qty: item.qty,
+          unitPrice: item.unitPriceSnapshot,
+        })),
+      },
+      discountCode,
+    );
 
     const result = await orderService.createOrderFromCart({
       userId: user.id,
@@ -206,18 +170,23 @@ async function processCheckout(
       appliedDiscounts: discountResult.appliedDiscounts,
     });
 
-    await ctx.reply(
+    await safeRender(
+      ctx,
       ClientTexts.orderSubmitted(result.orderId, result.grandTotal) + "\n\n" + ClientTexts.orderPendingApproval(),
       { reply_markup: ClientKeyboards.mainMenu() }
     );
+
+    // Notify managers about the new order
+    const userLabel = user.username || user.firstName || `#${user.id}`;
+    await notificationService?.notifyManagersNewOrder(result.orderId, userLabel, result.grandTotal);
   } catch (error) {
     if (error instanceof InsufficientStockError) {
-      await ctx.reply(ClientTexts.outOfStock(), {
+      await safeRender(ctx, ClientTexts.outOfStock(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
     }
-    await ctx.reply(ClientTexts.checkoutError(), {
+    await safeRender(ctx, ClientTexts.checkoutError(), {
       reply_markup: ClientKeyboards.mainMenu(),
     });
   }
@@ -229,7 +198,8 @@ async function processCheckout(
 async function continueCheckoutFlow(
   ctx: Context,
   user: User,
-  prisma: PrismaClient
+  prisma: PrismaClient,
+  notificationService?: NotificationService,
 ): Promise<void> {
   // Refresh user data
   const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
@@ -264,7 +234,7 @@ async function continueCheckoutFlow(
   });
 
   if (cart) {
-    await processCheckout(ctx, updatedUser, cart.id, prisma);
+    await processCheckout(ctx, updatedUser, cart.id, prisma, notificationService);
   }
 }
 
@@ -272,7 +242,8 @@ async function continueCheckoutFlow(
  * Register all interactive handlers for client bot
  */
 export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): void {
-  const { prisma } = deps;
+  const { prisma, managerBot } = deps;
+  const notificationService = new NotificationService({ prisma, managerBot });
 
   // ===========================================
   // START COMMAND - Referral Gate
@@ -350,7 +321,94 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       await ctx.reply(ClientTexts.addressReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma);
+      await continueCheckoutFlow(ctx, user, prisma, notificationService);
+      return;
+    }
+
+    // Handle discount code entry during checkout
+    if (session?.state === "checkout_discount") {
+      const code = ctx.message.text.trim();
+      
+      const user = await prisma.user.findUnique({
+        where: { tgUserId: BigInt(ctx.from.id) },
+      });
+      if (!user) {
+        await ctx.reply(ClientTexts.unableToIdentify());
+        return;
+      }
+
+      userSessions.delete(ctx.from.id);
+
+      if (code === "/skip") {
+        // Continue without discount code
+        const cart = await prisma.cart.findFirst({
+          where: { userId: user.id, state: CartState.ACTIVE },
+        });
+        if (cart) {
+          await processCheckout(ctx, user, cart.id, prisma, notificationService);
+        }
+        return;
+      }
+
+      // Validate the discount code exists and is active
+      const discount = await prisma.discount.findUnique({
+        where: { code },
+      });
+
+      if (!discount || !discount.isActive) {
+        await ctx.reply("❌ کد تخفیف نامعتبر است. سفارش بدون تخفیف ثبت می‌شود.");
+        const cart = await prisma.cart.findFirst({
+          where: { userId: user.id, state: CartState.ACTIVE },
+        });
+        if (cart) {
+          await processCheckout(ctx, user, cart.id, prisma, notificationService);
+        }
+        return;
+      }
+
+      // Process checkout with discount code
+      const cart = await prisma.cart.findFirst({
+        where: { userId: user.id, state: CartState.ACTIVE },
+      });
+      if (cart) {
+        await ctx.reply(`✅ کد تخفیف "${code}" اعمال شد.`);
+        await processCheckout(ctx, user, cart.id, prisma, notificationService, code);
+      }
+      return;
+    }
+
+    // Handle support message
+    if (session?.state === "support_message" && session.supportConversationId) {
+      const messageText = ctx.message.text.trim();
+      if (!messageText) return;
+
+      const user = await prisma.user.findUnique({
+        where: { tgUserId: BigInt(ctx.from.id) },
+      });
+      if (!user) {
+        await ctx.reply(ClientTexts.unableToIdentify());
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.supportMessage.create({
+          data: {
+            conversationId: session.supportConversationId,
+            senderType: SupportSenderType.USER,
+            text: messageText,
+          },
+        }),
+        prisma.supportConversation.update({
+          where: { id: session.supportConversationId },
+          data: { lastMessageAt: new Date() },
+        }),
+      ]);
+
+      await ctx.reply(ClientTexts.supportMessageSent());
+
+      // Notify managers
+      const userLabel = user.username || user.firstName || `#${user.id}`;
+      await notificationService.notifyManagersNewSupportMessage(session.supportConversationId, userLabel);
       return;
     }
 
@@ -381,7 +439,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       await ctx.reply(ClientTexts.phoneReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma);
+      await continueCheckoutFlow(ctx, user, prisma, notificationService);
     }
   });
 
@@ -412,7 +470,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       await ctx.reply(ClientTexts.locationReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma);
+      await continueCheckoutFlow(ctx, user, prisma, notificationService);
     }
   });
 
@@ -481,6 +539,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         ]);
 
         await ctx.reply(ClientTexts.receiptReceived());
+        const userLabel1 = user.username || user.firstName || `#${user.id}`;
+        await notificationService.notifyManagersNewReceipt(approvedOrder.id, userLabel1);
         return;
       }
 
@@ -515,6 +575,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     ]);
 
     await ctx.reply(ClientTexts.receiptReceived());
+    const userLabel2 = user.username || user.firstName || `#${user.id}`;
+    await notificationService.notifyManagersNewReceipt(order.id, userLabel2);
   });
 
   // ===========================================
@@ -539,13 +601,13 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     const { user, needsReferral } = await getOrCreateUser(ctx, prisma);
     
     if (!user || !user.isActive) {
-      await ctx.editMessageText(ClientTexts.userBlocked());
+      await safeRender(ctx, ClientTexts.userBlocked());
       return;
     }
 
     if (needsReferral && !data.startsWith("noop")) {
       userSessions.set(ctx.from.id, { state: "awaiting_referral" });
-      await ctx.editMessageText(ClientTexts.welcomeNewUser());
+      await safeRender(ctx, ClientTexts.welcomeNewUser());
       return;
     }
 
@@ -554,7 +616,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // MAIN MENU
     if (data === "client:menu") {
-      await ctx.editMessageText(ClientTexts.welcome(), {
+      await safeRender(ctx, ClientTexts.welcome(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
@@ -576,14 +638,14 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       ]);
 
       if (products.length === 0) {
-        await ctx.editMessageText(ClientTexts.noProductsAvailable(), {
+        await safeRender(ctx, ClientTexts.noProductsAvailable(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await ctx.editMessageText(ClientTexts.productsHeader(), {
+      await safeRender(ctx, ClientTexts.productsHeader(), {
         reply_markup: ClientKeyboards.productList(products, page, totalPages),
       });
       return;
@@ -595,7 +657,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const product = await prisma.product.findUnique({ where: { id: productId } });
 
       if (!product) {
-        await ctx.editMessageText(ClientTexts.productNotFound(), {
+        await safeRender(ctx, ClientTexts.productNotFound(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -621,7 +683,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           reply_markup: ClientKeyboards.productView(productId, 1),
         });
       } else {
-        await ctx.editMessageText(text, {
+        await safeRender(ctx, text, {
           parse_mode: "Markdown",
           reply_markup: ClientKeyboards.productView(productId, 1),
         });
@@ -719,32 +781,22 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!cart || cart.items.length === 0) {
-        await ctx.editMessageText(ClientTexts.cartEmpty(), {
+        await safeRender(ctx, ClientTexts.cartEmpty(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
       }
 
-      const items = cart.items.map((item) => ({
+      const display = buildCartDisplay(cart.items.map((item) => ({
         productId: item.productId,
         title: item.product.title,
         qty: item.qty,
-      }));
+        unitPrice: item.unitPriceSnapshot,
+        currency: item.product.currency,
+      })));
 
-      const subtotal = cart.items.reduce(
-        (sum, item) => sum + item.qty * item.unitPriceSnapshot,
-        0
-      );
-
-      let text = ClientTexts.cartHeader() + "\n\n";
-      cart.items.forEach((item) => {
-        const lineTotal = item.qty * item.unitPriceSnapshot;
-        text += `${item.product.title} x${item.qty} = ${lineTotal} ${item.product.currency}\n`;
-      });
-      text += `\n${ClientTexts.cartSubtotal(subtotal)}`;
-
-      await ctx.editMessageText(text, {
-        reply_markup: ClientKeyboards.cartView(items),
+      await safeRender(ctx, display.text, {
+        reply_markup: ClientKeyboards.cartView(display.items),
       });
       return;
     }
@@ -773,32 +825,22 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!updatedCart || updatedCart.items.length === 0) {
-        await ctx.editMessageText(ClientTexts.cartEmpty(), {
+        await safeRender(ctx, ClientTexts.cartEmpty(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
       }
 
-      const items = updatedCart.items.map((item) => ({
+      const display = buildCartDisplay(updatedCart.items.map((item) => ({
         productId: item.productId,
         title: item.product.title,
         qty: item.qty,
-      }));
+        unitPrice: item.unitPriceSnapshot,
+        currency: item.product.currency,
+      })));
 
-      const subtotal = updatedCart.items.reduce(
-        (sum, item) => sum + item.qty * item.unitPriceSnapshot,
-        0
-      );
-
-      let text = ClientTexts.cartHeader() + "\n\n";
-      updatedCart.items.forEach((item) => {
-        const lineTotal = item.qty * item.unitPriceSnapshot;
-        text += `${item.product.title} x${item.qty} = ${lineTotal} ${item.product.currency}\n`;
-      });
-      text += `\n${ClientTexts.cartSubtotal(subtotal)}`;
-
-      await ctx.editMessageText(text, {
-        reply_markup: ClientKeyboards.cartView(items),
+      await safeRender(ctx, display.text, {
+        reply_markup: ClientKeyboards.cartView(display.items),
       });
       return;
     }
@@ -813,7 +855,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
       }
 
-      await ctx.editMessageText(ClientTexts.cartCleared(), {
+      await safeRender(ctx, ClientTexts.cartCleared(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
@@ -827,7 +869,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!cart || cart.items.length === 0) {
-        await ctx.editMessageText(ClientTexts.cartEmpty(), {
+        await safeRender(ctx, ClientTexts.cartEmpty(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -840,7 +882,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const needsAddress = !user.address;
 
       if (needsPhone || needsLocation || needsAddress) {
-        await ctx.editMessageText(ClientTexts.checkoutInfoRequired());
+        // Delete the inline message to avoid stacking
+        try { await ctx.deleteMessage(); } catch { /* ignore */ }
         
         if (needsPhone) {
           userSessions.set(ctx.from.id, { state: "checkout_phone" });
@@ -869,15 +912,38 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         }
       }
 
-      // All info available - proceed with checkout
-      await processCheckout(ctx, user, cart.id, prisma);
+      // All info available - ask for discount code
+      const { InlineKeyboard: CK } = await import("grammy");
+      const discountKb = new CK();
+      discountKb.text("🎟️ وارد کردن کد تخفیف", "client:checkout:discount").row();
+      discountKb.text("⏭️ ادامه بدون کد تخفیف", `client:checkout:finalize:${cart.id}`).row();
+      discountKb.text("❌ انصراف", "client:checkout:cancel");
+
+      await safeRender(ctx, "آیا کد تخفیف دارید؟", {
+        reply_markup: discountKb,
+      });
+      return;
+    }
+
+    // DISCOUNT CODE PROMPT
+    if (data === "client:checkout:discount") {
+      userSessions.set(ctx.from.id, { state: "checkout_discount" });
+      await safeRender(ctx, "🎟️ لطفاً کد تخفیف خود را وارد کنید:\n\nبرای انصراف /skip را ارسال کنید.");
+      return;
+    }
+
+    // FINALIZE CHECKOUT (with or without discount code)
+    if (data.startsWith("client:checkout:finalize:")) {
+      const cartId = parseInt(parts[3]);
+      const discountCode = parts[4] || null; // optional discount code passed via callback
+      await processCheckout(ctx, user, cartId, prisma, notificationService, discountCode);
       return;
     }
 
     // CANCEL CHECKOUT
     if (data === "client:checkout:cancel") {
       userSessions.delete(ctx.from.id);
-      await ctx.editMessageText(ClientTexts.cancelCheckout(), {
+      await safeRender(ctx, ClientTexts.cancelCheckout(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
@@ -892,7 +958,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (orders.length === 0) {
-        await ctx.editMessageText(ClientTexts.noOrders(), {
+        await safeRender(ctx, ClientTexts.noOrders(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -900,12 +966,160 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       let text = ClientTexts.myOrdersHeader() + "\n\n";
       orders.forEach((o) => {
-        text += `#${o.id} - ${o.status} - ${o.grandTotal}\n`;
+        text += `سفارش #${o.id} · ${orderStatusLabel(o.status)} · ${o.grandTotal} تومان\n`;
       });
 
-      await ctx.editMessageText(text, {
+      const { InlineKeyboard } = await import("grammy");
+      const kb = new InlineKeyboard();
+      orders.forEach((o) => {
+        kb.text(`📋 جزئیات سفارش #${o.id}`, `client:order:${o.id}`).row();
+      });
+      kb.text("« بازگشت به منو", "client:menu");
+
+      await safeRender(ctx, text, {
+        reply_markup: kb,
+      });
+      return;
+    }
+
+    // ORDER DETAIL
+    if (data.startsWith("client:order:") && !data.startsWith("client:orders")) {
+      const orderId = parseInt(parts[2]);
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          items: { include: { product: true } },
+          delivery: true,
+        },
+      });
+
+      if (!order || order.userId !== user.id) {
+        await safeRender(ctx, "سفارش یافت نشد.", {
+          reply_markup: ClientKeyboards.backToMenu(),
+        });
+        return;
+      }
+
+      let detailText = `📦 *سفارش #${order.id}*\n`;
+      detailText += `وضعیت: ${orderStatusLabel(order.status)}\n`;
+      detailText += `تاریخ: ${order.createdAt.toISOString().split("T")[0]}\n\n`;
+      detailText += `*اقلام:*\n`;
+      order.items.forEach((item) => {
+        detailText += `  ${item.product.title} x${item.qty} = ${item.lineTotal} تومان\n`;
+      });
+      detailText += `\nجمع: ${order.subtotal} تومان\n`;
+      if (order.discountTotal > 0) {
+        detailText += `تخفیف: ${order.discountTotal} تومان\n`;
+      }
+      detailText += `*مبلغ نهایی: ${order.grandTotal} تومان*\n`;
+
+      if (order.delivery) {
+        const dlabel = order.delivery.status === "DELIVERED" ? "تحویل داده شده ✅"
+          : order.delivery.status === "OUT_FOR_DELIVERY" ? "در حال ارسال 🚚"
+          : order.delivery.status === "PICKED_UP" ? "برداشته شده 📦"
+          : order.delivery.status === "FAILED" ? "ناموفق ❌"
+          : "تخصیص داده شده 📋";
+        detailText += `\nوضعیت ارسال: ${dlabel}\n`;
+      }
+
+      const { InlineKeyboard: IK } = await import("grammy");
+      const detailKb = new IK();
+
+      // Show cancel button only for pending orders
+      if (order.status === OrderStatus.AWAITING_MANAGER_APPROVAL) {
+        detailKb.text("❌ لغو سفارش", `client:cancel:${order.id}`).row();
+      }
+      detailKb.text("« بازگشت به سفارش‌ها", "client:orders").row();
+      detailKb.text("« بازگشت به منو", "client:menu");
+
+      await safeRender(ctx, detailText, {
+        parse_mode: "Markdown",
+        reply_markup: detailKb,
+      });
+      return;
+    }
+
+    // CANCEL ORDER
+    if (data.startsWith("client:cancel:")) {
+      const orderId = parseInt(parts[2]);
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+
+      if (!order || order.userId !== user.id || order.status !== OrderStatus.AWAITING_MANAGER_APPROVAL) {
+        await answerCallback({ text: "این سفارش قابل لغو نیست.", show_alert: true });
+        return;
+      }
+
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          status: OrderStatus.CANCELLED,
+          events: {
+            create: {
+              actorType: "user",
+              actorId: user.id,
+              eventType: "order_cancelled_by_user",
+            },
+          },
+        },
+      });
+
+      await safeRender(ctx, `✅ سفارش #${orderId} لغو شد.`, {
         reply_markup: ClientKeyboards.backToMenu(),
       });
+      return;
+    }
+
+    // USER PROFILE
+    if (data === "client:profile") {
+      let profileText = "👤 *پروفایل من*\n\n";
+      profileText += `نام: ${user.firstName ?? "-"} ${user.lastName ?? ""}\n`;
+      profileText += `نام کاربری: ${user.username ? "@" + user.username : "-"}\n`;
+      profileText += `تلفن: ${user.phone ?? "ثبت نشده"}\n`;
+      profileText += `آدرس: ${user.address ?? "ثبت نشده"}\n`;
+      profileText += `موقعیت: ${user.locationLat != null ? "✅ ثبت شده" : "ثبت نشده"}\n`;
+
+      const { InlineKeyboard: PK } = await import("grammy");
+      const profileKb = new PK();
+      profileKb.text("📱 ویرایش تلفن", "client:profile:edit:phone").row();
+      profileKb.text("📍 ویرایش آدرس", "client:profile:edit:address").row();
+      profileKb.text("🗺️ ویرایش موقعیت", "client:profile:edit:location").row();
+      profileKb.text("« بازگشت به منو", "client:menu");
+
+      await safeRender(ctx, profileText, {
+        parse_mode: "Markdown",
+        reply_markup: profileKb,
+      });
+      return;
+    }
+
+    // EDIT PHONE
+    if (data === "client:profile:edit:phone") {
+      userSessions.set(ctx.from.id, { state: "checkout_phone" });
+      try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      const keyboard = new Keyboard()
+        .requestContact(ClientTexts.askPhoneButton())
+        .resized()
+        .oneTime();
+      await ctx.reply(ClientTexts.askPhone(), { reply_markup: keyboard });
+      return;
+    }
+
+    // EDIT ADDRESS
+    if (data === "client:profile:edit:address") {
+      userSessions.set(ctx.from.id, { state: "checkout_address" });
+      await safeRender(ctx, "📍 آدرس جدید خود را ارسال کنید:");
+      return;
+    }
+
+    // EDIT LOCATION
+    if (data === "client:profile:edit:location") {
+      userSessions.set(ctx.from.id, { state: "checkout_location" });
+      try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      const keyboard = new Keyboard()
+        .requestLocation(ClientTexts.askLocationButton())
+        .resized()
+        .oneTime();
+      await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
       return;
     }
 
@@ -930,7 +1144,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       text += `\n${ClientTexts.referralStats(totalReferred)}`;
 
-      await ctx.editMessageText(text, {
+      await safeRender(ctx, text, {
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.referralMenu(referralCodes.length > 0),
       });
@@ -952,10 +1166,12 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      // P1-4 Fix: Use retry mechanism for referral code creation
-      const code = await createReferralCodeWithRetry(prisma, user.id);
+      const code = await createReferralCodeWithRetry(prisma, {
+        createdByUserId: user.id,
+        maxUses: 5,
+      });
 
-      await ctx.editMessageText(ClientTexts.referralCodeGenerated(code), {
+      await safeRender(ctx, ClientTexts.referralCodeGenerated(code), {
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.backToMenu(),
       });
@@ -964,8 +1180,68 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // HELP
     if (data === "client:help") {
-      await ctx.editMessageText(ClientTexts.helpMessage(), {
+      await safeRender(ctx, ClientTexts.helpMessage(), {
         parse_mode: "Markdown",
+        reply_markup: ClientKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // ===========================================
+    // SUPPORT
+    // ===========================================
+    if (data === "client:support") {
+      // Find or create open conversation
+      let conversation = await prisma.supportConversation.findFirst({
+        where: { userId: user.id, status: SupportConversationStatus.OPEN },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (!conversation) {
+        conversation = await prisma.supportConversation.create({
+          data: { userId: user.id },
+        });
+      }
+
+      // Show last messages
+      const messages = await prisma.supportMessage.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+
+      let supportText = ClientTexts.supportIntro() + "\n\n";
+      if (messages.length > 0) {
+        const sorted = messages.reverse();
+        sorted.forEach((m) => {
+          const sender = m.senderType === SupportSenderType.USER ? "شما" : "پشتیبانی";
+          supportText += `*${sender}:* ${m.text}\n\n`;
+        });
+      }
+      supportText += ClientTexts.supportAskMessage();
+
+      userSessions.set(ctx.from.id, {
+        state: "support_message",
+        supportConversationId: conversation.id,
+      });
+
+      await safeRender(ctx, supportText, {
+        parse_mode: "Markdown",
+        reply_markup: ClientKeyboards.supportActions(conversation.id),
+      });
+      return;
+    }
+
+    // CLOSE SUPPORT CONVERSATION
+    if (data.startsWith("client:support:close:")) {
+      const convId = parseInt(parts[3]);
+      await prisma.supportConversation.update({
+        where: { id: convId },
+        data: { status: SupportConversationStatus.CLOSED },
+      });
+
+      userSessions.delete(ctx.from.id);
+      await safeRender(ctx, ClientTexts.supportClosed(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;

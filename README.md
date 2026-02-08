@@ -151,6 +151,9 @@ npm run dev
 | `DATABASE_URL` | Yes | - | Prisma connection string |
 | `CLIENT_BOT_TOKEN` | Yes | - | Telegram bot token for client bot |
 | `MANAGER_BOT_TOKEN` | Yes | - | Telegram bot token for manager bot |
+| `COURIER_BOT_TOKEN` | Yes | - | Telegram bot token for courier bot |
+| `ADMIN_TG_USER_ID` | Yes | - | Telegram user ID for the admin manager (seed) |
+| `COURIER_TG_USER_ID` | No | - | Telegram user ID for the courier (seed) |
 | `PORT` | No | `3000` | HTTP server port |
 | `NODE_ENV` | No | `development` | Environment mode |
 | `UPDATES_MODE` | No | `auto` | `auto`, `polling`, or `webhook` |
@@ -162,7 +165,7 @@ npm run dev
 
 1. Message [@BotFather](https://t.me/BotFather) on Telegram
 2. Send `/newbot` and follow the prompts
-3. Create two bots: one for clients, one for managers
+3. Create three bots: one for clients, one for managers, one for couriers
 4. Copy the tokens to your `.env` file
 
 ### Getting Your Telegram User ID

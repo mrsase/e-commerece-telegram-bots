@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 
 interface SeedOptions {
   adminTgUserId?: string;
+  courierTgUserId?: string;
   includeProducts?: boolean;
   includeDiscounts?: boolean;
 }
@@ -11,6 +12,7 @@ interface SeedOptions {
 function getOptions(): SeedOptions {
   return {
     adminTgUserId: process.env.ADMIN_TG_USER_ID,
+    courierTgUserId: process.env.COURIER_TG_USER_ID,
     includeProducts: process.env.SEED_PRODUCTS === "true",
     includeDiscounts: process.env.SEED_DISCOUNTS === "true",
   };
@@ -37,6 +39,28 @@ async function seedManager(tgUserId: string): Promise<void> {
   });
 
   console.log(`✓ Created ADMIN manager (tgUserId: ${tgUserId})`);
+}
+
+async function seedCourier(tgUserId: string): Promise<void> {
+  const tgUserIdBigInt = BigInt(tgUserId);
+
+  const existing = await prisma.courier.findUnique({
+    where: { tgUserId: tgUserIdBigInt },
+  });
+
+  if (existing) {
+    console.log(`✓ Courier already exists (tgUserId: ${tgUserId})`);
+    return;
+  }
+
+  await prisma.courier.create({
+    data: {
+      tgUserId: tgUserIdBigInt,
+      isActive: true,
+    },
+  });
+
+  console.log(`✓ Created courier (tgUserId: ${tgUserId})`);
 }
 
 async function seedProducts(): Promise<void> {
@@ -186,6 +210,16 @@ async function main(): Promise<void> {
     console.log("⚠️  ADMIN_TG_USER_ID not set. Skipping manager seed.");
     console.log("   To seed a manager, set ADMIN_TG_USER_ID in your .env file.");
     console.log("   Get your Telegram user ID from @userinfobot on Telegram.\n");
+  }
+
+  // Seed courier (optional)
+  if (options.courierTgUserId) {
+    console.log("--- Seeding Courier ---");
+    await seedCourier(options.courierTgUserId);
+    console.log("");
+  } else {
+    console.log("⚠️  COURIER_TG_USER_ID not set. Skipping courier seed.");
+    console.log("   To seed a courier, set COURIER_TG_USER_ID in your .env file.\n");
   }
 
   // Seed products (optional)
