@@ -714,7 +714,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
-    // ADD TO CART
+    // ADD TO CART (continue shopping → back to products)
     if (data.startsWith("client:addtocart:")) {
       const productId = parseInt(parts[2]);
       const qty = parseInt(parts[3]);
@@ -742,13 +742,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (existingItem) {
-        // P2-3 Fix: Always update price snapshot to latest price when adding to cart
-        // This ensures consistent behavior with legacy flow
         await prisma.cartItem.update({
           where: { id: existingItem.id },
           data: { 
             qty: existingItem.qty + qty,
-            unitPriceSnapshot: product.price, // Update to current price
+            unitPriceSnapshot: product.price,
           },
         });
       } else {
@@ -765,6 +763,97 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       await answerCallback({ 
         text: ClientTexts.addedToCartSuccess(product.title, qty),
         show_alert: true,
+      });
+
+      // Navigate back to products list
+      const products = await prisma.product.findMany({
+        where: { isActive: true },
+        orderBy: { id: "desc" },
+        take: 5,
+      });
+      const total = await prisma.product.count({ where: { isActive: true } });
+      const totalPages = Math.ceil(total / 5);
+
+      await safeRender(ctx, ClientTexts.productsHeader(), {
+        reply_markup: ClientKeyboards.productList(products, 0, totalPages),
+      });
+      return;
+    }
+
+    // ADD TO CART & GO TO CHECKOUT
+    if (data.startsWith("client:addandcheckout:")) {
+      const productId = parseInt(parts[2]);
+      const qty = parseInt(parts[3]);
+
+      const product = await prisma.product.findUnique({ where: { id: productId } });
+      if (!product) {
+        await answerCallback({ text: ClientTexts.productNotFound() });
+        return;
+      }
+
+      // Get or create cart
+      let cart = await prisma.cart.findFirst({
+        where: { userId: user.id, state: CartState.ACTIVE },
+      });
+
+      if (!cart) {
+        cart = await prisma.cart.create({
+          data: { userId: user.id, state: CartState.ACTIVE },
+        });
+      }
+
+      // Check if item exists in cart
+      const existingItem = await prisma.cartItem.findFirst({
+        where: { cartId: cart.id, productId },
+      });
+
+      if (existingItem) {
+        await prisma.cartItem.update({
+          where: { id: existingItem.id },
+          data: { 
+            qty: existingItem.qty + qty,
+            unitPriceSnapshot: product.price,
+          },
+        });
+      } else {
+        await prisma.cartItem.create({
+          data: {
+            cartId: cart.id,
+            productId,
+            qty,
+            unitPriceSnapshot: product.price,
+          },
+        });
+      }
+
+      await answerCallback({ 
+        text: ClientTexts.addedToCartSuccess(product.title, qty),
+        show_alert: true,
+      });
+
+      // Navigate to cart view
+      const updatedCart = await prisma.cart.findFirst({
+        where: { userId: user.id, state: CartState.ACTIVE },
+        include: { items: { include: { product: true } } },
+      });
+
+      if (!updatedCart || updatedCart.items.length === 0) {
+        await safeRender(ctx, ClientTexts.cartEmpty(), {
+          reply_markup: ClientKeyboards.backToMenu(),
+        });
+        return;
+      }
+
+      const display = buildCartDisplay(updatedCart.items.map((item) => ({
+        productId: item.productId,
+        title: item.product.title,
+        qty: item.qty,
+        unitPrice: item.unitPriceSnapshot,
+        currency: item.product.currency,
+      })));
+
+      await safeRender(ctx, display.text, {
+        reply_markup: ClientKeyboards.cartView(display.items),
       });
       return;
     }
