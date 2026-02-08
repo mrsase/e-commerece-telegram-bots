@@ -1,0 +1,7 @@
+node_modules
+node_modules/*
+docs
+dist
+.env
+.env.local
+.env.example

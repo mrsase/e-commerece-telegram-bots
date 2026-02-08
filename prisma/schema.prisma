@@ -1,0 +1,296 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              Int              @id @default(autoincrement())
+  tgUserId        BigInt           @unique
+  username        String?
+  firstName       String?
+  lastName        String?
+  phone           String?
+  locationLat     Float?
+  locationLng     Float?
+  address         String?
+  referralCode    String           @unique
+  referredById    Int?
+  referredBy      User?            @relation("UserReferrals", fields: [referredById], references: [id])
+  referrals       User[]           @relation("UserReferrals")
+  isActive        Boolean          @default(true)
+  isVerified      Boolean          @default(false)  // Has entered a valid referral code
+  createdAt       DateTime         @default(now())
+  lastSeenAt      DateTime?
+
+  carts           Cart[]
+  orders          Order[]
+  receipts        Receipt[]
+  discountUsages  DiscountUsage[]
+  createdReferralCodes ReferralCode[] @relation("ReferralCodeCreator")
+  usedReferralCode     ReferralCode?  @relation("ReferralCodeUsedBy", fields: [usedReferralCodeId], references: [id])
+  usedReferralCodeId   Int?
+
+  supportConversations SupportConversation[]
+}
+
+model Manager {
+  id        Int          @id @default(autoincrement())
+  tgUserId  BigInt       @unique
+  role      ManagerRole
+  isActive  Boolean      @default(true)
+
+  receipts  Receipt[]    @relation("ReceiptReviewedBy")
+  createdReferralCodes ReferralCode[] @relation("ReferralCodeByManager")
+
+  supportMessages SupportMessage[] @relation("SupportMessageManager")
+}
+
+model Courier {
+  id        Int       @id @default(autoincrement())
+  tgUserId  BigInt    @unique
+  username  String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  deliveries Delivery[]
+}
+
+model ReferralCode {
+  id              Int       @id @default(autoincrement())
+  code            String    @unique
+  createdByUserId Int?
+  createdByUser   User?     @relation("ReferralCodeCreator", fields: [createdByUserId], references: [id])
+  createdByManagerId Int?
+  createdByManager   Manager? @relation("ReferralCodeByManager", fields: [createdByManagerId], references: [id])
+  maxUses         Int?      // null = unlimited
+  usedCount       Int       @default(0)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime?
+  
+  usedBy          User[]    @relation("ReferralCodeUsedBy")
+}
+
+enum ManagerRole {
+  STAFF
+  ADMIN
+}
+
+model Product {
+  id           Int         @id @default(autoincrement())
+  title        String
+  description  String?
+  price        Int
+  currency     String
+  photoFileId  String?
+  isActive     Boolean     @default(true)
+  stock        Int?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  cartItems    CartItem[]
+  orderItems   OrderItem[]
+}
+
+enum CartState {
+  ACTIVE
+  SUBMITTED
+  EXPIRED
+}
+
+model Cart {
+  id         Int        @id @default(autoincrement())
+  userId     Int
+  user       User       @relation(fields: [userId], references: [id])
+  state      CartState  @default(ACTIVE)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  items      CartItem[]
+  order      Order?
+}
+
+model CartItem {
+  id                 Int      @id @default(autoincrement())
+  cartId             Int
+  cart               Cart     @relation(fields: [cartId], references: [id])
+  productId          Int
+  product            Product  @relation(fields: [productId], references: [id])
+  qty                Int
+  unitPriceSnapshot  Int
+}
+
+enum OrderStatus {
+  AWAITING_MANAGER_APPROVAL
+  APPROVED
+  INVITE_SENT
+  AWAITING_RECEIPT
+  PAID
+  COMPLETED
+  CANCELLED
+}
+
+enum SupportConversationStatus {
+  OPEN
+  CLOSED
+}
+
+enum SupportSenderType {
+  USER
+  MANAGER
+}
+
+enum DeliveryStatus {
+  ASSIGNED
+  PICKED_UP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+}
+
+model Order {
+  id             Int             @id @default(autoincrement())
+  userId         Int
+  user           User            @relation(fields: [userId], references: [id])
+  cartId         Int?            @unique
+  cart           Cart?           @relation(fields: [cartId], references: [id])
+  subtotal       Int
+  discountTotal  Int
+  grandTotal     Int
+  status         OrderStatus     @default(AWAITING_MANAGER_APPROVAL)
+  inviteLink     String?
+  inviteSentAt   DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  items          OrderItem[]
+  events         OrderEvent[]
+  receipts       Receipt[]
+  discountUsages DiscountUsage[]
+  delivery       Delivery?
+
+  supportConversations SupportConversation[]
+}
+
+model SupportConversation {
+  id            Int                       @id @default(autoincrement())
+  userId        Int
+  user          User                      @relation(fields: [userId], references: [id])
+  orderId       Int?
+  order         Order?                    @relation(fields: [orderId], references: [id])
+  status        SupportConversationStatus @default(OPEN)
+  lastMessageAt DateTime                  @default(now())
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  messages      SupportMessage[]
+}
+
+model SupportMessage {
+  id               Int             @id @default(autoincrement())
+  conversationId   Int
+  conversation     SupportConversation @relation(fields: [conversationId], references: [id])
+  senderType       SupportSenderType
+  senderManagerId  Int?
+  senderManager    Manager?        @relation("SupportMessageManager", fields: [senderManagerId], references: [id])
+  text             String
+  createdAt        DateTime        @default(now())
+}
+
+model Delivery {
+  id               Int            @id @default(autoincrement())
+  orderId           Int            @unique
+  order             Order          @relation(fields: [orderId], references: [id])
+  status            DeliveryStatus @default(ASSIGNED)
+  assignedCourierId Int
+  assignedCourier   Courier        @relation(fields: [assignedCourierId], references: [id])
+  assignedAt        DateTime       @default(now())
+  pickedUpAt        DateTime?
+  outForDeliveryAt  DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+  failureReason     String?
+  eta               DateTime?
+  updatedAt         DateTime       @updatedAt
+}
+
+model OrderItem {
+  id                Int      @id @default(autoincrement())
+  orderId           Int
+  order             Order    @relation(fields: [orderId], references: [id])
+  productId         Int
+  product           Product  @relation(fields: [productId], references: [id])
+  qty               Int
+  unitPriceSnapshot Int
+  lineTotal         Int
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+model Discount {
+  id           Int             @id @default(autoincrement())
+  code         String?         @unique
+  autoRule     String?
+  type         DiscountType
+  value        Int
+  startsAt     DateTime?
+  endsAt       DateTime?
+  minQty       Int?
+  minAmount    Int?
+  stackable    Boolean         @default(false)
+  maxUses      Int?
+  perUserLimit Int?
+  isActive     Boolean         @default(true)
+
+  usages       DiscountUsage[]
+}
+
+model DiscountUsage {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  user       User      @relation(fields: [userId], references: [id])
+  discountId Int
+  discount   Discount  @relation(fields: [discountId], references: [id])
+  orderId    Int?
+  order      Order?    @relation(fields: [orderId], references: [id])
+  usedAt     DateTime  @default(now())
+}
+
+enum ReceiptReviewStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model Receipt {
+  id            Int                  @id @default(autoincrement())
+  orderId       Int
+  order         Order                @relation(fields: [orderId], references: [id])
+  userId        Int
+  user          User                 @relation(fields: [userId], references: [id])
+  fileId        String
+  caption       String?
+  submittedAt   DateTime             @default(now())
+  reviewStatus  ReceiptReviewStatus  @default(PENDING)
+  reviewedById  Int?
+  reviewedBy    Manager?             @relation("ReceiptReviewedBy", fields: [reviewedById], references: [id])
+  reviewNotes   String?
+}
+
+model OrderEvent {
+  id         Int      @id @default(autoincrement())
+  orderId    Int
+  order      Order    @relation(fields: [orderId], references: [id])
+  actorType  String
+  actorId    Int?
+  eventType  String
+  payload    String?
+  createdAt  DateTime @default(now())
+}
