@@ -23,7 +23,8 @@ type SessionState =
   | "receipt:reject:reason"
   | "support:reply"
   | "settings:image"
-  | "settings:expiry";
+  | "settings:expiry"
+  | "courier:add";
 
 interface ManagerSession {
   state: SessionState;
@@ -1118,7 +1119,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:user:") && parts[2] !== "toggle" && parts[2] !== "orders" && parts[2] !== "referrals") {
+    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete"].includes(parts[2])) {
       const userId = parseInt(parts[2]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
@@ -1130,10 +1131,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const orderCount = await prisma.order.count({ where: { userId } });
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount),
+        ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, user.isActive),
+          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral),
         }
       );
       return;
@@ -1164,12 +1165,213 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const orderCount = await prisma.order.count({ where: { userId } });
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount),
+        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated!.isActive),
+          reply_markup: ManagerKeyboards.userActions(userId, updated!.isActive, updated!.canCreateReferral),
         }
       );
+      return;
+    }
+
+    // TOGGLE USER REFERRAL PERMISSION
+    if (data.startsWith("mgr:user:toggleref:")) {
+      const userId = parseInt(parts[3]);
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: { canCreateReferral: !user.canCreateReferral },
+      });
+
+      const message = user.canCreateReferral
+        ? ManagerTexts.userReferralRevoked(user.username)
+        : ManagerTexts.userReferralGranted(user.username);
+
+      await answerCallback({ text: message, show_alert: true });
+
+      const updated = await prisma.user.findUnique({ where: { id: userId } });
+      const orderCount = await prisma.order.count({ where: { userId } });
+
+      await safeRender(ctx, 
+        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral),
+        {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.userActions(userId, updated!.isActive, updated!.canCreateReferral),
+        }
+      );
+      return;
+    }
+
+    // USER CONTACT INFO
+    if (data.startsWith("mgr:user:contact:")) {
+      const userId = parseInt(parts[3]);
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
+      await safeRender(ctx,
+        ManagerTexts.userContactInfo(user.phone, user.address, user.locationLat, user.locationLng),
+        {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral),
+        }
+      );
+      return;
+    }
+
+    // DELETE USER
+    if (data.startsWith("mgr:user:delete:")) {
+      const userId = parseInt(parts[3]);
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
+      // Soft-delete: deactivate + clear personal data
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          isActive: false,
+          phone: null,
+          address: null,
+          locationLat: null,
+          locationLng: null,
+        },
+      });
+
+      await answerCallback({ text: ManagerTexts.userDeleted(user.username), show_alert: true });
+
+      await safeRender(ctx, ManagerTexts.userDeleted(user.username), {
+        reply_markup: ManagerKeyboards.userManagement(),
+      });
+      return;
+    }
+
+    // ===========================================
+    // COURIERS
+    // ===========================================
+    if (data === "mgr:couriers") {
+      await safeRender(ctx, ManagerTexts.couriersMenuTitle(), {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.courierManagement(),
+      });
+      return;
+    }
+
+    if (data === "mgr:couriers:list") {
+      const couriers = await prisma.courier.findMany({
+        orderBy: { id: "desc" },
+      });
+
+      if (couriers.length === 0) {
+        await safeRender(ctx, ManagerTexts.noCouriers(), {
+          reply_markup: ManagerKeyboards.courierManagement(),
+        });
+        return;
+      }
+
+      await safeRender(ctx, ManagerTexts.courierListTitle(), {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.courierList(couriers),
+      });
+      return;
+    }
+
+    if (data === "mgr:couriers:add") {
+      managerSessions.set(ctx.from.id, { state: "courier:add" });
+      await safeRender(ctx, ManagerTexts.enterCourierTgId(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:courier:") && parts[2] !== "toggle" && parts[2] !== "delete") {
+      const courierId = parseInt(parts[2]);
+      const courier = await prisma.courier.findUnique({ where: { id: courierId } });
+
+      if (!courier) {
+        await answerCallback({ text: "پیک یافت نشد" });
+        return;
+      }
+
+      await safeRender(ctx,
+        ManagerTexts.courierDetails(courier.id, courier.username, courier.tgUserId, courier.isActive),
+        {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.courierActions(courierId, courier.isActive),
+        }
+      );
+      return;
+    }
+
+    if (data.startsWith("mgr:courier:toggle:")) {
+      const courierId = parseInt(parts[3]);
+      const courier = await prisma.courier.findUnique({ where: { id: courierId } });
+
+      if (!courier) {
+        await answerCallback({ text: "پیک یافت نشد" });
+        return;
+      }
+
+      const updated = await prisma.courier.update({
+        where: { id: courierId },
+        data: { isActive: !courier.isActive },
+      });
+
+      await answerCallback({
+        text: ManagerTexts.courierToggled(updated.username, updated.isActive),
+        show_alert: true,
+      });
+
+      await safeRender(ctx,
+        ManagerTexts.courierDetails(updated.id, updated.username, updated.tgUserId, updated.isActive),
+        {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.courierActions(courierId, updated.isActive),
+        }
+      );
+      return;
+    }
+
+    if (data.startsWith("mgr:courier:delete:")) {
+      const courierId = parseInt(parts[3]);
+      const courier = await prisma.courier.findUnique({ where: { id: courierId } });
+
+      if (!courier) {
+        await answerCallback({ text: "پیک یافت نشد" });
+        return;
+      }
+
+      await prisma.courier.delete({ where: { id: courierId } });
+
+      await answerCallback({
+        text: ManagerTexts.courierDeleted(courier.username),
+        show_alert: true,
+      });
+
+      // Back to courier list
+      const couriers = await prisma.courier.findMany({ orderBy: { id: "desc" } });
+      if (couriers.length === 0) {
+        await safeRender(ctx, ManagerTexts.noCouriers(), {
+          reply_markup: ManagerKeyboards.courierManagement(),
+        });
+      } else {
+        await safeRender(ctx, ManagerTexts.courierListTitle(), {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.courierList(couriers),
+        });
+      }
       return;
     }
 
@@ -1792,6 +1994,40 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         reply_markup: ManagerKeyboards.settingsMenu(
           !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
         ),
+      });
+      return;
+    }
+
+    // Handle courier add by TG ID
+    if (session?.state === "courier:add") {
+      const input = ctx.message.text.trim();
+      const tgUserId = BigInt(input || "0");
+
+      if (!input || tgUserId <= 0n) {
+        await ctx.reply(ManagerTexts.invalidTgId());
+        return;
+      }
+
+      // Check if courier already exists
+      const existing = await prisma.courier.findUnique({
+        where: { tgUserId },
+      });
+
+      if (existing) {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply(ManagerTexts.courierAlreadyExists(), {
+          reply_markup: ManagerKeyboards.courierManagement(),
+        });
+        return;
+      }
+
+      await prisma.courier.create({
+        data: { tgUserId, isActive: true },
+      });
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.courierAdded(input), {
+        reply_markup: ManagerKeyboards.courierManagement(),
       });
       return;
     }

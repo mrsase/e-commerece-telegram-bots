@@ -23,6 +23,7 @@ model User {
   referrals       User[]           @relation("UserReferrals")
   isActive        Boolean          @default(true)
   isVerified      Boolean          @default(false)  // Has entered a valid referral code
+  canCreateReferral Boolean        @default(false)  // Manager must grant this permission
   createdAt       DateTime         @default(now())
   lastSeenAt      DateTime?
 

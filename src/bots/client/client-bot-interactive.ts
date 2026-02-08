@@ -1233,15 +1233,29 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       text += `\n${ClientTexts.referralStats(totalReferred)}`;
 
+      // Re-fetch user to get canCreateReferral
+      const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
+      const canCreate = freshUser?.canCreateReferral ?? false;
+
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
-        reply_markup: ClientKeyboards.referralMenu(referralCodes.length > 0),
+        reply_markup: ClientKeyboards.referralMenu(referralCodes.length > 0, canCreate),
       });
       return;
     }
 
     // GENERATE REFERRAL CODE
     if (data === "client:referral:generate") {
+      // Check permission
+      const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
+      if (!freshUser?.canCreateReferral) {
+        await answerCallback({
+          text: "شما مجوز ساخت کد معرفی ندارید. با مدیریت تماس بگیرید.",
+          show_alert: true,
+        });
+        return;
+      }
+
       // Check if user already has a code (limit to 3 per user)
       const existingCodes = await prisma.referralCode.count({
         where: { createdByUserId: user.id },

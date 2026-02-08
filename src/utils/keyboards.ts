@@ -92,10 +92,10 @@ export const ClientKeyboards = {
   },
 
   /** Referral menu */
-  referralMenu: (hasCode: boolean) => {
+  referralMenu: (hasCode: boolean, canCreate: boolean = false) => {
     const kb = new InlineKeyboard();
     
-    if (!hasCode) {
+    if (canCreate && !hasCode) {
       kb.text("🔑 ساخت کد معرفی", "client:referral:generate").row();
     }
     
@@ -139,7 +139,9 @@ export const ManagerKeyboards = {
       .text("📊 آمار", "mgr:analytics")
       .text("💬 پشتیبانی", "mgr:support")
       .row()
+      .text("🚚 پیک‌ها", "mgr:couriers")
       .text("⚙️ تنظیمات", "mgr:settings")
+      .row()
       .text("❓ راهنما", "mgr:help");
   },
 
@@ -264,16 +266,22 @@ export const ManagerKeyboards = {
   },
 
   /** User detail actions */
-  userActions: (userId: number, isActive: boolean) => {
+  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean) => {
     return new InlineKeyboard()
       .text("📦 سفارش‌ها", `mgr:user:orders:${userId}`)
+      .text("📋 اطلاعات تماس", `mgr:user:contact:${userId}`)
       .row()
       .text("🔗 معرفی‌ها", `mgr:user:referrals:${userId}`)
+      .text(
+        canCreateReferral ? "🔒 لغو مجوز معرفی" : "🔑 مجوز معرفی",
+        `mgr:user:toggleref:${userId}`
+      )
       .row()
       .text(
         isActive ? "🚫 مسدود کردن" : "✅ رفع مسدودیت",
         `mgr:user:toggle:${userId}`
       )
+      .text("🗑️ حذف کاربر", `mgr:user:delete:${userId}`)
       .row()
       .text("« بازگشت به کاربران", "mgr:users:list");
   },
@@ -316,6 +324,41 @@ export const ManagerKeyboards = {
     }
     kb.text("« بازگشت به منو", "mgr:menu");
     return kb;
+  },
+
+  /** Courier management menu */
+  courierManagement: () => {
+    return new InlineKeyboard()
+      .text("📋 لیست پیک‌ها", "mgr:couriers:list")
+      .row()
+      .text("➕ افزودن پیک", "mgr:couriers:add")
+      .row()
+      .text("« بازگشت به منو", "mgr:menu");
+  },
+
+  /** Courier list */
+  courierList: (couriers: { id: number; username: string | null; tgUserId: bigint; isActive: boolean }[]) => {
+    const kb = new InlineKeyboard();
+    couriers.forEach((c) => {
+      const status = c.isActive ? "✅" : "🚫";
+      const name = c.username || `پیک #${c.id}`;
+      kb.text(`${status} ${name}`, `mgr:courier:${c.id}`).row();
+    });
+    kb.text("➕ افزودن پیک", "mgr:couriers:add").row();
+    kb.text("« بازگشت به منو", "mgr:menu");
+    return kb;
+  },
+
+  /** Courier detail actions */
+  courierActions: (courierId: number, isActive: boolean) => {
+    return new InlineKeyboard()
+      .text(
+        isActive ? "🚫 غیرفعال" : "✅ فعال",
+        `mgr:courier:toggle:${courierId}`
+      )
+      .text("🗑️ حذف", `mgr:courier:delete:${courierId}`)
+      .row()
+      .text("« بازگشت به لیست پیک‌ها", "mgr:couriers:list");
   },
 
   /** Confirm dangerous action */

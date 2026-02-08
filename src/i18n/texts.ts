@@ -210,11 +210,29 @@ export const ManagerTexts = {
   usersMenuTitle: () => "👥 *مدیریت کاربران*",
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
-  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${username || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nتعداد سفارش: ${orderCount}`,
+  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean) =>
+    `*کاربر #${id}*\n\nنام کاربری: ${username || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\nتعداد سفارش: ${orderCount}`,
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,
   userUnblocked: (username: string | null) => `✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,
+  userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی به ${username || 'کاربر'} داده شد.`,
+  userReferralRevoked: (username: string | null) => `🔒 مجوز ساخت کد معرفی از ${username || 'کاربر'} گرفته شد.`,
+  userDeleted: (username: string | null) => `🗑️ کاربر ${username || 'نامشخص'} حذف شد.`,
+  userDeleteConfirm: (username: string | null) => `⚠️ آیا از حذف کاربر ${username || 'نامشخص'} مطمئن هستید؟ این عمل غیرقابل بازگشت است.`,
   enterSearchQuery: () => "نام کاربری یا شناسه تلگرام را وارد کنید:",
+
+  // Courier Management
+  couriersMenuTitle: () => "🚚 *مدیریت پیک‌ها*",
+  courierListTitle: () => "🚚 *لیست پیک‌ها*",
+  noCouriers: () => "هیچ پیکی یافت نشد.",
+  courierDetails: (id: number, username: string | null, tgUserId: bigint, isActive: boolean) =>
+    `*پیک #${id}*\n\nنام کاربری: ${username || '—'}\nشناسه تلگرام: \`${tgUserId}\`\nوضعیت: ${isActive ? '✅ فعال' : '🚫 غیرفعال'}`,
+  courierAdded: (tgUserId: string) => `✅ پیک با شناسه تلگرام ${tgUserId} اضافه شد.`,
+  courierAlreadyExists: () => "این شناسه تلگرام قبلاً به عنوان پیک ثبت شده است.",
+  courierToggled: (username: string | null, isActive: boolean) =>
+    isActive ? `✅ پیک ${username || 'نامشخص'} فعال شد.` : `🚫 پیک ${username || 'نامشخص'} غیرفعال شد.`,
+  courierDeleted: (username: string | null) => `🗑️ پیک ${username || 'نامشخص'} حذف شد.`,
+  enterCourierTgId: () => "شناسه تلگرام پیک را وارد کنید (عدد):",
+  invalidTgId: () => "❌ شناسه تلگرام باید یک عدد معتبر باشد.",
 
   // Referral Management
   referralsMenuTitle: () => "🔗 *مدیریت کدهای معرفی*",
