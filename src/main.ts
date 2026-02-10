@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   const courierBot = createCourierBot(config.courierBotToken);
 
   registerInteractiveClientBot(clientBot, { prisma, managerBot });
-  registerInteractiveCourierBot(courierBot, { prisma, clientBot });
+  registerInteractiveCourierBot(courierBot, { prisma, clientBot, managerBot });
   registerInteractiveManagerBot(managerBot, { 
     prisma, 
     clientBot,

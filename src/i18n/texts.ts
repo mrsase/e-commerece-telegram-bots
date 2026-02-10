@@ -322,15 +322,25 @@ export const CourierTexts = {
     customerName: string;
     phone: string;
     address: string;
-  }) =>
-    [
-      `ارسال مربوط به سفارش #${params.orderId}`,
-      `وضعیت: ${params.status}`,
-      "",
-      `مشتری: ${params.customerName}`,
-      `تلفن: ${params.phone}`,
-      `آدرس: ${params.address}`,
-    ].join("\n"),
+    locationLat?: number | null;
+    locationLng?: number | null;
+  }) => {
+    const lines = [
+      `🚚 ارسال سفارش #${params.orderId}`,
+      `━━━━━━━━━━━━━━━`,
+      `📌 وضعیت: ${params.status}`,
+      ``,
+      `👤 مشتری: ${params.customerName}`,
+      `📱 تلفن: ${params.phone}`,
+      `🏠 آدرس: ${params.address}`,
+    ];
+    if (params.locationLat != null && params.locationLng != null) {
+      lines.push(`📍 موقعیت: ثبت شده`);
+    } else {
+      lines.push(`📍 موقعیت: ثبت نشده`);
+    }
+    return lines.join("\n");
+  },
   askFailureReason: () => "علت عدم موفقیت را به صورت پیام ارسال کنید.",
   statusUpdated: (status: string) => `وضعیت به‌روزرسانی شد: ${status}`,
   failureReasonSaved: () => "علت ثبت شد.",

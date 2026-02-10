@@ -159,6 +159,21 @@ export class NotificationService {
       await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
     }
   }
+
+  /** Notify managers about any delivery status change */
+  async notifyManagersDeliveryStatusChange(orderId: number, statusLabel: string, courierLabel: string): Promise<void> {
+    const bot = this.deps.managerBot;
+    if (!bot) return;
+
+    const managers = await this.deps.prisma.manager.findMany({
+      where: { isActive: true },
+    });
+
+    const text = NotificationServiceTexts.deliveryStatusForManager(orderId, statusLabel, courierLabel);
+    for (const mgr of managers) {
+      await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+    }
+  }
 }
 
 // ─── Notification-specific texts (added to centralized i18n later) ──
@@ -178,4 +193,7 @@ export const NotificationServiceTexts = {
 
   deliveryFailedForManager: (orderId: number, reason: string) =>
     `⚠️ ارسال ناموفق!\n\nسفارش #${orderId}\nعلت: ${reason}`,
+
+  deliveryStatusForManager: (orderId: number, statusLabel: string, courierLabel: string) =>
+    `🚚 بروزرسانی ارسال\n\nسفارش #${orderId}\nپیک: ${courierLabel}\nوضعیت: ${statusLabel}`,
 };

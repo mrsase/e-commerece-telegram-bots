@@ -19,6 +19,7 @@ const courierSessions = new SessionStore<CourierSession>();
 interface CourierBotDeps {
   prisma: PrismaClient;
   clientBot?: Bot;
+  managerBot?: Bot;
 }
 
 async function getCourier(ctx: Context, prisma: PrismaClient): Promise<Courier | null> {
@@ -78,8 +79,8 @@ function statusLabel(status: DeliveryStatus): string {
 }
 
 export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): void {
-  const { prisma, clientBot } = deps;
-  const notificationService = new NotificationService({ prisma, clientBot });
+  const { prisma, clientBot, managerBot } = deps;
+  const notificationService = new NotificationService({ prisma, clientBot, managerBot });
 
   // Global error handler to prevent crashes
   bot.catch((err) => {
@@ -118,24 +119,17 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       await answerCallback(ctx);
 
       const deliveries = await prisma.delivery.findMany({
-        where: { assignedCourierId: courier.id },
-        include: {
-          order: {
-            include: {
-              user: true,
-            },
-          },
+        where: {
+          assignedCourierId: courier.id,
+          status: { not: DeliveryStatus.DELIVERED },
         },
+        include: { order: { include: { user: true } } },
         orderBy: { updatedAt: "desc" },
         take: 20,
       });
 
       if (deliveries.length === 0) {
-        await render(
-          ctx,
-          CourierTexts.noDeliveries(),
-          CourierKeyboards.backToMenu()
-        );
+        await render(ctx, CourierTexts.noDeliveries(), CourierKeyboards.backToMenu());
         return;
       }
 
@@ -153,61 +147,48 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       return;
     }
 
-    if (data.startsWith("courier:delivery:")) {
-      const parts = data.split(":");
-      const deliveryId = Number(parts[2]);
-      if (!Number.isFinite(deliveryId)) {
-        await answerCallback(ctx, CourierTexts.invalidDelivery());
-        return;
-      }
-
-      const delivery = await prisma.delivery.findUnique({
-        where: { id: deliveryId },
-        include: {
-          order: {
-            include: {
-              user: true,
-            },
-          },
-        },
-      });
-
-      if (!delivery || delivery.assignedCourierId !== courier.id) {
-        await answerCallback(ctx, CourierTexts.notFound());
-        return;
-      }
-
-      const user = delivery.order.user;
-      const details = CourierTexts.deliveryDetails({
-        orderId: delivery.orderId,
-        status: statusLabel(delivery.status),
-        customerName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "-",
-        phone: user.phone ?? "-",
-        address: user.address ?? "-",
-      });
-
+    if (data === "courier:history") {
       await answerCallback(ctx);
-      await render(ctx, details, CourierKeyboards.deliveryActions(delivery.id));
+
+      const deliveries = await prisma.delivery.findMany({
+        where: {
+          assignedCourierId: courier.id,
+          status: DeliveryStatus.DELIVERED,
+        },
+        include: { order: true },
+        orderBy: { deliveredAt: "desc" },
+        take: 10,
+      });
+
+      if (deliveries.length === 0) {
+        await render(ctx, "هیچ ارسال تکمیل‌شده‌ای ندارید.", CourierKeyboards.backToMenu());
+        return;
+      }
+
+      let text = "📋 تاریخچه ارسال‌ها:\n\n";
+      deliveries.forEach((d) => {
+        const date = d.deliveredAt?.toISOString().split("T")[0] ?? "—";
+        text += `✅ سفارش #${d.orderId} — ${date}\n`;
+      });
+
+      await render(ctx, text, CourierKeyboards.backToMenu());
       return;
     }
 
-    if (data.startsWith("courier:delivery:set:")) {
+    // ── STATUS CHANGE — must be checked BEFORE courier:delivery: ──
+    if (data.startsWith("courier:status:")) {
       const parts = data.split(":");
-      const deliveryId = Number(parts[3]);
-      const status = parts[4] as DeliveryStatus;
+      const deliveryId = Number(parts[2]);
+      const status = parts[3] as DeliveryStatus;
 
-      if (!Number.isFinite(deliveryId)) {
-        await answerCallback(ctx, CourierTexts.invalidDelivery());
-        return;
-      }
-
-      if (!Object.values(DeliveryStatus).includes(status)) {
+      if (!Number.isFinite(deliveryId) || !Object.values(DeliveryStatus).includes(status)) {
         await answerCallback(ctx, CourierTexts.invalidDelivery());
         return;
       }
 
       const delivery = await prisma.delivery.findUnique({
         where: { id: deliveryId },
+        include: { order: { include: { user: true } } },
       });
 
       if (!delivery || delivery.assignedCourierId !== courier.id) {
@@ -221,11 +202,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
           deliveryId,
         });
         await answerCallback(ctx);
-        await render(
-          ctx,
-          CourierTexts.askFailureReason(),
-          CourierKeyboards.backToDelivery(deliveryId)
-        );
+        await render(ctx, CourierTexts.askFailureReason(), CourierKeyboards.backToDelivery(deliveryId));
         return;
       }
 
@@ -241,10 +218,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
 
       const updatedDelivery = await prisma.delivery.update({
         where: { id: deliveryId },
-        data: {
-          status,
-          ...timestampUpdate,
-        },
+        data: { status, ...timestampUpdate },
         include: { order: { include: { user: true } } },
       });
 
@@ -265,17 +239,103 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
         });
       }
 
+      const courierLabel = courier.username || `پیک #${courier.id}`;
+
       // Notify client about delivery status change
       if (updatedDelivery.order.user) {
-        await notificationService.notifyClientDeliveryUpdate(
-          updatedDelivery.order.user.tgUserId,
+        try {
+          await notificationService.notifyClientDeliveryUpdate(
+            updatedDelivery.order.user.tgUserId,
+            updatedDelivery.orderId,
+            statusLabel(status),
+          );
+        } catch (err) {
+          console.error("[COURIER] Failed to notify client:", err);
+        }
+      }
+
+      // Notify managers about delivery status change
+      try {
+        await notificationService.notifyManagersDeliveryStatusChange(
           updatedDelivery.orderId,
           statusLabel(status),
+          courierLabel,
         );
+      } catch (err) {
+        console.error("[COURIER] Failed to notify managers:", err);
       }
 
       await answerCallback(ctx, CourierTexts.updated());
-      await render(ctx, CourierTexts.statusUpdated(statusLabel(status)), CourierKeyboards.backToDeliveries());
+
+      // Go back to the delivery detail so courier sees the updated status
+      const user = updatedDelivery.order.user;
+      const details = CourierTexts.deliveryDetails({
+        orderId: updatedDelivery.orderId,
+        status: statusLabel(status),
+        customerName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "-",
+        phone: user.phone ?? "-",
+        address: user.address ?? "-",
+        locationLat: user.locationLat,
+        locationLng: user.locationLng,
+      });
+      await render(ctx, details, CourierKeyboards.deliveryActions(deliveryId, status));
+      return;
+    }
+
+    // ── SEND LOCATION — sends location pin to courier ──
+    if (data.startsWith("courier:location:")) {
+      const deliveryId = Number(data.split(":")[2]);
+      const delivery = await prisma.delivery.findUnique({
+        where: { id: deliveryId },
+        include: { order: { include: { user: true } } },
+      });
+
+      if (!delivery || delivery.assignedCourierId !== courier.id) {
+        await answerCallback(ctx, CourierTexts.notFound());
+        return;
+      }
+
+      const user = delivery.order.user;
+      if (user.locationLat != null && user.locationLng != null) {
+        await answerCallback(ctx);
+        await ctx.replyWithLocation(user.locationLat, user.locationLng);
+      } else {
+        await answerCallback(ctx, "موقعیت مشتری ثبت نشده است.");
+      }
+      return;
+    }
+
+    // ── DELIVERY DETAIL ──
+    if (data.startsWith("courier:delivery:")) {
+      const deliveryId = Number(data.split(":")[2]);
+      if (!Number.isFinite(deliveryId)) {
+        await answerCallback(ctx, CourierTexts.invalidDelivery());
+        return;
+      }
+
+      const delivery = await prisma.delivery.findUnique({
+        where: { id: deliveryId },
+        include: { order: { include: { user: true } } },
+      });
+
+      if (!delivery || delivery.assignedCourierId !== courier.id) {
+        await answerCallback(ctx, CourierTexts.notFound());
+        return;
+      }
+
+      const user = delivery.order.user;
+      const details = CourierTexts.deliveryDetails({
+        orderId: delivery.orderId,
+        status: statusLabel(delivery.status),
+        customerName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "-",
+        phone: user.phone ?? "-",
+        address: user.address ?? "-",
+        locationLat: user.locationLat,
+        locationLng: user.locationLng,
+      });
+
+      await answerCallback(ctx);
+      await render(ctx, details, CourierKeyboards.deliveryActions(delivery.id, delivery.status));
       return;
     }
 

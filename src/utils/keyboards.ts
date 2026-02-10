@@ -435,9 +435,11 @@ export const ManagerKeyboards = {
 export const CourierKeyboards = {
   menu: () => {
     return new InlineKeyboard()
-      .text("🚚 ارسال‌های من", "courier:deliveries")
+      .text("🚚 ارسال‌های فعال", "courier:deliveries")
       .row()
-      .text("🔄 بروزرسانی", "courier:menu");
+      .text("� تاریخچه", "courier:history")
+      .row()
+      .text("�🔄 بروزرسانی", "courier:menu");
   },
   backToMenu: () => {
     return new InlineKeyboard().text("« بازگشت", "courier:menu");
@@ -450,16 +452,26 @@ export const CourierKeyboards = {
     kb.text("« بازگشت", "courier:menu");
     return kb;
   },
-  deliveryActions: (deliveryId: number) => {
-    return new InlineKeyboard()
-      .text("📦 تحویل گرفتم", `courier:delivery:set:${deliveryId}:PICKED_UP`)
-      .row()
-      .text("🛵 در مسیر ارسال", `courier:delivery:set:${deliveryId}:OUT_FOR_DELIVERY`)
-      .row()
-      .text("✅ تحویل شد", `courier:delivery:set:${deliveryId}:DELIVERED`)
-      .text("❌ ناموفق", `courier:delivery:set:${deliveryId}:FAILED`)
-      .row()
-      .text("« بازگشت", "courier:deliveries");
+  deliveryActions: (deliveryId: number, currentStatus?: string) => {
+    const kb = new InlineKeyboard();
+
+    // Show only the logical next status transitions
+    if (!currentStatus || currentStatus === "ASSIGNED") {
+      kb.text("📦 تحویل گرفتم", `courier:status:${deliveryId}:PICKED_UP`).row();
+    }
+    if (!currentStatus || currentStatus === "ASSIGNED" || currentStatus === "PICKED_UP") {
+      kb.text("🛵 در مسیر ارسال", `courier:status:${deliveryId}:OUT_FOR_DELIVERY`).row();
+    }
+    if (!currentStatus || currentStatus !== "DELIVERED" && currentStatus !== "FAILED") {
+      kb.text("✅ تحویل دادم", `courier:status:${deliveryId}:DELIVERED`).row();
+      kb.text("❌ ناموفق", `courier:status:${deliveryId}:FAILED`).row();
+    }
+
+    // Location button
+    kb.text("📍 مشاهده موقعیت", `courier:location:${deliveryId}`).row();
+
+    kb.text("« بازگشت", "courier:deliveries");
+    return kb;
   },
   backToDelivery: (deliveryId: number) => {
     return new InlineKeyboard().text("« بازگشت", `courier:delivery:${deliveryId}`);
