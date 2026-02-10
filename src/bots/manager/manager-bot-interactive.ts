@@ -5,7 +5,7 @@ import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 
 import { SessionStore } from "../../utils/session-store.js";
-import { getFileUrl } from "../../utils/cross-bot-file.js";
+import { crossBotFile } from "../../utils/cross-bot-file.js";
 
 // Session state for multi-step flows
 type SessionState = 
@@ -705,13 +705,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
 
         // Checkout image was uploaded to the manager bot — file_ids are bot-specific.
-        // Convert to a download URL so any bot can use it.
-        let checkoutImageUrl: string | null = null;
+        // Download from manager bot and re-upload via client bot.
+        let checkoutImageInput: import("grammy").InputFile | null = null;
         if (effectiveImageFileId) {
           try {
-            checkoutImageUrl = await getFileUrl(bot.api, bot.token, effectiveImageFileId);
+            checkoutImageInput = await crossBotFile(bot.api, bot.token, effectiveImageFileId);
           } catch (err) {
-            console.error("[APPROVE] Failed to get checkout image URL from manager bot:", err);
+            console.error("[APPROVE] Failed to download checkout image from manager bot:", err);
           }
         }
 
@@ -748,8 +748,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
             // Post payment message to checkout channel
             let channelMessageId: number | null = null;
             try {
-              if (checkoutImageUrl) {
-                const msg = await clientBot.api.sendPhoto(checkoutChannelId, checkoutImageUrl, {
+              if (checkoutImageInput) {
+                const msg = await clientBot.api.sendPhoto(checkoutChannelId, checkoutImageInput, {
                   caption: paymentCaption, parse_mode: "Markdown",
                 });
                 channelMessageId = msg.message_id;
@@ -818,8 +818,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           let directMessageId: number | null = null;
 
           try {
-            if (checkoutImageUrl) {
-              const msg = await clientBot.api.sendPhoto(userTgId, checkoutImageUrl, {
+            if (checkoutImageInput) {
+              const msg = await clientBot.api.sendPhoto(userTgId, checkoutImageInput, {
                 caption: paymentCaption, parse_mode: "Markdown",
               });
               directMessageId = msg.message_id;
@@ -1941,8 +1941,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       let receiptSent = false;
       if (clientBot) {
         try {
-          const receiptUrl = await getFileUrl(clientBot.api, clientBot.token, receipt.fileId);
-          await ctx.replyWithPhoto(receiptUrl, {
+          const receiptInput = await crossBotFile(clientBot.api, clientBot.token, receipt.fileId);
+          await ctx.replyWithPhoto(receiptInput, {
             caption: text,
             parse_mode: "Markdown",
             reply_markup: ManagerKeyboards.receiptActions(receiptId),
