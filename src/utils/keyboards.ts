@@ -317,8 +317,11 @@ export const ManagerKeyboards = {
   },
 
   /** Settings menu */
-  settingsMenu: (hasImage: boolean) => {
+  settingsMenu: (hasImage: boolean, paymentMethod: "channel" | "direct" = "direct") => {
+    const methodLabel = paymentMethod === "channel" ? "📢 کانال" : "📩 مستقیم";
     const kb = new InlineKeyboard()
+      .text(`💳 روش پرداخت: ${methodLabel}`, "mgr:settings:paymethod")
+      .row()
       .text("🖼️ تغییر تصویر پرداخت", "mgr:settings:image")
       .row()
       .text("⏳ تغییر مهلت پرداخت", "mgr:settings:expiry")

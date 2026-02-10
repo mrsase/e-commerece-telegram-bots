@@ -297,14 +297,18 @@ export const ManagerTexts = {
     `📋 *اطلاعات مشتری:*\nتلفن: ${escapeMarkdown(phone) || '—'}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : ''}`,
 
   // Settings
-  settingsMenuTitle: (imageStatus: string, expiryMinutes: number) =>
-    `⚙️ *تنظیمات ربات*\n\n🖼️ تصویر پرداخت: ${imageStatus}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
+  settingsMenuTitle: (imageStatus: string, expiryMinutes: number, paymentMethod: "channel" | "direct" = "direct") =>
+    `⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: ${paymentMethod === "channel" ? "📢 کانال" : "� مستقیم"}\n�🖼️ تصویر پرداخت: ${imageStatus}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
   settingsImageUpdated: () => "✅ تصویر پرداخت با موفقیت به‌روزرسانی شد.",
   settingsImageDeleted: () => "✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود.",
   settingsImageAsk: () => "🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):",
   settingsExpiryAsk: () => "⏳ مهلت پرداخت را به دقیقه وارد کنید (مثلاً 60):",
   settingsExpiryUpdated: (minutes: number) => `✅ مهلت پرداخت به ${minutes} دقیقه تغییر یافت.`,
   settingsExpiryInvalid: () => "❌ لطفاً یک عدد معتبر (بزرگتر از صفر) وارد کنید.",
+  settingsPayMethodToggled: (method: "channel" | "direct") =>
+    method === "channel"
+      ? "✅ روش پرداخت به \"\u06a9\u0627\u0646\u0627\u0644\" تغییر یافت. اطلاعات پرداخت در کانال پست می‌شود."
+      : "✅ روش پرداخت به \"\u0645\u0633\u062a\u0642\u06cc\u0645\" تغییر یافت. اطلاعات پرداخت مستقیماً به کاربر ارسال می‌شود.",
 };
 
 export const CourierTexts = {

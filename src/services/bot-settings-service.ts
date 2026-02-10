@@ -7,7 +7,10 @@ import type { PrismaClient } from "@prisma/client";
 export const SettingKeys = {
   CHECKOUT_IMAGE_FILE_ID: "checkout_image_file_id",
   INVITE_EXPIRY_MINUTES: "invite_expiry_minutes",
+  PAYMENT_METHOD: "payment_method",
 } as const;
+
+export type PaymentMethod = "channel" | "direct";
 
 export class BotSettingsService {
   constructor(private readonly prisma: PrismaClient) {}
@@ -58,5 +61,14 @@ export class BotSettingsService {
       if (Number.isFinite(parsed) && parsed > 0) return parsed;
     }
     return envFallback ?? 60;
+  }
+
+  /**
+   * Get payment method: "channel" (post to checkout channel + invite) or "direct" (DM to client).
+   * Default: "direct" (works without channel setup).
+   */
+  async getPaymentMethod(): Promise<PaymentMethod> {
+    const val = await this.get(SettingKeys.PAYMENT_METHOD);
+    return val === "channel" ? "channel" : "direct";
   }
 }

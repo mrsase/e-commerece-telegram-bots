@@ -680,7 +680,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // APPROVE ORDER - Post to channel, create time-limited invite, notify client
+    // APPROVE ORDER - Supports two methods: "channel" and "direct"
     if (data.startsWith("mgr:approve:")) {
       const orderId = parseInt(parts[2]);
 
@@ -693,142 +693,206 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      // Require checkoutChannelId to be configured before approval
-      if (!checkoutChannelId) {
-        await answerCallback({ 
-          text: ManagerTexts.envMissingCheckoutChannel(), 
-          show_alert: true 
-        });
-        return;
-      }
-
       if (!clientBot) {
         await answerCallback({ text: "خطا: ربات مشتری در دسترس نیست.", show_alert: true });
         return;
       }
 
-      // 1) Update order status to APPROVED
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: OrderStatus.APPROVED,
-          events: {
-            create: {
-              actorType: "manager",
-              actorId: manager.id,
-              eventType: "order_approved",
+      try {
+        const payMethod = await settingsService.getPaymentMethod();
+        const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
+        const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+        const paymentCaption = ChannelTexts.paymentMessage(
+          orderId,
+          order.grandTotal,
+          order.items[0]?.product?.currency ?? "IRR",
+        );
+
+        // 1) Update order status to APPROVED
+        await prisma.order.update({
+          where: { id: orderId },
+          data: {
+            status: OrderStatus.APPROVED,
+            events: {
+              create: { actorType: "manager", actorId: manager.id, eventType: "order_approved" },
             },
           },
-        },
-      });
+        });
 
-      // 2) Read runtime settings (DB takes priority over env)
-      const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
-      const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+        if (payMethod === "channel") {
+          // ── CHANNEL METHOD ──
+          if (!checkoutChannelId) {
+            // Fallback: no channel configured → approve but warn
+            await prisma.order.update({
+              where: { id: orderId },
+              data: { status: OrderStatus.AWAITING_RECEIPT },
+            });
+            await answerCallback({
+              text: "⚠️ تأیید شد اما CHECKOUT_CHANNEL_ID تنظیم نشده. روش را به «مستقیم» تغییر دهید یا کانال تنظیم کنید.",
+              show_alert: true,
+            });
+          } else {
+            // Post payment message to checkout channel
+            let channelMessageId: number | null = null;
+            try {
+              if (effectiveImageFileId) {
+                const msg = await clientBot.api.sendPhoto(checkoutChannelId, effectiveImageFileId, {
+                  caption: paymentCaption, parse_mode: "Markdown",
+                });
+                channelMessageId = msg.message_id;
+              } else {
+                const msg = await clientBot.api.sendMessage(checkoutChannelId, paymentCaption, {
+                  parse_mode: "Markdown",
+                });
+                channelMessageId = msg.message_id;
+              }
+            } catch (err) {
+              console.error("[APPROVE channel] Failed to post payment message:", err);
+            }
 
-      // 3) Post payment message (image + text) to the checkout channel
-      const paymentCaption = ChannelTexts.paymentMessage(
-        orderId,
-        order.grandTotal,
-        order.items[0]?.product?.currency ?? "IRR",
-      );
+            // Create time-limited invite link
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + effectiveExpiryMin * 60 * 1000);
+            const expireUnix = Math.floor(expiresAt.getTime() / 1000);
+            let inviteLink: string | null = null;
+            try {
+              const result = await clientBot.api.createChatInviteLink(checkoutChannelId, {
+                member_limit: 1, name: `Order #${orderId}`, expire_date: expireUnix,
+              });
+              inviteLink = result.invite_link;
+            } catch (err) {
+              console.error("[APPROVE channel] Failed to create invite link:", err);
+            }
 
-      let channelMessageId: number | null = null;
-      try {
-        if (effectiveImageFileId) {
-          const msg = await clientBot.api.sendPhoto(checkoutChannelId, effectiveImageFileId, {
-            caption: paymentCaption,
-            parse_mode: "Markdown",
-          });
-          channelMessageId = msg.message_id;
+            // Persist invite details
+            await prisma.order.update({
+              where: { id: orderId },
+              data: {
+                status: OrderStatus.INVITE_SENT,
+                inviteLink, inviteSentAt: now, inviteExpiresAt: expiresAt, channelMessageId,
+                events: {
+                  create: {
+                    actorType: "manager", actorId: manager.id, eventType: "invite_sent",
+                    payload: JSON.stringify({ inviteLink, channelMessageId, expiresAt: expiresAt.toISOString() }),
+                  },
+                },
+              },
+            });
+
+            // Send invite to client
+            if (order.user && inviteLink) {
+              try {
+                await clientBot.api.sendMessage(
+                  order.user.tgUserId.toString(),
+                  ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
+                );
+              } catch (err) {
+                console.error("[APPROVE channel] Failed to send invite to client:", err);
+              }
+              await answerCallback({ text: `✅ سفارش #${orderId} تأیید شد و لینک کانال ارسال شد.`, show_alert: true });
+            } else {
+              await answerCallback({
+                text: `⚠️ سفارش #${orderId} تأیید شد ولی لینک دعوت ایجاد نشد.`,
+                show_alert: true,
+              });
+            }
+          }
+
         } else {
-          const msg = await clientBot.api.sendMessage(checkoutChannelId, paymentCaption, {
-            parse_mode: "Markdown",
-          });
-          channelMessageId = msg.message_id;
-        }
-      } catch (error) {
-        console.error("Failed to post payment message to channel:", error);
-      }
+          // ── DIRECT METHOD ──
+          // Send payment details directly to client via DM
+          const userTgId = order.user.tgUserId.toString();
+          let directMessageId: number | null = null;
 
-      // 4) Create time-limited single-use invite link
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + effectiveExpiryMin * 60 * 1000);
-      const expireUnix = Math.floor(expiresAt.getTime() / 1000);
+          try {
+            if (effectiveImageFileId) {
+              const msg = await clientBot.api.sendPhoto(userTgId, effectiveImageFileId, {
+                caption: paymentCaption, parse_mode: "Markdown",
+              });
+              directMessageId = msg.message_id;
+            } else {
+              const msg = await clientBot.api.sendMessage(userTgId, paymentCaption, {
+                parse_mode: "Markdown",
+              });
+              directMessageId = msg.message_id;
+            }
+          } catch (err) {
+            console.error("[APPROVE direct] Failed to send payment details to client:", err);
+            // Retry without Markdown if it was a parse error
+            try {
+              const msg = await clientBot.api.sendMessage(userTgId, paymentCaption.replace(/[*_`\[]/g, ""));
+              directMessageId = msg.message_id;
+            } catch (err2) {
+              console.error("[APPROVE direct] Retry also failed:", err2);
+            }
+          }
 
-      let inviteLink: string | null = null;
-      try {
-        const result = await clientBot.api.createChatInviteLink(checkoutChannelId, {
-          member_limit: 1,
-          name: `Order #${orderId}`,
-          expire_date: expireUnix,
-        });
-        inviteLink = result.invite_link;
-      } catch (error) {
-        console.error("Failed to create invite link:", error);
-      }
+          // Also send instruction to upload receipt
+          try {
+            await clientBot.api.sendMessage(
+              userTgId,
+              `✅ سفارش #${orderId} تأیید شد.\n\nپس از پرداخت، عکس رسید را همینجا ارسال کنید.`,
+            );
+          } catch (err) {
+            console.error("[APPROVE direct] Failed to send receipt instruction:", err);
+          }
 
-      // 4) Persist invite details on the order
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: OrderStatus.INVITE_SENT,
-          inviteLink,
-          inviteSentAt: now,
-          inviteExpiresAt: expiresAt,
-          channelMessageId,
-          events: {
-            create: {
-              actorType: "manager",
-              actorId: manager.id,
-              eventType: "invite_sent",
-              payload: JSON.stringify({ inviteLink, channelMessageId, expiresAt: expiresAt.toISOString() }),
+          // Update order to AWAITING_RECEIPT (skip INVITE_SENT since no channel)
+          await prisma.order.update({
+            where: { id: orderId },
+            data: {
+              status: OrderStatus.AWAITING_RECEIPT,
+              channelMessageId: directMessageId,
+              inviteSentAt: new Date(),
+              events: {
+                create: {
+                  actorType: "manager", actorId: manager.id, eventType: "payment_details_sent_direct",
+                  payload: JSON.stringify({ directMessageId }),
+                },
+              },
             },
-          },
-        },
-      });
-
-      // 5) Send invite link to client via DM
-      if (order.user && inviteLink) {
-        try {
-          await clientBot.api.sendMessage(
-            order.user.tgUserId.toString(),
-            ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
-          );
-          await answerCallback({ 
-            text: ManagerTexts.orderApprovedInviteSent(orderId, order.user.tgUserId),
-            show_alert: true,
           });
-        } catch (error) {
-          console.error("Failed to send invite to client:", error);
-          await answerCallback({ 
-            text: ManagerTexts.inviteSendFailed(orderId),
+
+          // Schedule auto-delete of the payment message after expiry
+          if (directMessageId) {
+            const deleteDelayMs = effectiveExpiryMin * 60 * 1000;
+            setTimeout(async () => {
+              try {
+                await clientBot!.api.deleteMessage(userTgId, directMessageId!);
+                console.log(`[AUTO-DELETE] Deleted payment message ${directMessageId} for order #${orderId}`);
+              } catch (err) {
+                console.error(`[AUTO-DELETE] Failed to delete message ${directMessageId}:`, err);
+              }
+            }, deleteDelayMs);
+          }
+
+          await answerCallback({
+            text: `✅ سفارش #${orderId} تأیید شد و اطلاعات پرداخت مستقیماً ارسال شد.`,
             show_alert: true,
           });
         }
-      } else {
+
+        // Refresh order list (both methods)
+        const orders = await prisma.order.findMany({
+          where: { status: OrderStatus.AWAITING_MANAGER_APPROVAL },
+          orderBy: { id: "asc" },
+          take: 5,
+        });
+
+        if (orders.length === 0) {
+          await safeRender(ctx, ManagerTexts.noPendingOrders(), {
+            reply_markup: ManagerKeyboards.backToMenu(),
+          });
+        } else {
+          await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
+            reply_markup: ManagerKeyboards.orderList(orders, 0, 1),
+          });
+        }
+      } catch (error) {
+        console.error(`[APPROVE ORDER #${orderId}] Error:`, error);
         await answerCallback({ 
-          text: inviteLink 
-            ? ManagerTexts.orderApproved(orderId) 
-            : "⚠️ تأیید شد ولی لینک دعوت ایجاد نشد. لطفاً تنظیمات کانال را بررسی کنید.",
+          text: `❌ خطا در تأیید سفارش #${orderId}: ${error instanceof Error ? error.message : 'خطای ناشناخته'}`,
           show_alert: true,
-        });
-      }
-
-      // Refresh order list
-      const orders = await prisma.order.findMany({
-        where: { status: OrderStatus.AWAITING_MANAGER_APPROVAL },
-        orderBy: { id: "asc" },
-        take: 5,
-      });
-
-      if (orders.length === 0) {
-        await safeRender(ctx, ManagerTexts.noPendingOrders(), {
-          reply_markup: ManagerKeyboards.backToMenu(),
-        });
-      } else {
-        await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
-          reply_markup: ManagerKeyboards.orderList(orders, 0, 1),
         });
       }
       return;
@@ -2097,11 +2161,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data === "mgr:settings") {
       const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
       const expiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+      const payMethod = await settingsService.getPaymentMethod();
       const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
 
-      await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, expiryMin), {
+      await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, expiryMin, payMethod), {
         parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
+        reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId, payMethod),
       });
       return;
     }
@@ -2119,9 +2184,31 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await answerCallback({ text: ManagerTexts.settingsImageDeleted(), show_alert: true });
 
       const expiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
-      await safeRender(ctx, ManagerTexts.settingsMenuTitle("❌ تنظیم نشده", expiryMin), {
+      const payMethod = await settingsService.getPaymentMethod();
+      await safeRender(ctx, ManagerTexts.settingsMenuTitle("❌ تنظیم نشده", expiryMin, payMethod), {
         parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.settingsMenu(false),
+        reply_markup: ManagerKeyboards.settingsMenu(false, payMethod),
+      });
+      return;
+    }
+
+    if (data === "mgr:settings:paymethod") {
+      const current = await settingsService.getPaymentMethod();
+      const newMethod = current === "channel" ? "direct" : "channel";
+      try {
+        await settingsService.set(SettingKeys.PAYMENT_METHOD, newMethod);
+      } catch {
+        await answerCallback({ text: "❌ خطا در ذخیره تنظیمات", show_alert: true });
+        return;
+      }
+      await answerCallback({ text: ManagerTexts.settingsPayMethodToggled(newMethod), show_alert: true });
+
+      const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
+      const expiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+      const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
+      await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, expiryMin, newMethod), {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId, newMethod),
       });
       return;
     }
