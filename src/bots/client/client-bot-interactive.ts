@@ -483,105 +483,73 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   // PHOTO MESSAGE HANDLER - For receipt images
   // ===========================================
   bot.on("message:photo", async (ctx) => {
-    // Check if user has an order awaiting receipt
-    const user = await prisma.user.findUnique({
-      where: { tgUserId: BigInt(ctx.from.id) },
-    });
+    try {
+      // Check if user has an order awaiting receipt
+      const user = await prisma.user.findUnique({
+        where: { tgUserId: BigInt(ctx.from.id) },
+      });
 
-    if (!user) {
-      await ctx.reply(ClientTexts.unableToIdentify());
-      return;
-    }
+      if (!user) {
+        await ctx.reply(ClientTexts.unableToIdentify());
+        return;
+      }
 
-    // Find order awaiting receipt
-    const order = await prisma.order.findFirst({
-      where: {
-        userId: user.id,
-        status: OrderStatus.AWAITING_RECEIPT,
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (!order) {
-      // Check if they have an approved order that needs receipt
-      const approvedOrder = await prisma.order.findFirst({
+      // Find order awaiting receipt (direct method) or invite_sent (channel method)
+      const order = await prisma.order.findFirst({
         where: {
           userId: user.id,
-          status: OrderStatus.INVITE_SENT,
+          status: { in: [OrderStatus.AWAITING_RECEIPT, OrderStatus.INVITE_SENT, OrderStatus.APPROVED] },
         },
         orderBy: { createdAt: "desc" },
       });
 
-      if (approvedOrder) {
-        // P1-1 Fix: Mark any existing pending receipts as superseded before creating new one
-        const photo = ctx.message.photo[ctx.message.photo.length - 1];
-        
-        await prisma.$transaction([
-          // Mark existing pending receipts as rejected (superseded)
-          prisma.receipt.updateMany({
-            where: {
-              orderId: approvedOrder.id,
-              reviewStatus: ReceiptReviewStatus.PENDING,
-            },
-            data: {
-              reviewStatus: ReceiptReviewStatus.REJECTED,
-              reviewNotes: "با ارسال رسید جدید جایگزین شد",
-            },
-          }),
-          // Create new receipt
-          prisma.receipt.create({
-            data: {
-              orderId: approvedOrder.id,
-              userId: user.id,
-              fileId: photo.file_id,
-              caption: ctx.message.caption,
-            },
-          }),
-          prisma.order.update({
-            where: { id: approvedOrder.id },
-            data: { status: OrderStatus.AWAITING_RECEIPT },
-          }),
-        ]);
-
-        await ctx.reply(ClientTexts.receiptReceived());
-        const userLabel1 = user.username || user.firstName || `#${user.id}`;
-        await notificationService.notifyManagersNewReceipt(approvedOrder.id, userLabel1);
+      if (!order) {
+        await ctx.reply(ClientTexts.noActiveOrderForReceipt());
         return;
       }
 
-      await ctx.reply(ClientTexts.noActiveOrderForReceipt());
-      return;
+      // P1-1 Fix: Mark any existing pending receipts as superseded before creating new one
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      
+      await prisma.$transaction([
+        // Mark existing pending receipts as rejected (superseded)
+        prisma.receipt.updateMany({
+          where: {
+            orderId: order.id,
+            reviewStatus: ReceiptReviewStatus.PENDING,
+          },
+          data: {
+            reviewStatus: ReceiptReviewStatus.REJECTED,
+            reviewNotes: "با ارسال رسید جدید جایگزین شد",
+          },
+        }),
+        // Create new receipt
+        prisma.receipt.create({
+          data: {
+            orderId: order.id,
+            userId: user.id,
+            fileId: photo.file_id,
+            caption: ctx.message.caption,
+          },
+        }),
+        // Ensure order is in AWAITING_RECEIPT status
+        prisma.order.update({
+          where: { id: order.id },
+          data: { status: OrderStatus.AWAITING_RECEIPT },
+        }),
+      ]);
+
+      await ctx.reply(ClientTexts.receiptReceived());
+      const userLabel = user.username || user.firstName || `#${user.id}`;
+      await notificationService.notifyManagersNewReceipt(order.id, userLabel);
+    } catch (error) {
+      console.error("[CLIENT PHOTO HANDLER] Error processing receipt:", error);
+      try {
+        await ctx.reply("❌ خطا در ثبت رسید. لطفاً دوباره تلاش کنید.");
+      } catch {
+        // Ignore reply errors
+      }
     }
-
-    // P1-1 Fix: Mark any existing pending receipts as superseded before creating new one
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    
-    await prisma.$transaction([
-      // Mark existing pending receipts as rejected (superseded)
-      prisma.receipt.updateMany({
-        where: {
-          orderId: order.id,
-          reviewStatus: ReceiptReviewStatus.PENDING,
-        },
-        data: {
-          reviewStatus: ReceiptReviewStatus.REJECTED,
-          reviewNotes: "با ارسال رسید جدید جایگزین شد",
-        },
-      }),
-      // Create new receipt
-      prisma.receipt.create({
-        data: {
-          orderId: order.id,
-          userId: user.id,
-          fileId: photo.file_id,
-          caption: ctx.message.caption,
-        },
-      }),
-    ]);
-
-    await ctx.reply(ClientTexts.receiptReceived());
-    const userLabel2 = user.username || user.firstName || `#${user.id}`;
-    await notificationService.notifyManagersNewReceipt(order.id, userLabel2);
   });
 
   // ===========================================
