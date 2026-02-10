@@ -13,8 +13,13 @@ export class BotSettingsService {
   constructor(private readonly prisma: PrismaClient) {}
 
   async get(key: string): Promise<string | null> {
-    const row = await this.prisma.botSettings.findUnique({ where: { key } });
-    return row?.value ?? null;
+    try {
+      const row = await this.prisma.botSettings.findUnique({ where: { key } });
+      return row?.value ?? null;
+    } catch {
+      // Table may not exist yet (prisma db push not run)
+      return null;
+    }
   }
 
   async set(key: string, value: string): Promise<void> {

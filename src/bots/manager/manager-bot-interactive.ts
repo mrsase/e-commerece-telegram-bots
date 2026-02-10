@@ -48,6 +48,7 @@ import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
 import { ReferralAnalyticsService, formatReferralTree } from "../../services/referral-analytics-service.js";
 import { safeRender } from "../../utils/safe-reply.js";
+import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { cleanupChannelForOrder } from "../../services/channel-cleanup-service.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
 
@@ -793,7 +794,6 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           await clientBot.api.sendMessage(
             order.user.tgUserId.toString(),
             ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
-            { parse_mode: "Markdown" }
           );
           await answerCallback({ 
             text: ManagerTexts.orderApprovedInviteSent(orderId, order.user.tgUserId),
@@ -911,22 +911,23 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
+      const esc = escapeMarkdown;
       let detailText = `📦 *سفارش #${order.id}*\n`;
-      detailText += `وضعیت: ${orderStatusLabel(order.status)}\n`;
+      detailText += `وضعیت: ${esc(orderStatusLabel(order.status))}\n`;
       detailText += `تاریخ: ${order.createdAt.toISOString().split("T")[0]}\n\n`;
 
       // User info
       const u = order.user;
-      detailText += `*مشتری:* ${u.firstName ?? "-"} (@${u.username ?? "-"})\n`;
-      detailText += `تلفن: ${u.phone ?? "-"}\n`;
-      detailText += `آدرس: ${u.address ?? "-"}\n`;
+      detailText += `*مشتری:* ${esc(u.firstName)} (@${esc(u.username)})\n`;
+      detailText += `تلفن: ${esc(u.phone) || "-"}\n`;
+      detailText += `آدرس: ${esc(u.address) || "-"}\n`;
       if (u.locationLat != null) detailText += `📍 موقعیت ثبت شده\n`;
       detailText += "\n";
 
       // Items
       detailText += `*اقلام:*\n`;
       order.items.forEach((item) => {
-        detailText += `  ${item.product.title} x${item.qty} = ${item.lineTotal}\n`;
+        detailText += `  ${esc(item.product.title)} x${item.qty} = ${item.lineTotal}\n`;
       });
       detailText += `\nجمع: ${order.subtotal}\n`;
       if (order.discountTotal > 0) detailText += `تخفیف: ${order.discountTotal}\n`;
@@ -934,14 +935,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       // Receipts
       if (order.receipts.length > 0) {
-        detailText += `\n🧾 رسیدها: ${order.receipts.length} عدد (آخرین: ${order.receipts[0].reviewStatus})\n`;
+        detailText += `\n🧾 رسیدها: ${order.receipts.length} عدد (آخرین: ${esc(order.receipts[0].reviewStatus)})\n`;
       }
 
       // Delivery
       if (order.delivery) {
         const d = order.delivery;
-        detailText += `\n🚚 ارسال: ${d.status}`;
-        if (d.assignedCourier) detailText += ` (پیک: @${d.assignedCourier.username ?? d.assignedCourier.id})`;
+        detailText += `\n🚚 ارسال: ${esc(d.status)}`;
+        if (d.assignedCourier) detailText += ` (پیک: @${esc(d.assignedCourier.username) || d.assignedCourier.id})`;
         detailText += "\n";
       }
 
@@ -949,7 +950,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       if (order.events.length > 0) {
         detailText += `\n📋 *تاریخچه:*\n`;
         order.events.forEach((e) => {
-          detailText += `  ${e.createdAt.toISOString().split("T")[0]} · ${e.eventType}\n`;
+          detailText += `  ${e.createdAt.toISOString().split("T")[0]} · ${esc(e.eventType)}\n`;
         });
       }
 
@@ -996,8 +997,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         text += "سفارشی یافت نشد.\n";
       } else {
         orders.forEach((o) => {
-          const label = o.user.username || o.user.firstName || `#${o.userId}`;
-          text += `#${o.id} · ${label} · ${orderStatusLabel(o.status)} · ${o.grandTotal}\n`;
+          const label = escapeMarkdown(o.user.username || o.user.firstName) || `#${o.userId}`;
+          text += `#${o.id} · ${label} · ${escapeMarkdown(orderStatusLabel(o.status))} · ${o.grandTotal}\n`;
         });
       }
 
@@ -1170,9 +1171,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      const text = `*ویرایش محصول: ${product.title}*\n\n` +
-        `📝 عنوان: ${product.title}\n` +
-        `📄 توضیحات: ${product.description || '—'}\n` +
+      const text = `*ویرایش محصول: ${escapeMarkdown(product.title)}*\n\n` +
+        `📝 عنوان: ${escapeMarkdown(product.title)}\n` +
+        `📄 توضیحات: ${escapeMarkdown(product.description) || '—'}\n` +
         `💰 قیمت: ${product.price} ${product.currency}\n` +
         `📦 موجودی: ${product.stock ?? 'نامحدود'}\n` +
         `🖼️ تصویر: ${product.photoFileId ? 'دارد' : 'ندارد'}\n` +
@@ -1197,9 +1198,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         });
         
         const product = await prisma.product.findUnique({ where: { id: productId } });
-        const text = `*ویرایش محصول: ${product!.title}*\n\n` +
-          `📝 عنوان: ${product!.title}\n` +
-          `📄 توضیحات: ${product!.description || '—'}\n` +
+        const text = `*ویرایش محصول: ${escapeMarkdown(product!.title)}*\n\n` +
+          `📝 عنوان: ${escapeMarkdown(product!.title)}\n` +
+          `📄 توضیحات: ${escapeMarkdown(product!.description) || '—'}\n` +
           `💰 قیمت: ${product!.price} ${product!.currency}\n` +
           `📦 موجودی: ${product!.stock ?? 'نامحدود'}\n` +
           `🖼️ تصویر: ندارد\n` +
@@ -1246,9 +1247,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       // Refresh edit view
       const updated = await prisma.product.findUnique({ where: { id: productId } });
-      const text = `*ویرایش محصول: ${updated!.title}*\n\n` +
-        `📝 عنوان: ${updated!.title}\n` +
-        `📄 توضیحات: ${updated!.description || '—'}\n` +
+      const text = `*ویرایش محصول: ${escapeMarkdown(updated!.title)}*\n\n` +
+        `📝 عنوان: ${escapeMarkdown(updated!.title)}\n` +
+        `📄 توضیحات: ${escapeMarkdown(updated!.description) || '—'}\n` +
         `💰 قیمت: ${updated!.price} ${updated!.currency}\n` +
         `📦 موجودی: ${updated!.stock ?? 'نامحدود'}\n` +
         `🖼️ تصویر: ${updated!.photoFileId ? 'دارد' : 'ندارد'}\n` +

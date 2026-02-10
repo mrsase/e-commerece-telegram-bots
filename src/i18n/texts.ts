@@ -15,8 +15,8 @@
  */
 export function escapeMarkdown(text: string | null | undefined): string {
   if (!text) return '';
-  // Escape Markdown special characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
-  return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+  // Escape Markdown V1 special characters: _ * ` [
+  return text.replace(/([_*`\[])/g, '\\$1');
 }
 
 /**
@@ -82,7 +82,7 @@ export const ClientTexts = {
   
   // Product View
   productDetails: (title: string, description: string | null, price: number, currency: string, stock: number | null) =>
-    `*${title}*\n\n${description || 'بدون توضیحات'}\n\n💰 قیمت: ${price} ${currency}${stock !== null ? `\n📦 موجودی: ${stock}` : ''}`,
+    `*${escapeMarkdown(title)}*\n\n${escapeMarkdown(description) || 'بدون توضیحات'}\n\n💰 قیمت: ${price} ${currency}${stock !== null ? `\n📦 موجودی: ${stock}` : ''}`,
   selectQuantity: () => "تعداد را انتخاب کنید:",
   addedToCartSuccess: (title: string, qty: number) => `✅ ${qty} عدد ${title} به سبد خرید اضافه شد!`,
   
@@ -211,7 +211,7 @@ export const ManagerTexts = {
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
   userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${username || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\nتعداد سفارش: ${orderCount}`,
+    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\nتعداد سفارش: ${orderCount}`,
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,
   userUnblocked: (username: string | null) => `✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,
   userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی به ${username || 'کاربر'} داده شد.`,
@@ -231,7 +231,7 @@ export const ManagerTexts = {
   courierListTitle: () => "🚚 *لیست پیک‌ها*",
   noCouriers: () => "هیچ پیکی یافت نشد.",
   courierDetails: (id: number, username: string | null, tgUserId: bigint, isActive: boolean) =>
-    `*پیک #${id}*\n\nنام کاربری: ${username || '—'}\nشناسه تلگرام: \`${tgUserId}\`\nوضعیت: ${isActive ? '✅ فعال' : '🚫 غیرفعال'}`,
+    `*پیک #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nشناسه تلگرام: \`${tgUserId}\`\nوضعیت: ${isActive ? '✅ فعال' : '🚫 غیرفعال'}`,
   courierAdded: (tgUserId: string) => `✅ پیک با شناسه تلگرام ${tgUserId} اضافه شد.`,
   courierAlreadyExists: () => "این شناسه تلگرام قبلاً به عنوان پیک ثبت شده است.",
   courierToggled: (username: string | null, isActive: boolean) =>
@@ -294,7 +294,7 @@ export const ManagerTexts = {
   
   // User Info Display
   userContactInfo: (phone: string | null, address: string | null, lat: number | null, lng: number | null) =>
-    `📋 *اطلاعات مشتری:*\nتلفن: ${phone || '—'}\nآدرس: ${address || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : ''}`,
+    `📋 *اطلاعات مشتری:*\nتلفن: ${escapeMarkdown(phone) || '—'}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : ''}`,
 
   // Settings
   settingsMenuTitle: (imageStatus: string, expiryMinutes: number) =>

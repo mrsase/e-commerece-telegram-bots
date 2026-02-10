@@ -113,7 +113,15 @@ export async function safeRender(
     // Ignore delete failures (message may already be gone)
   }
 
-  await ctx.reply(text, options);
+  try {
+    await ctx.reply(text, options);
+  } catch {
+    // If Markdown fails, retry without parse_mode as a last resort
+    const { parse_mode, ...rest } = options ?? {};
+    if (parse_mode) {
+      await ctx.reply(text, rest);
+    }
+  }
 }
 
 /**
