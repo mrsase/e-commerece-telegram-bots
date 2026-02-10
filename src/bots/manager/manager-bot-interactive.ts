@@ -5,6 +5,7 @@ import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 
 import { SessionStore } from "../../utils/session-store.js";
+import { getFileUrl } from "../../utils/cross-bot-file.js";
 
 // Session state for multi-step flows
 type SessionState = 
@@ -702,6 +703,18 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         const payMethod = await settingsService.getPaymentMethod();
         const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
         const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+
+        // Checkout image was uploaded to the manager bot — file_ids are bot-specific.
+        // Convert to a download URL so any bot can use it.
+        let checkoutImageUrl: string | null = null;
+        if (effectiveImageFileId) {
+          try {
+            checkoutImageUrl = await getFileUrl(bot.api, bot.token, effectiveImageFileId);
+          } catch (err) {
+            console.error("[APPROVE] Failed to get checkout image URL from manager bot:", err);
+          }
+        }
+
         const paymentCaption = ChannelTexts.paymentMessage(
           orderId,
           order.grandTotal,
@@ -735,8 +748,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
             // Post payment message to checkout channel
             let channelMessageId: number | null = null;
             try {
-              if (effectiveImageFileId) {
-                const msg = await clientBot.api.sendPhoto(checkoutChannelId, effectiveImageFileId, {
+              if (checkoutImageUrl) {
+                const msg = await clientBot.api.sendPhoto(checkoutChannelId, checkoutImageUrl, {
                   caption: paymentCaption, parse_mode: "Markdown",
                 });
                 channelMessageId = msg.message_id;
@@ -805,8 +818,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           let directMessageId: number | null = null;
 
           try {
-            if (effectiveImageFileId) {
-              const msg = await clientBot.api.sendPhoto(userTgId, effectiveImageFileId, {
+            if (checkoutImageUrl) {
+              const msg = await clientBot.api.sendPhoto(userTgId, checkoutImageUrl, {
                 caption: paymentCaption, parse_mode: "Markdown",
               });
               directMessageId = msg.message_id;
@@ -818,7 +831,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
             }
           } catch (err) {
             console.error("[APPROVE direct] Failed to send payment details to client:", err);
-            // Retry without Markdown if it was a parse error
+            // Retry without Markdown and without image
             try {
               const msg = await clientBot.api.sendMessage(userTgId, paymentCaption.replace(/[*_`\[]/g, ""));
               directMessageId = msg.message_id;
@@ -1923,13 +1936,29 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         receipt.user.locationLng
       );
 
-      // Send receipt image
+      // Send receipt image — file_id belongs to the client bot, so convert to URL
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
-      await ctx.replyWithPhoto(receipt.fileId, {
-        caption: text,
-        parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.receiptActions(receiptId),
-      });
+      let receiptSent = false;
+      if (clientBot) {
+        try {
+          const receiptUrl = await getFileUrl(clientBot.api, clientBot.token, receipt.fileId);
+          await ctx.replyWithPhoto(receiptUrl, {
+            caption: text,
+            parse_mode: "Markdown",
+            reply_markup: ManagerKeyboards.receiptActions(receiptId),
+          });
+          receiptSent = true;
+        } catch (err) {
+          console.error("[RECEIPT VIEW] Failed to get receipt image URL from client bot:", err);
+        }
+      }
+      if (!receiptSent) {
+        // Fallback: show text only
+        await safeRender(ctx, text + "\n\n⚠️ تصویر رسید قابل نمایش نیست.", {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.receiptActions(receiptId),
+        });
+      }
       return;
     }
 
