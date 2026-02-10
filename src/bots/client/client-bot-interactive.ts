@@ -484,7 +484,16 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   // ===========================================
   bot.on("message:photo", async (ctx) => {
     try {
-      // Check if user has an order awaiting receipt
+      const session = userSessions.get(ctx.from.id);
+
+      // Only accept receipt photos when user has explicitly selected an order
+      if (session?.state !== "awaiting_receipt" || !session.orderId) {
+        await ctx.reply("برای ارسال رسید، ابتدا از منوی «سفارش‌های من» سفارش مورد نظر را انتخاب کرده و دکمه «📸 ارسال رسید پرداخت» را بزنید.");
+        return;
+      }
+
+      const orderId = session.orderId;
+
       const user = await prisma.user.findUnique({
         where: { tgUserId: BigInt(ctx.from.id) },
       });
@@ -494,25 +503,26 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      // Find order awaiting receipt (direct method) or invite_sent (channel method)
-      const order = await prisma.order.findFirst({
-        where: {
-          userId: user.id,
-          status: { in: [OrderStatus.AWAITING_RECEIPT, OrderStatus.INVITE_SENT, OrderStatus.APPROVED] },
-        },
-        orderBy: { createdAt: "desc" },
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
       });
 
-      if (!order) {
-        await ctx.reply(ClientTexts.noActiveOrderForReceipt());
+      if (!order || order.userId !== user.id) {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply("سفارش یافت نشد. لطفاً دوباره از منوی سفارش‌ها اقدام کنید.");
         return;
       }
 
-      // P1-1 Fix: Mark any existing pending receipts as superseded before creating new one
+      if (order.status !== OrderStatus.APPROVED && order.status !== OrderStatus.INVITE_SENT && order.status !== OrderStatus.AWAITING_RECEIPT) {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply("این سفارش دیگر در وضعیت ارسال رسید نیست.");
+        return;
+      }
+
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
-      
+
       await prisma.$transaction([
-        // Mark existing pending receipts as rejected (superseded)
+        // Mark existing pending receipts as superseded
         prisma.receipt.updateMany({
           where: {
             orderId: order.id,
@@ -539,11 +549,15 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         }),
       ]);
 
+      // Clear session
+      userSessions.delete(ctx.from.id);
+
       await ctx.reply(ClientTexts.receiptReceived());
       const userLabel = user.username || user.firstName || `#${user.id}`;
       await notificationService.notifyManagersNewReceipt(order.id, userLabel);
     } catch (error) {
       console.error("[CLIENT PHOTO HANDLER] Error processing receipt:", error);
+      userSessions.delete(ctx.from.id);
       try {
         await ctx.reply("❌ خطا در ثبت رسید. لطفاً دوباره تلاش کنید.");
       } catch {
@@ -1091,6 +1105,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const { InlineKeyboard: IK } = await import("grammy");
       const detailKb = new IK();
 
+      // Show send receipt button for orders awaiting payment
+      if (order.status === OrderStatus.APPROVED || order.status === OrderStatus.INVITE_SENT || order.status === OrderStatus.AWAITING_RECEIPT) {
+        detailKb.text("📸 ارسال رسید پرداخت", `client:receipt:${order.id}`).row();
+      }
+
       // Show cancel button only for pending orders
       if (order.status === OrderStatus.AWAITING_MANAGER_APPROVAL) {
         detailKb.text("❌ لغو سفارش", `client:cancel:${order.id}`).row();
@@ -1102,6 +1121,31 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         parse_mode: "Markdown",
         reply_markup: detailKb,
       });
+      return;
+    }
+
+    // SEND RECEIPT - Set session to awaiting_receipt with orderId
+    if (data.startsWith("client:receipt:")) {
+      const orderId = parseInt(parts[2]);
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+
+      if (!order || order.userId !== user.id) {
+        await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
+        return;
+      }
+
+      if (order.status !== OrderStatus.APPROVED && order.status !== OrderStatus.INVITE_SENT && order.status !== OrderStatus.AWAITING_RECEIPT) {
+        await answerCallback({ text: "این سفارش در وضعیت ارسال رسید نیست.", show_alert: true });
+        return;
+      }
+
+      userSessions.set(ctx.from.id, { state: "awaiting_receipt", orderId });
+
+      try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      await ctx.reply(
+        `📸 *سفارش #${orderId}*\n\nلطفاً عکس رسید پرداخت را ارسال کنید.`,
+        { parse_mode: "Markdown" },
+      );
       return;
     }
 
