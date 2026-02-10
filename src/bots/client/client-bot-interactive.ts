@@ -17,8 +17,7 @@ type SessionState =
   | "checkout_address"
   | "checkout_discount"
   | "awaiting_receipt"
-  | "support_message"
-  | "referral:create:score";
+  | "support_message";
 
 interface ClientSession {
   state: SessionState;
@@ -36,7 +35,6 @@ interface ClientBotDeps {
 }
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
-import { ManagerTexts } from "../../i18n/texts.js";
 import { buildCartDisplay } from "../../utils/cart-display.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
@@ -116,7 +114,6 @@ async function validateAndUseReferralCode(
         isVerified: true,
         usedReferralCodeId: referralCode.id,
         referredById: referralCode.createdByUserId, // Link to who referred them
-        loyaltyScore: referralCode.loyaltyScore,     // Inherit score from referral code
       },
     }),
     prisma.referralCode.update({
@@ -306,39 +303,6 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       userSessions.delete(ctx.from.id);
       await ctx.reply(ClientTexts.referralCodeAccepted(), {
         reply_markup: ClientKeyboards.mainMenu(),
-      });
-      return;
-    }
-
-    // Handle referral code creation — step 2: receive loyalty score
-    if (session?.state === "referral:create:score") {
-      const input = ctx.message.text.trim();
-      const score = parseInt(input, 10);
-
-      if (!Number.isFinite(score) || score < 0 || score > 10) {
-        await ctx.reply(ManagerTexts.invalidScore());
-        return;
-      }
-
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
-
-      if (!user) {
-        await ctx.reply(ClientTexts.unableToIdentify());
-        return;
-      }
-
-      const code = await createReferralCodeWithRetry(prisma, {
-        createdByUserId: user.id,
-        maxUses: 5,
-        loyaltyScore: score,
-      });
-
-      userSessions.delete(ctx.from.id);
-      await ctx.reply(ClientTexts.referralCodeGenerated(code), {
-        parse_mode: "Markdown",
-        reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
     }
@@ -1316,8 +1280,13 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      userSessions.set(ctx.from.id, { state: "referral:create:score" });
-      await safeRender(ctx, ManagerTexts.enterReferralScore(), {
+      const code = await createReferralCodeWithRetry(prisma, {
+        createdByUserId: user.id,
+        maxUses: 5,
+      });
+
+      await safeRender(ctx, ClientTexts.referralCodeGenerated(code), {
+        parse_mode: "Markdown",
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;

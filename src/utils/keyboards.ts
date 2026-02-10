@@ -285,6 +285,8 @@ export const ManagerKeyboards = {
       .row()
       .text("🗑️ حذف کاربر", `mgr:user:delete:${userId}`)
       .row()
+      .text("💬 ارسال پیام", `mgr:user:message:${userId}`)
+      .row()
       .text("« بازگشت به کاربران", "mgr:users:list");
   },
 

@@ -24,7 +24,7 @@ model User {
   isActive        Boolean          @default(true)
   isVerified      Boolean          @default(false)  // Has entered a valid referral code
   canCreateReferral Boolean        @default(false)  // Manager must grant this permission
-  loyaltyScore    Int              @default(0)       // Score inherited from referral code (0-10)
+  loyaltyScore    Int              @default(0)       // Score assigned by parent or manager (0-10)
   loyaltyScoreOverride Int?                           // Manager override of loyalty score
   createdAt       DateTime         @default(now())
   lastSeenAt      DateTime?
@@ -71,7 +71,6 @@ model ReferralCode {
   createdByManager   Manager? @relation("ReferralCodeByManager", fields: [createdByManagerId], references: [id])
   maxUses         Int?      // null = unlimited
   usedCount       Int       @default(0)
-  loyaltyScore    Int       @default(0)   // Score assigned to users who redeem this code (0-10)
   isActive        Boolean   @default(true)
   createdAt       DateTime  @default(now())
   expiresAt       DateTime?

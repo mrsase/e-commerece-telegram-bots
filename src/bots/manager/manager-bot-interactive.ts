@@ -25,7 +25,6 @@ type SessionState =
   | "settings:image"
   | "settings:expiry"
   | "courier:add"
-  | "referral:create:score"
   | "user:setscore";
 
 interface ManagerSession {
@@ -267,7 +266,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // REFERRAL CODE CREATION — step 1: maxUses
+    // REFERRAL CODE CREATION
     if (session.state === "referral:create:maxuses") {
       const maxUses = text === "/skip" ? null : parseInt(text);
       if (text !== "/skip" && (isNaN(maxUses!) || maxUses! < 1)) {
@@ -275,29 +274,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      // Save maxUses and move to score step
-      managerSessions.set(ctx.from.id, {
-        state: "referral:create:score",
-        data: { maxUses },
-      });
-      await ctx.reply(ManagerTexts.enterReferralScore());
-      return;
-    }
-
-    // REFERRAL CODE CREATION — step 2: loyalty score
-    if (session.state === "referral:create:score") {
-      const score = parseInt(text, 10);
-      if (!Number.isFinite(score) || score < 0 || score > 10) {
-        await ctx.reply(ManagerTexts.invalidScore());
-        return;
-      }
-
-      const maxUses = (session.data?.maxUses as number | null) ?? null;
-
       const code = await createReferralCodeWithRetry(prisma, {
         createdByManagerId: manager.id,
         maxUses,
-        loyaltyScore: score,
         prefix: "MGR_",
         length: 6,
       });
@@ -305,6 +284,183 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.referralCodeCreated(code), {
         parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // RECEIPT REJECTION REASON
+    if (session.state === "receipt:reject:reason") {
+      const receiptId = session.data?.receiptId as number;
+      const reason = ctx.message.text === "/skip" ? null : ctx.message.text.trim();
+
+      const receipt = await prisma.receipt.findUnique({
+        where: { id: receiptId },
+        include: { order: { include: { user: true } } },
+      });
+
+      if (!receipt) {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply("رسید یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.receipt.update({
+          where: { id: receiptId },
+          data: { 
+            reviewStatus: ReceiptReviewStatus.REJECTED,
+            reviewedById: manager.id,
+            reviewNotes: reason,
+          },
+        }),
+        prisma.order.update({
+          where: { id: receipt.orderId },
+          data: { 
+            status: OrderStatus.INVITE_SENT,
+            events: {
+              create: {
+                actorType: "manager",
+                actorId: manager.id,
+                eventType: "receipt_rejected",
+                payload: reason ? JSON.stringify({ reason }) : null,
+              },
+            },
+          },
+        }),
+      ]);
+
+      if (clientBot && receipt.order.user) {
+        try {
+          await clientBot.api.sendMessage(
+            receipt.order.user.tgUserId.toString(),
+            ClientTexts.receiptRejected(receipt.orderId, reason || undefined)
+          );
+        } catch (error) {
+          console.error("Failed to notify client of receipt rejection:", error);
+        }
+      }
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.receiptRejected(receipt.orderId), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // SETTINGS EXPIRY
+    if (session.state === "settings:expiry") {
+      const input = ctx.message.text.trim();
+      const minutes = parseInt(input, 10);
+
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        await ctx.reply(ManagerTexts.settingsExpiryInvalid());
+        return;
+      }
+
+      await settingsService.set(SettingKeys.INVITE_EXPIRY_MINUTES, String(minutes));
+      managerSessions.delete(ctx.from.id);
+
+      await ctx.reply(ManagerTexts.settingsExpiryUpdated(minutes), {
+        reply_markup: ManagerKeyboards.settingsMenu(
+          !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
+        ),
+      });
+      return;
+    }
+
+    // USER SCORE OVERRIDE
+    if (session.state === "user:setscore") {
+      const input = ctx.message.text.trim();
+      const score = parseInt(input, 10);
+
+      if (!Number.isFinite(score) || score < 0 || score > 10) {
+        await ctx.reply(ManagerTexts.invalidScore());
+        return;
+      }
+
+      const userId = session.data?.userId as number;
+      await prisma.user.update({
+        where: { id: userId },
+        data: { loyaltyScoreOverride: score },
+      });
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.userScoreUpdated(score), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // COURIER ADD BY TG ID
+    if (session.state === "courier:add") {
+      const input = ctx.message.text.trim();
+      const tgUserId = BigInt(input || "0");
+
+      if (!input || tgUserId <= 0n) {
+        await ctx.reply(ManagerTexts.invalidTgId());
+        return;
+      }
+
+      const existing = await prisma.courier.findUnique({
+        where: { tgUserId },
+      });
+
+      if (existing) {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply(ManagerTexts.courierAlreadyExists(), {
+          reply_markup: ManagerKeyboards.courierManagement(),
+        });
+        return;
+      }
+
+      await prisma.courier.create({
+        data: { tgUserId, isActive: true },
+      });
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.courierAdded(input), {
+        reply_markup: ManagerKeyboards.courierManagement(),
+      });
+      return;
+    }
+
+    // SUPPORT REPLY
+    if (session.state === "support:reply") {
+      const conversationId = session.data?.conversationId as number;
+      const replyText = ctx.message.text.trim();
+      if (!replyText) return;
+
+      const conversation = await prisma.supportConversation.findUnique({
+        where: { id: conversationId },
+        include: { user: true },
+      });
+
+      if (!conversation) {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply("گفتگو یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.supportMessage.create({
+          data: {
+            conversationId,
+            senderType: SupportSenderType.MANAGER,
+            senderManagerId: manager.id,
+            text: replyText,
+          },
+        }),
+        prisma.supportConversation.update({
+          where: { id: conversationId },
+          data: { lastMessageAt: new Date() },
+        }),
+      ]);
+
+      await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText);
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.supportReplySent(), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -1150,7 +1306,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore"].includes(parts[2])) {
+    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "message"].includes(parts[2])) {
       const userId = parseInt(parts[2]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
@@ -1270,6 +1426,40 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const userId = parseInt(parts[3]);
       managerSessions.set(ctx.from.id, { state: "user:setscore", data: { userId } });
       await safeRender(ctx, ManagerTexts.enterUserScore(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    // INITIATE SUPPORT CONVERSATION WITH USER
+    if (data.startsWith("mgr:user:message:")) {
+      const userId = parseInt(parts[3]);
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
+      // Find or create an open conversation for this user
+      let conversation = await prisma.supportConversation.findFirst({
+        where: { userId, status: SupportConversationStatus.OPEN },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (!conversation) {
+        conversation = await prisma.supportConversation.create({
+          data: { userId },
+        });
+      }
+
+      managerSessions.set(ctx.from.id, {
+        state: "support:reply",
+        data: { conversationId: conversation.id },
+      });
+
+      const userLabel = user.username || user.firstName || `#${user.id}`;
+      await safeRender(ctx, `💬 پیام به ${userLabel}:\n\nمتن پیام خود را ارسال کنید:`, {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -1669,7 +1859,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       );
 
       // Send receipt image
-      await ctx.deleteMessage();
+      try { await ctx.deleteMessage(); } catch { /* ignore */ }
       await ctx.replyWithPhoto(receipt.fileId, {
         caption: text,
         parse_mode: "Markdown",
@@ -1958,189 +2148,4 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
   });
 
-  // Handle receipt rejection reason text
-  bot.on("message:text", async (ctx) => {
-    const manager = await getManager(ctx, prisma);
-    if (!manager) return;
-
-    const session = managerSessions.get(ctx.from.id);
-    if (session?.state === "receipt:reject:reason") {
-      const receiptId = session.data?.receiptId as number;
-      const reason = ctx.message.text === "/skip" ? null : ctx.message.text.trim();
-
-      const receipt = await prisma.receipt.findUnique({
-        where: { id: receiptId },
-        include: { order: { include: { user: true } } },
-      });
-
-      if (!receipt) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply("رسید یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
-        return;
-      }
-
-      // Update receipt status but keep order in INVITE_SENT so user can send new receipt
-      await prisma.$transaction([
-        prisma.receipt.update({
-          where: { id: receiptId },
-          data: { 
-            reviewStatus: ReceiptReviewStatus.REJECTED,
-            reviewedById: manager.id,
-            reviewNotes: reason,
-          },
-        }),
-        prisma.order.update({
-          where: { id: receipt.orderId },
-          data: { 
-            status: OrderStatus.INVITE_SENT, // Back to invite_sent so user can try again
-            events: {
-              create: {
-                actorType: "manager",
-                actorId: manager.id,
-                eventType: "receipt_rejected",
-                payload: reason ? JSON.stringify({ reason }) : null,
-              },
-            },
-          },
-        }),
-      ]);
-
-      // Notify client
-      if (clientBot && receipt.order.user) {
-        try {
-          await clientBot.api.sendMessage(
-            receipt.order.user.tgUserId.toString(),
-            ClientTexts.receiptRejected(receipt.orderId, reason || undefined)
-          );
-        } catch (error) {
-          console.error("Failed to notify client of receipt rejection:", error);
-        }
-      }
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.receiptRejected(receipt.orderId), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
-      return;
-    }
-
-    // Handle settings expiry input
-    if (session?.state === "settings:expiry") {
-      const input = ctx.message.text.trim();
-      const minutes = parseInt(input, 10);
-
-      if (!Number.isFinite(minutes) || minutes <= 0) {
-        await ctx.reply(ManagerTexts.settingsExpiryInvalid());
-        return;
-      }
-
-      await settingsService.set(SettingKeys.INVITE_EXPIRY_MINUTES, String(minutes));
-      managerSessions.delete(ctx.from.id);
-
-      await ctx.reply(ManagerTexts.settingsExpiryUpdated(minutes), {
-        reply_markup: ManagerKeyboards.settingsMenu(
-          !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
-        ),
-      });
-      return;
-    }
-
-    // Handle user score override
-    if (session?.state === "user:setscore") {
-      const input = ctx.message.text.trim();
-      const score = parseInt(input, 10);
-
-      if (!Number.isFinite(score) || score < 0 || score > 10) {
-        await ctx.reply(ManagerTexts.invalidScore());
-        return;
-      }
-
-      const userId = session.data?.userId as number;
-      await prisma.user.update({
-        where: { id: userId },
-        data: { loyaltyScoreOverride: score },
-      });
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.userScoreUpdated(score), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
-      return;
-    }
-
-    // Handle courier add by TG ID
-    if (session?.state === "courier:add") {
-      const input = ctx.message.text.trim();
-      const tgUserId = BigInt(input || "0");
-
-      if (!input || tgUserId <= 0n) {
-        await ctx.reply(ManagerTexts.invalidTgId());
-        return;
-      }
-
-      // Check if courier already exists
-      const existing = await prisma.courier.findUnique({
-        where: { tgUserId },
-      });
-
-      if (existing) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply(ManagerTexts.courierAlreadyExists(), {
-          reply_markup: ManagerKeyboards.courierManagement(),
-        });
-        return;
-      }
-
-      await prisma.courier.create({
-        data: { tgUserId, isActive: true },
-      });
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.courierAdded(input), {
-        reply_markup: ManagerKeyboards.courierManagement(),
-      });
-      return;
-    }
-
-    // Handle support reply text
-    if (session?.state === "support:reply") {
-      const conversationId = session.data?.conversationId as number;
-      const replyText = ctx.message.text.trim();
-      if (!replyText) return;
-
-      const conversation = await prisma.supportConversation.findUnique({
-        where: { id: conversationId },
-        include: { user: true },
-      });
-
-      if (!conversation) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply("گفتگو یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
-        return;
-      }
-
-      await prisma.$transaction([
-        prisma.supportMessage.create({
-          data: {
-            conversationId,
-            senderType: SupportSenderType.MANAGER,
-            senderManagerId: manager.id,
-            text: replyText,
-          },
-        }),
-        prisma.supportConversation.update({
-          where: { id: conversationId },
-          data: { lastMessageAt: new Date() },
-        }),
-      ]);
-
-      // Notify client
-      await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText);
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.supportReplySent(), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
-    }
-  });
 }

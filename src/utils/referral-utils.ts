@@ -25,7 +25,6 @@ export async function createReferralCodeWithRetry(
     createdByUserId?: number;
     createdByManagerId?: number;
     maxUses?: number | null;
-    loyaltyScore?: number;
     prefix?: string;
     length?: number;
   },
@@ -40,7 +39,6 @@ export async function createReferralCodeWithRetry(
           createdByUserId: opts.createdByUserId ?? null,
           createdByManagerId: opts.createdByManagerId ?? null,
           maxUses: opts.maxUses ?? null,
-          loyaltyScore: opts.loyaltyScore ?? 0,
         },
       });
       return code;
