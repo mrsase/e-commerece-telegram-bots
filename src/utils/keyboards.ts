@@ -277,10 +277,12 @@ export const ManagerKeyboards = {
         `mgr:user:toggleref:${userId}`
       )
       .row()
+      .text("⭐ تغییر امتیاز", `mgr:user:setscore:${userId}`)
       .text(
         isActive ? "🚫 مسدود کردن" : "✅ رفع مسدودیت",
         `mgr:user:toggle:${userId}`
       )
+      .row()
       .text("🗑️ حذف کاربر", `mgr:user:delete:${userId}`)
       .row()
       .text("« بازگشت به کاربران", "mgr:users:list");

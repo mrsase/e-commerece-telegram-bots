@@ -17,7 +17,8 @@ type SessionState =
   | "checkout_address"
   | "checkout_discount"
   | "awaiting_receipt"
-  | "support_message";
+  | "support_message"
+  | "referral:create:score";
 
 interface ClientSession {
   state: SessionState;
@@ -35,6 +36,7 @@ interface ClientBotDeps {
 }
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
+import { ManagerTexts } from "../../i18n/texts.js";
 import { buildCartDisplay } from "../../utils/cart-display.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
@@ -114,6 +116,7 @@ async function validateAndUseReferralCode(
         isVerified: true,
         usedReferralCodeId: referralCode.id,
         referredById: referralCode.createdByUserId, // Link to who referred them
+        loyaltyScore: referralCode.loyaltyScore,     // Inherit score from referral code
       },
     }),
     prisma.referralCode.update({
@@ -245,6 +248,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   const { prisma, managerBot } = deps;
   const notificationService = new NotificationService({ prisma, managerBot });
 
+  // Global error handler to prevent crashes
+  bot.catch((err) => {
+    console.error("Client bot error:", err.message || err);
+  });
+
   // ===========================================
   // START COMMAND - Referral Gate
   // ===========================================
@@ -298,6 +306,39 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       userSessions.delete(ctx.from.id);
       await ctx.reply(ClientTexts.referralCodeAccepted(), {
         reply_markup: ClientKeyboards.mainMenu(),
+      });
+      return;
+    }
+
+    // Handle referral code creation — step 2: receive loyalty score
+    if (session?.state === "referral:create:score") {
+      const input = ctx.message.text.trim();
+      const score = parseInt(input, 10);
+
+      if (!Number.isFinite(score) || score < 0 || score > 10) {
+        await ctx.reply(ManagerTexts.invalidScore());
+        return;
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { tgUserId: BigInt(ctx.from.id) },
+      });
+
+      if (!user) {
+        await ctx.reply(ClientTexts.unableToIdentify());
+        return;
+      }
+
+      const code = await createReferralCodeWithRetry(prisma, {
+        createdByUserId: user.id,
+        maxUses: 5,
+        loyaltyScore: score,
+      });
+
+      userSessions.delete(ctx.from.id);
+      await ctx.reply(ClientTexts.referralCodeGenerated(code), {
+        parse_mode: "Markdown",
+        reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
     }
@@ -590,7 +631,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     const answerCallback = async (options?: { text?: string; show_alert?: boolean }) => {
       if (!callbackAnswered) {
         callbackAnswered = true;
-        await ctx.answerCallbackQuery(options);
+        try {
+          await ctx.answerCallbackQuery(options);
+        } catch {
+          // Ignore stale/expired callback query errors
+        }
       }
     };
     
@@ -1166,6 +1211,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       profileText += `تلفن: ${user.phone ?? "ثبت نشده"}\n`;
       profileText += `آدرس: ${user.address ?? "ثبت نشده"}\n`;
       profileText += `موقعیت: ${user.locationLat != null ? "✅ ثبت شده" : "ثبت نشده"}\n`;
+      const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
+      profileText += `⭐ امتیاز وفاداری: ${effectiveScore}/10\n`;
 
       const { InlineKeyboard: PK } = await import("grammy");
       const profileKb = new PK();
@@ -1244,7 +1291,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
-    // GENERATE REFERRAL CODE
+    // GENERATE REFERRAL CODE — step 1: ask for score
     if (data === "client:referral:generate") {
       // Check permission
       const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
@@ -1269,13 +1316,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      const code = await createReferralCodeWithRetry(prisma, {
-        createdByUserId: user.id,
-        maxUses: 5,
-      });
-
-      await safeRender(ctx, ClientTexts.referralCodeGenerated(code), {
-        parse_mode: "Markdown",
+      userSessions.set(ctx.from.id, { state: "referral:create:score" });
+      await safeRender(ctx, ManagerTexts.enterReferralScore(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;

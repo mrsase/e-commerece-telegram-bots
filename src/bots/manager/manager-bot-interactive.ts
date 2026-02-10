@@ -24,7 +24,9 @@ type SessionState =
   | "support:reply"
   | "settings:image"
   | "settings:expiry"
-  | "courier:add";
+  | "courier:add"
+  | "referral:create:score"
+  | "user:setscore";
 
 interface ManagerSession {
   state: SessionState;
@@ -72,6 +74,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
   const { prisma, clientBot, courierBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes = 60 } = deps;
   const notificationService = new NotificationService({ prisma, clientBot, courierBot });
   const settingsService = new BotSettingsService(prisma);
+
+  // Global error handler to prevent crashes
+  bot.catch((err) => {
+    console.error("Manager bot error:", err.message || err);
+  });
 
   // ===========================================
   // START COMMAND
@@ -260,7 +267,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // REFERRAL CODE CREATION
+    // REFERRAL CODE CREATION — step 1: maxUses
     if (session.state === "referral:create:maxuses") {
       const maxUses = text === "/skip" ? null : parseInt(text);
       if (text !== "/skip" && (isNaN(maxUses!) || maxUses! < 1)) {
@@ -268,9 +275,29 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
+      // Save maxUses and move to score step
+      managerSessions.set(ctx.from.id, {
+        state: "referral:create:score",
+        data: { maxUses },
+      });
+      await ctx.reply(ManagerTexts.enterReferralScore());
+      return;
+    }
+
+    // REFERRAL CODE CREATION — step 2: loyalty score
+    if (session.state === "referral:create:score") {
+      const score = parseInt(text, 10);
+      if (!Number.isFinite(score) || score < 0 || score > 10) {
+        await ctx.reply(ManagerTexts.invalidScore());
+        return;
+      }
+
+      const maxUses = (session.data?.maxUses as number | null) ?? null;
+
       const code = await createReferralCodeWithRetry(prisma, {
         createdByManagerId: manager.id,
         maxUses,
+        loyaltyScore: score,
         prefix: "MGR_",
         length: 6,
       });
@@ -429,7 +456,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     const answerCallback = async (options?: { text?: string; show_alert?: boolean }) => {
       if (!callbackAnswered) {
         callbackAnswered = true;
-        await ctx.answerCallbackQuery(options);
+        try {
+          await ctx.answerCallbackQuery(options);
+        } catch {
+          // Ignore stale/expired callback query errors
+        }
       }
     };
     
@@ -979,7 +1010,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const product = await prisma.product.findUnique({ where: { id: productId } });
 
       if (!product) {
-        await ctx.answerCallbackQuery({ text: "محصول یافت نشد" });
+        await answerCallback({ text: "محصول یافت نشد" });
         return;
       }
 
@@ -1119,7 +1150,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete"].includes(parts[2])) {
+    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore"].includes(parts[2])) {
       const userId = parseInt(parts[2]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
@@ -1129,9 +1160,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
 
       const orderCount = await prisma.order.count({ where: { userId } });
+      const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
+      const hasOverride = user.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral),
+        ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride),
         {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral),
@@ -1145,7 +1178,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
-        await ctx.answerCallbackQuery({ text: "کاربر یافت نشد" });
+        await answerCallback({ text: "کاربر یافت نشد" });
         return;
       }
 
@@ -1163,9 +1196,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       // Refresh user view
       const updated = await prisma.user.findUnique({ where: { id: userId } });
       const orderCount = await prisma.order.count({ where: { userId } });
+      const eScore = updated!.loyaltyScoreOverride ?? updated!.loyaltyScore;
+      const hasOvr = updated!.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral),
+        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral, eScore, hasOvr),
         {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.userActions(userId, updated!.isActive, updated!.canCreateReferral),
@@ -1197,9 +1232,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const updated = await prisma.user.findUnique({ where: { id: userId } });
       const orderCount = await prisma.order.count({ where: { userId } });
+      const eScore2 = updated!.loyaltyScoreOverride ?? updated!.loyaltyScore;
+      const hasOvr2 = updated!.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral),
+        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral, eScore2, hasOvr2),
         {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.userActions(userId, updated!.isActive, updated!.canCreateReferral),
@@ -1225,6 +1262,16 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral),
         }
       );
+      return;
+    }
+
+    // SET USER LOYALTY SCORE (override)
+    if (data.startsWith("mgr:user:setscore:")) {
+      const userId = parseInt(parts[3]);
+      managerSessions.set(ctx.from.id, { state: "user:setscore", data: { userId } });
+      await safeRender(ctx, ManagerTexts.enterUserScore(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
       return;
     }
 
@@ -1994,6 +2041,29 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         reply_markup: ManagerKeyboards.settingsMenu(
           !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
         ),
+      });
+      return;
+    }
+
+    // Handle user score override
+    if (session?.state === "user:setscore") {
+      const input = ctx.message.text.trim();
+      const score = parseInt(input, 10);
+
+      if (!Number.isFinite(score) || score < 0 || score > 10) {
+        await ctx.reply(ManagerTexts.invalidScore());
+        return;
+      }
+
+      const userId = session.data?.userId as number;
+      await prisma.user.update({
+        where: { id: userId },
+        data: { loyaltyScoreOverride: score },
+      });
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.userScoreUpdated(score), {
+        reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
     }

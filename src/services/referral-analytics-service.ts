@@ -7,6 +7,7 @@ export interface ReferralChainNode {
   depth: number;
   orderCount: number;
   orderTotal: number;
+  loyaltyScore: number;
   children: ReferralChainNode[];
 }
 
@@ -94,7 +95,7 @@ export class ReferralAnalyticsService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, username: true, firstName: true },
+      select: { id: true, username: true, firstName: true, loyaltyScore: true, loyaltyScoreOverride: true },
     });
     if (!user) return null;
 
@@ -123,6 +124,7 @@ export class ReferralAnalyticsService {
       depth,
       orderCount: orderAgg._count.id,
       orderTotal: orderAgg._sum.grandTotal ?? 0,
+      loyaltyScore: user.loyaltyScoreOverride ?? user.loyaltyScore,
       children: childNodes,
     };
   }
@@ -144,7 +146,7 @@ export class ReferralAnalyticsService {
  */
 export function formatReferralTree(node: ReferralChainNode, indent = ""): string {
   const label = node.username || node.firstName || `#${node.userId}`;
-  let text = `${indent}${indent ? "└ " : ""}${label} (${node.orderCount} سفارش · ${node.orderTotal} تومان)\n`;
+  let text = `${indent}${indent ? "└ " : ""}${label} ⭐${node.loyaltyScore} (${node.orderCount} سفارش · ${node.orderTotal} تومان)\n`;
   node.children.forEach((child, i) => {
     const isLast = i === node.children.length - 1;
     text += formatReferralTree(child, indent + (isLast ? "  " : "│ "));

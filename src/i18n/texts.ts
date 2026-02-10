@@ -210,8 +210,8 @@ export const ManagerTexts = {
   usersMenuTitle: () => "👥 *مدیریت کاربران*",
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
-  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${username || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\nتعداد سفارش: ${orderCount}`,
+  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean) =>
+    `*کاربر #${id}*\n\nنام کاربری: ${username || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\nتعداد سفارش: ${orderCount}`,
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,
   userUnblocked: (username: string | null) => `✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,
   userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی به ${username || 'کاربر'} داده شد.`,
@@ -219,6 +219,12 @@ export const ManagerTexts = {
   userDeleted: (username: string | null) => `🗑️ کاربر ${username || 'نامشخص'} حذف شد.`,
   userDeleteConfirm: (username: string | null) => `⚠️ آیا از حذف کاربر ${username || 'نامشخص'} مطمئن هستید؟ این عمل غیرقابل بازگشت است.`,
   enterSearchQuery: () => "نام کاربری یا شناسه تلگرام را وارد کنید:",
+  enterUserScore: () => "امتیاز جدید (۰ تا ۱۰) را وارد کنید:",
+  userScoreUpdated: (score: number) => `⭐ امتیاز کاربر به ${score} تغییر یافت.`,
+
+  // Loyalty Score
+  enterReferralScore: () => "⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربران این کد وارد کنید:",
+  invalidScore: () => "❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد.",
 
   // Courier Management
   couriersMenuTitle: () => "🚚 *مدیریت پیک‌ها*",

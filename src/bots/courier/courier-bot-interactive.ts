@@ -81,6 +81,11 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
   const { prisma, clientBot } = deps;
   const notificationService = new NotificationService({ prisma, clientBot });
 
+  // Global error handler to prevent crashes
+  bot.catch((err) => {
+    console.error("Courier bot error:", err.message || err);
+  });
+
   bot.command("start", async (ctx) => {
     const courier = await getCourier(ctx, prisma);
     if (!courier) {
