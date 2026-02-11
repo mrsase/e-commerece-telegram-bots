@@ -40,7 +40,7 @@ export const ClientKeyboards = {
     const kb = new InlineKeyboard();
     
     products.forEach((p) => {
-      kb.text(`${p.title} - ${p.price}`, `client:product:${p.id}`).row();
+      kb.text(`${p.title} - ${p.price}`, `client:product:${p.id}:${page}`).row();
     });
 
     // Pagination
@@ -56,17 +56,17 @@ export const ClientKeyboards = {
   },
 
   /** Single product view with quantity controls */
-  productView: (productId: number, currentQty: number = 1) => {
+  productView: (productId: number, currentQty: number = 1, page: number = 0) => {
     return new InlineKeyboard()
-      .text("➖", `client:qty:dec:${productId}`)
+      .text("➖", `client:qty:dec:${productId}:${page}`)
       .text(`${currentQty}`, "noop")
-      .text("➕", `client:qty:inc:${productId}`)
+      .text("➕", `client:qty:inc:${productId}:${page}`)
       .row()
-      .text("🛒 افزودن و ادامه خرید", `client:addtocart:${productId}:${currentQty}`)
+      .text("🛒 افزودن و ادامه خرید", `client:addtocart:${productId}:${currentQty}:${page}`)
       .row()
-      .text("✅ افزودن و پرداخت", `client:addandcheckout:${productId}:${currentQty}`)
+      .text("✅ افزودن و پرداخت", `client:addandcheckout:${productId}:${currentQty}:${page}`)
       .row()
-      .text("« بازگشت به محصولات", "client:products")
+      .text("« بازگشت به محصولات", `client:products:${page}`)
       .row()
       .text("💬 پشتیبانی", "client:support");
   },
