@@ -38,7 +38,7 @@ import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
 import { buildCartDisplay } from "../../utils/cart-display.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
-import { safeRender } from "../../utils/safe-reply.js";
+import { safeRender as safeRenderOriginal } from "../../utils/safe-reply.js";
 
 /**
  * Get or create user, checking referral status
@@ -135,6 +135,8 @@ async function processCheckout(
   prisma: PrismaClient,
   notificationService?: NotificationService,
   discountCode?: string | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  render: (text: string, options?: any) => Promise<any> = (t, o) => safeRenderOriginal(ctx, t, o)
 ): Promise<void> {
   const orderService = new OrderService(prisma);
   const discountService = new DiscountService(prisma);
@@ -146,7 +148,7 @@ async function processCheckout(
     });
 
     if (!cart) {
-      await safeRender(ctx, ClientTexts.checkoutError(), {
+      await render( ClientTexts.checkoutError(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
@@ -170,8 +172,7 @@ async function processCheckout(
       appliedDiscounts: discountResult.appliedDiscounts,
     });
 
-    await safeRender(
-      ctx,
+    await render(
       ClientTexts.orderSubmitted(result.orderId, result.grandTotal) + "\n\n" + ClientTexts.orderPendingApproval(),
       { reply_markup: ClientKeyboards.mainMenu() }
     );
@@ -181,12 +182,12 @@ async function processCheckout(
     await notificationService?.notifyManagersNewOrder(result.orderId, userLabel, result.grandTotal);
   } catch (error) {
     if (error instanceof InsufficientStockError) {
-      await safeRender(ctx, ClientTexts.outOfStock(), {
+      await render( ClientTexts.outOfStock(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
     }
-    await safeRender(ctx, ClientTexts.checkoutError(), {
+    await render( ClientTexts.checkoutError(), {
       reply_markup: ClientKeyboards.mainMenu(),
     });
   }
@@ -350,6 +351,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           where: { userId: user.id, state: CartState.ACTIVE },
         });
         if (cart) {
+          // Called from message:text, so use default render (no callback answer)
           await processCheckout(ctx, user, cart.id, prisma, notificationService);
         }
         return;
@@ -585,20 +587,24 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       }
     };
     
-    // Answer immediately for responsive UX (will be skipped if answered later with specific text)
-    await answerCallback();
+    // Helper to answer callback and render
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const render = async (text: string, options?: any) => {
+      await answerCallback();
+      return safeRenderOriginal(ctx, text, options);
+    };
 
     // Get user
     const { user, needsReferral } = await getOrCreateUser(ctx, prisma);
     
     if (!user || !user.isActive) {
-      await safeRender(ctx, ClientTexts.userBlocked());
+      await render(ClientTexts.userBlocked());
       return;
     }
 
     if (needsReferral && !data.startsWith("noop")) {
       userSessions.set(ctx.from.id, { state: "awaiting_referral" });
-      await safeRender(ctx, ClientTexts.welcomeNewUser());
+      await render(ClientTexts.welcomeNewUser());
       return;
     }
 
@@ -607,7 +613,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // MAIN MENU
     if (data === "client:menu") {
-      await safeRender(ctx, ClientTexts.welcome(), {
+      await render(ClientTexts.welcome(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
@@ -629,14 +635,14 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       ]);
 
       if (products.length === 0) {
-        await safeRender(ctx, ClientTexts.noProductsAvailable(), {
+        await render( ClientTexts.noProductsAvailable(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await safeRender(ctx, ClientTexts.productsHeader(), {
+      await render( ClientTexts.productsHeader(), {
         reply_markup: ClientKeyboards.productList(products, page, totalPages),
       });
       return;
@@ -645,10 +651,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     // VIEW SINGLE PRODUCT
     if (data.startsWith("client:product:") && !data.includes("qty")) {
       const productId = parseInt(parts[2]);
+      const page = parts[3] ? parseInt(parts[3]) : 0;
       const product = await prisma.product.findUnique({ where: { id: productId } });
 
       if (!product) {
-        await safeRender(ctx, ClientTexts.productNotFound(), {
+        await render( ClientTexts.productNotFound(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -671,12 +678,12 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         await ctx.replyWithPhoto(product.photoFileId, {
           caption: text,
           parse_mode: "Markdown",
-          reply_markup: ClientKeyboards.productView(productId, 1),
+          reply_markup: ClientKeyboards.productView(productId, 1, page),
         });
       } else {
-        await safeRender(ctx, text, {
+        await render( text, {
           parse_mode: "Markdown",
-          reply_markup: ClientKeyboards.productView(productId, 1),
+          reply_markup: ClientKeyboards.productView(productId, 1, page),
         });
       }
       return;
@@ -686,6 +693,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     if (data.startsWith("client:qty:")) {
       const action = parts[2]; // inc or dec
       const productId = parseInt(parts[3]);
+      const page = parts[4] ? parseInt(parts[4]) : 0;
       const session = userSessions.get(ctx.from.id) || { state: "viewing_product", selectedQty: 1 };
       let qty = session.selectedQty || 1;
 
@@ -697,7 +705,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       // Update keyboard
       try {
         await ctx.editMessageReplyMarkup({
-          reply_markup: ClientKeyboards.productView(productId, qty),
+          reply_markup: ClientKeyboards.productView(productId, qty, page),
         });
       } catch {
         // Message might be a photo, try different approach
@@ -709,6 +717,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     if (data.startsWith("client:addtocart:")) {
       const productId = parseInt(parts[2]);
       const qty = parseInt(parts[3]);
+      const page = parts[4] ? parseInt(parts[4]) : 0;
 
       const product = await prisma.product.findUnique({ where: { id: productId } });
       if (!product) {
@@ -756,17 +765,19 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         show_alert: true,
       });
 
-      // Navigate back to products list
+      // Navigate back to products list (with preserved page)
+      const pageSize = 5;
       const products = await prisma.product.findMany({
         where: { isActive: true },
         orderBy: { id: "desc" },
-        take: 5,
+        skip: page * pageSize,
+        take: pageSize,
       });
       const total = await prisma.product.count({ where: { isActive: true } });
-      const totalPages = Math.ceil(total / 5);
+      const totalPages = Math.ceil(total / pageSize);
 
-      await safeRender(ctx, ClientTexts.productsHeader(), {
-        reply_markup: ClientKeyboards.productList(products, 0, totalPages),
+      await render( ClientTexts.productsHeader(), {
+        reply_markup: ClientKeyboards.productList(products, page, totalPages),
       });
       return;
     }
@@ -775,6 +786,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     if (data.startsWith("client:addandcheckout:")) {
       const productId = parseInt(parts[2]);
       const qty = parseInt(parts[3]);
+      // page is parts[4], but not used here since we go to cart/checkout
 
       const product = await prisma.product.findUnique({ where: { id: productId } });
       if (!product) {
@@ -829,7 +841,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!updatedCart || updatedCart.items.length === 0) {
-        await safeRender(ctx, ClientTexts.cartEmpty(), {
+        await render( ClientTexts.cartEmpty(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -843,7 +855,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         currency: item.product.currency,
       })));
 
-      await safeRender(ctx, display.text, {
+      await render( display.text, {
         reply_markup: ClientKeyboards.cartView(display.items),
       });
       return;
@@ -861,7 +873,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!cart || cart.items.length === 0) {
-        await safeRender(ctx, ClientTexts.cartEmpty(), {
+        await render( ClientTexts.cartEmpty(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -875,7 +887,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         currency: item.product.currency,
       })));
 
-      await safeRender(ctx, display.text, {
+      await render( display.text, {
         reply_markup: ClientKeyboards.cartView(display.items),
       });
       return;
@@ -905,7 +917,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!updatedCart || updatedCart.items.length === 0) {
-        await safeRender(ctx, ClientTexts.cartEmpty(), {
+        await render( ClientTexts.cartEmpty(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -919,7 +931,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         currency: item.product.currency,
       })));
 
-      await safeRender(ctx, display.text, {
+      await render( display.text, {
         reply_markup: ClientKeyboards.cartView(display.items),
       });
       return;
@@ -935,7 +947,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
       }
 
-      await safeRender(ctx, ClientTexts.cartCleared(), {
+      await render( ClientTexts.cartCleared(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
@@ -949,7 +961,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!cart || cart.items.length === 0) {
-        await safeRender(ctx, ClientTexts.cartEmpty(), {
+        await render( ClientTexts.cartEmpty(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -999,7 +1011,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       discountKb.text("⏭️ ادامه بدون کد تخفیف", `client:checkout:finalize:${cart.id}`).row();
       discountKb.text("❌ انصراف", "client:checkout:cancel");
 
-      await safeRender(ctx, "آیا کد تخفیف دارید؟", {
+      await render( "آیا کد تخفیف دارید؟", {
         reply_markup: discountKb,
       });
       return;
@@ -1008,7 +1020,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     // DISCOUNT CODE PROMPT
     if (data === "client:checkout:discount") {
       userSessions.set(ctx.from.id, { state: "checkout_discount" });
-      await safeRender(ctx, "🎟️ لطفاً کد تخفیف خود را وارد کنید:\n\nبرای انصراف /skip را ارسال کنید.");
+      await render( "🎟️ لطفاً کد تخفیف خود را وارد کنید:\n\nبرای انصراف /skip را ارسال کنید.");
       return;
     }
 
@@ -1016,14 +1028,14 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     if (data.startsWith("client:checkout:finalize:")) {
       const cartId = parseInt(parts[3]);
       const discountCode = parts[4] || null; // optional discount code passed via callback
-      await processCheckout(ctx, user, cartId, prisma, notificationService, discountCode);
+      await processCheckout(ctx, user, cartId, prisma, notificationService, discountCode, render);
       return;
     }
 
     // CANCEL CHECKOUT
     if (data === "client:checkout:cancel") {
       userSessions.delete(ctx.from.id);
-      await safeRender(ctx, ClientTexts.cancelCheckout(), {
+      await render( ClientTexts.cancelCheckout(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
@@ -1038,7 +1050,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (orders.length === 0) {
-        await safeRender(ctx, ClientTexts.noOrders(), {
+        await render( ClientTexts.noOrders(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -1056,7 +1068,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
       kb.text("« بازگشت به منو", "client:menu");
 
-      await safeRender(ctx, text, {
+      await render( text, {
         reply_markup: kb,
       });
       return;
@@ -1074,7 +1086,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       if (!order || order.userId !== user.id) {
-        await safeRender(ctx, "سفارش یافت نشد.", {
+        await render( "سفارش یافت نشد.", {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
@@ -1117,7 +1129,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       detailKb.text("« بازگشت به سفارش‌ها", "client:orders").row();
       detailKb.text("« بازگشت به منو", "client:menu");
 
-      await safeRender(ctx, detailText, {
+      await render( detailText, {
         parse_mode: "Markdown",
         reply_markup: detailKb,
       });
@@ -1173,7 +1185,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         },
       });
 
-      await safeRender(ctx, `✅ سفارش #${orderId} لغو شد.`, {
+      await render( `✅ سفارش #${orderId} لغو شد.`, {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
@@ -1197,7 +1209,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       profileKb.text("🗺️ ویرایش موقعیت", "client:profile:edit:location").row();
       profileKb.text("« بازگشت به منو", "client:menu");
 
-      await safeRender(ctx, profileText, {
+      await render( profileText, {
         parse_mode: "Markdown",
         reply_markup: profileKb,
       });
@@ -1219,7 +1231,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     // EDIT ADDRESS
     if (data === "client:profile:edit:address") {
       userSessions.set(ctx.from.id, { state: "checkout_address" });
-      await safeRender(ctx, "📍 آدرس جدید خود را ارسال کنید:");
+      await render( "📍 آدرس جدید خود را ارسال کنید:");
       return;
     }
 
@@ -1260,7 +1272,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
       const canCreate = freshUser?.canCreateReferral ?? false;
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.referralMenu(referralCodes.length > 0, canCreate),
       });
@@ -1297,7 +1309,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         maxUses: 5,
       });
 
-      await safeRender(ctx, ClientTexts.referralCodeGenerated(code), {
+      await render( ClientTexts.referralCodeGenerated(code), {
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.backToMenu(),
       });
@@ -1306,7 +1318,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // HELP
     if (data === "client:help") {
-      await safeRender(ctx, ClientTexts.helpMessage(), {
+      await render( ClientTexts.helpMessage(), {
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.backToMenu(),
       });
@@ -1351,7 +1363,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         supportConversationId: conversation.id,
       });
 
-      await safeRender(ctx, supportText, {
+      await render( supportText, {
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.supportActions(conversation.id),
       });
@@ -1367,7 +1379,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       userSessions.delete(ctx.from.id);
-      await safeRender(ctx, ClientTexts.supportClosed(), {
+      await render( ClientTexts.supportClosed(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;

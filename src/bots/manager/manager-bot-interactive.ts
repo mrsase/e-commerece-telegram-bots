@@ -48,7 +48,7 @@ import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
 import { ReferralAnalyticsService, formatReferralTree } from "../../services/referral-analytics-service.js";
-import { safeRender } from "../../utils/safe-reply.js";
+import { safeRender as safeRenderOriginal } from "../../utils/safe-reply.js";
 import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { cleanupChannelForOrder } from "../../services/channel-cleanup-service.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
@@ -116,12 +116,21 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     const text = ctx.message.text.trim();
 
+    // CANCEL HANDLER
+    if (text === "/cancel") {
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.actionCancelled(), {
+        reply_markup: ManagerKeyboards.mainMenu(),
+      });
+      return;
+    }
+
     // PRODUCT CREATION FLOW
     if (session.state === "product:add:title") {
       session.data = { ...session.data, title: text };
       session.state = "product:add:description";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.enterProductDescription());
+      await ctx.reply(ManagerTexts.enterProductDescription() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -129,7 +138,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       session.data = { ...session.data, description: text === "/skip" ? null : text };
       session.state = "product:add:price";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.enterProductPrice());
+      await ctx.reply(ManagerTexts.enterProductPrice() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -142,7 +151,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       session.data = { ...session.data, price };
       session.state = "product:add:stock";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.enterProductStock());
+      await ctx.reply(ManagerTexts.enterProductStock() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -155,7 +164,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       session.data = { ...session.data, stock };
       session.state = "product:add:image";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.sendProductImage());
+      await ctx.reply(ManagerTexts.sendProductImage() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -627,7 +636,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    await answerCallback();
+    // Helper to answer callback and render
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const render = async (text: string, options?: any) => {
+      await answerCallback();
+      return safeRenderOriginal(ctx, text, options);
+    };
 
     const data = ctx.callbackQuery.data;
     const parts = data.split(":");
@@ -638,7 +652,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         where: { status: OrderStatus.AWAITING_MANAGER_APPROVAL },
       });
 
-      await safeRender(ctx, 
+      await render(
         `${ManagerTexts.mainMenuTitle()}\n\n📋 سفارش‌های در انتظار: ${pendingCount}`,
         {
           parse_mode: "Markdown",
@@ -668,14 +682,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (orders.length === 0) {
-        await safeRender(ctx, ManagerTexts.noPendingOrders(), {
+        await render( ManagerTexts.noPendingOrders(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
+      await render( ManagerTexts.pendingOrdersHeader(), {
         reply_markup: ManagerKeyboards.orderList(orders, page, totalPages),
       });
       return;
@@ -893,11 +907,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         });
 
         if (orders.length === 0) {
-          await safeRender(ctx, ManagerTexts.noPendingOrders(), {
+          await render( ManagerTexts.noPendingOrders(), {
             reply_markup: ManagerKeyboards.backToMenu(),
           });
         } else {
-          await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
+          await render( ManagerTexts.pendingOrdersHeader(), {
             reply_markup: ManagerKeyboards.orderList(orders, 0, 1),
           });
         }
@@ -956,11 +970,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       if (orders.length === 0) {
-        await safeRender(ctx, ManagerTexts.noPendingOrders(), {
+        await render( ManagerTexts.noPendingOrders(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
       } else {
-        await safeRender(ctx, ManagerTexts.pendingOrdersHeader(), {
+        await render( ManagerTexts.pendingOrdersHeader(), {
           reply_markup: ManagerKeyboards.orderList(orders, 0, 1),
         });
       }
@@ -1038,7 +1052,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
       detailKb.text("« سفارش‌ها", "mgr:orders").text("« منو", "mgr:menu");
 
-      await safeRender(ctx, detailText, {
+      await render( detailText, {
         parse_mode: "Markdown",
         reply_markup: detailKb,
       });
@@ -1109,7 +1123,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       allKb.text("« منو", "mgr:menu");
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: allKb,
       });
@@ -1147,7 +1161,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       userKb.text("« کاربران", "mgr:users").text("« منو", "mgr:menu");
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: userKb,
       });
@@ -1187,7 +1201,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         text += `  ${u.username || u.firstName || `#${u.id}`}\n`;
       });
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.backToMenu(),
       });
@@ -1198,7 +1212,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // PRODUCTS
     // ===========================================
     if (data === "mgr:products") {
-      await safeRender(ctx, ManagerTexts.productsMenuTitle(), {
+      await render( ManagerTexts.productsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productManagement(),
       });
@@ -1219,14 +1233,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (products.length === 0) {
-        await safeRender(ctx, ManagerTexts.noProducts(), {
+        await render( ManagerTexts.noProducts(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await safeRender(ctx, ManagerTexts.productListTitle(), {
+      await render( ManagerTexts.productListTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productList(products, page, totalPages),
       });
@@ -1235,7 +1249,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:products:add") {
       managerSessions.set(ctx.from.id, { state: "product:add:title", data: {} });
-      await safeRender(ctx, ManagerTexts.enterProductTitle());
+      await render( ManagerTexts.enterProductTitle() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -1256,7 +1270,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         `🖼️ تصویر: ${product.photoFileId ? 'دارد' : 'ندارد'}\n` +
         `وضعیت: ${product.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productEdit(productId, !!product.photoFileId),
       });
@@ -1283,7 +1297,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           `🖼️ تصویر: ندارد\n` +
           `وضعیت: ${product!.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
-        await safeRender(ctx, text, {
+        await render( text, {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.productEdit(productId, false),
         });
@@ -1296,11 +1310,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         data: { productId },
       });
 
-      if (field === "title") await safeRender(ctx, ManagerTexts.enterProductTitle());
-      else if (field === "desc") await safeRender(ctx, ManagerTexts.enterProductDescription());
-      else if (field === "price") await safeRender(ctx, ManagerTexts.enterProductPrice());
-      else if (field === "stock") await safeRender(ctx, ManagerTexts.enterProductStock());
-      else if (field === "image") await safeRender(ctx, ManagerTexts.sendProductImage());
+      if (field === "title") await render( ManagerTexts.enterProductTitle() + "\n(برای انصراف /cancel را ارسال کنید)");
+      else if (field === "desc") await render( ManagerTexts.enterProductDescription() + "\n(برای انصراف /cancel را ارسال کنید)");
+      else if (field === "price") await render( ManagerTexts.enterProductPrice() + "\n(برای انصراف /cancel را ارسال کنید)");
+      else if (field === "stock") await render( ManagerTexts.enterProductStock() + "\n(برای انصراف /cancel را ارسال کنید)");
+      else if (field === "image") await render( ManagerTexts.sendProductImage() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -1332,7 +1346,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         `🖼️ تصویر: ${updated!.photoFileId ? 'دارد' : 'ندارد'}\n` +
         `وضعیت: ${updated!.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productEdit(productId, !!updated!.photoFileId),
       });
@@ -1343,7 +1357,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // USERS
     // ===========================================
     if (data === "mgr:users") {
-      await safeRender(ctx, ManagerTexts.usersMenuTitle(), {
+      await render( ManagerTexts.usersMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.userManagement(),
       });
@@ -1364,14 +1378,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (users.length === 0) {
-        await safeRender(ctx, ManagerTexts.noUsers(), {
+        await render( ManagerTexts.noUsers(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await safeRender(ctx, ManagerTexts.userListTitle(), {
+      await render( ManagerTexts.userListTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.userList(users, page, totalPages),
       });
@@ -1380,7 +1394,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:users:search") {
       managerSessions.set(ctx.from.id, { state: "user:search" });
-      await safeRender(ctx, ManagerTexts.enterSearchQuery());
+      await render( ManagerTexts.enterSearchQuery() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -1397,7 +1411,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
       const hasOverride = user.loyaltyScoreOverride != null;
 
-      await safeRender(ctx, 
+      await render(
         ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride),
         {
           parse_mode: "Markdown",
@@ -1433,7 +1447,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const eScore = updated!.loyaltyScoreOverride ?? updated!.loyaltyScore;
       const hasOvr = updated!.loyaltyScoreOverride != null;
 
-      await safeRender(ctx, 
+      await render(
         ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral, eScore, hasOvr),
         {
           parse_mode: "Markdown",
@@ -1469,7 +1483,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const eScore2 = updated!.loyaltyScoreOverride ?? updated!.loyaltyScore;
       const hasOvr2 = updated!.loyaltyScoreOverride != null;
 
-      await safeRender(ctx, 
+      await render(
         ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral, eScore2, hasOvr2),
         {
           parse_mode: "Markdown",
@@ -1489,7 +1503,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await safeRender(ctx,
+      await render(
         ManagerTexts.userContactInfo(user.phone, user.address, user.locationLat, user.locationLng),
         {
           parse_mode: "Markdown",
@@ -1503,7 +1517,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data.startsWith("mgr:user:setscore:")) {
       const userId = parseInt(parts[3]);
       managerSessions.set(ctx.from.id, { state: "user:setscore", data: { userId } });
-      await safeRender(ctx, ManagerTexts.enterUserScore(), {
+      await render( ManagerTexts.enterUserScore() + "\n(برای انصراف /cancel را ارسال کنید)", {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -1537,7 +1551,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       const userLabel = user.username || user.firstName || `#${user.id}`;
-      await safeRender(ctx, `💬 پیام به ${userLabel}:\n\nمتن پیام خود را ارسال کنید:`, {
+      await render( `💬 پیام به ${userLabel}:\n\nمتن پیام خود را ارسال کنید:`, {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -1567,7 +1581,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       await answerCallback({ text: ManagerTexts.userDeleted(user.username), show_alert: true });
 
-      await safeRender(ctx, ManagerTexts.userDeleted(user.username), {
+      await render( ManagerTexts.userDeleted(user.username), {
         reply_markup: ManagerKeyboards.userManagement(),
       });
       return;
@@ -1577,7 +1591,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // COURIERS
     // ===========================================
     if (data === "mgr:couriers") {
-      await safeRender(ctx, ManagerTexts.couriersMenuTitle(), {
+      await render( ManagerTexts.couriersMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.courierManagement(),
       });
@@ -1590,13 +1604,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       if (couriers.length === 0) {
-        await safeRender(ctx, ManagerTexts.noCouriers(), {
+        await render( ManagerTexts.noCouriers(), {
           reply_markup: ManagerKeyboards.courierManagement(),
         });
         return;
       }
 
-      await safeRender(ctx, ManagerTexts.courierListTitle(), {
+      await render( ManagerTexts.courierListTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.courierList(couriers),
       });
@@ -1605,7 +1619,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:couriers:add") {
       managerSessions.set(ctx.from.id, { state: "courier:add" });
-      await safeRender(ctx, ManagerTexts.enterCourierTgId(), {
+      await render( ManagerTexts.enterCourierTgId() + "\n(برای انصراف /cancel را ارسال کنید)", {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -1620,7 +1634,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await safeRender(ctx,
+      await render(
         ManagerTexts.courierDetails(courier.id, courier.username, courier.tgUserId, courier.isActive),
         {
           parse_mode: "Markdown",
@@ -1649,7 +1663,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         show_alert: true,
       });
 
-      await safeRender(ctx,
+      await render(
         ManagerTexts.courierDetails(updated.id, updated.username, updated.tgUserId, updated.isActive),
         {
           parse_mode: "Markdown",
@@ -1678,11 +1692,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       // Back to courier list
       const couriers = await prisma.courier.findMany({ orderBy: { id: "desc" } });
       if (couriers.length === 0) {
-        await safeRender(ctx, ManagerTexts.noCouriers(), {
+        await render( ManagerTexts.noCouriers(), {
           reply_markup: ManagerKeyboards.courierManagement(),
         });
       } else {
-        await safeRender(ctx, ManagerTexts.courierListTitle(), {
+        await render( ManagerTexts.courierListTitle(), {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.courierList(couriers),
         });
@@ -1694,7 +1708,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // REFERRALS
     // ===========================================
     if (data === "mgr:referrals") {
-      await safeRender(ctx, ManagerTexts.referralsMenuTitle(), {
+      await render( ManagerTexts.referralsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.referralManagement(),
       });
@@ -1703,7 +1717,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:referrals:create") {
       managerSessions.set(ctx.from.id, { state: "referral:create:maxuses" });
-      await safeRender(ctx, ManagerTexts.enterReferralMaxUses());
+      await render( ManagerTexts.enterReferralMaxUses() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -1718,7 +1732,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       if (codes.length === 0) {
-        await safeRender(ctx, ManagerTexts.noReferralCodes(), {
+        await render( ManagerTexts.noReferralCodes(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
@@ -1731,7 +1745,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         text += `${status} \`${c.code}\` - توسط ${creator} - ${c.usedCount}/${c.maxUses || '∞'} استفاده\n`;
       });
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.backToMenu(),
       });
@@ -1742,7 +1756,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ANALYTICS
     // ===========================================
     if (data === "mgr:analytics") {
-      await safeRender(ctx, ManagerTexts.analyticsMenuTitle(), {
+      await render( ManagerTexts.analyticsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.analyticsMenu(),
       });
@@ -1762,7 +1776,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       const revenue = revenueResult._sum.grandTotal || 0;
 
-      await safeRender(ctx, 
+      await render(
         ManagerTexts.orderAnalytics(total, pending, completed, revenue),
         {
           parse_mode: "Markdown",
@@ -1782,7 +1796,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         prisma.user.count({ where: { createdAt: { gte: today } } }),
       ]);
 
-      await safeRender(ctx, 
+      await render(
         ManagerTexts.userAnalytics(total, active, newToday),
         {
           parse_mode: "Markdown",
@@ -1802,7 +1816,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         where: { isActive: true, stock: { lt: 10, not: null } },
       });
 
-      await safeRender(ctx, 
+      await render(
         ManagerTexts.productAnalytics(total, active, lowStock),
         {
           parse_mode: "Markdown",
@@ -1831,7 +1845,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       refKb.text("🌳 مشاهده درخت معرفی‌ها", "mgr:analytics:referraltree").row();
       refKb.text("« بازگشت به منو", "mgr:menu");
 
-      await safeRender(ctx, 
+      await render(
         ManagerTexts.referralAnalytics(
           totalCodes,
           totalUses,
@@ -1865,7 +1879,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         text = text.substring(0, 3950) + "\n\n... (ادامه دارد)";
       }
 
-      await safeRender(ctx, text, {
+      await render( text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.backToMenu(),
       });
@@ -1894,14 +1908,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (receipts.length === 0) {
-        await safeRender(ctx, ManagerTexts.noPendingReceipts(), {
+        await render( ManagerTexts.noPendingReceipts(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await safeRender(ctx, ManagerTexts.pendingReceiptsTitle(), {
+      await render( ManagerTexts.pendingReceiptsTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.receiptList(receipts, page, totalPages),
       });
@@ -1954,7 +1968,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
       if (!receiptSent) {
         // Fallback: show text only
-        await safeRender(ctx, text + "\n\n⚠️ تصویر رسید قابل نمایش نیست.", {
+        await render( text + "\n\n⚠️ تصویر رسید قابل نمایش نیست.", {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.receiptActions(receiptId),
         });
@@ -2063,7 +2077,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         data: { receiptId } 
       });
       await ctx.deleteMessage();
-      await ctx.reply(ManagerTexts.enterRejectReason());
+      await ctx.reply(ManagerTexts.enterRejectReason() + "\n(برای انصراف /cancel را ارسال کنید)");
       return;
     }
 
@@ -2088,7 +2102,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       if (conversations.length === 0) {
-        await safeRender(ctx, ManagerTexts.noSupportConversations(), {
+        await render( ManagerTexts.noSupportConversations(), {
           reply_markup: ManagerKeyboards.backToMenu(),
         });
         return;
@@ -2101,7 +2115,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         lastMessageAtLabel: c.lastMessageAt.toISOString().split("T")[0],
       }));
 
-      await safeRender(ctx, ManagerTexts.supportInboxTitle(), {
+      await render( ManagerTexts.supportInboxTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.supportInbox(items, page, totalPages),
       });
@@ -2140,7 +2154,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         convText += "هنوز پیامی ارسال نشده.\n";
       }
 
-      await safeRender(ctx, convText, {
+      await render( convText, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.supportConversationActions(convId),
       });
@@ -2154,7 +2168,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         state: "support:reply",
         data: { conversationId: convId },
       });
-      await safeRender(ctx, ManagerTexts.supportAskReply(), {
+      await render( ManagerTexts.supportAskReply() + "\n(برای انصراف /cancel را ارسال کنید)", {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -2178,7 +2192,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         await notificationService.notifyClientSupportClosed(conversation.user.tgUserId);
       }
 
-      await safeRender(ctx, ManagerTexts.supportConversationClosed(), {
+      await render( ManagerTexts.supportConversationClosed(), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -2193,7 +2207,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const payMethod = await settingsService.getPaymentMethod();
       const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
 
-      await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, expiryMin, payMethod), {
+      await render( ManagerTexts.settingsMenuTitle(imageStatus, expiryMin, payMethod), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId, payMethod),
       });
@@ -2202,7 +2216,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:settings:image") {
       managerSessions.set(ctx.from.id, { state: "settings:image" });
-      await safeRender(ctx, ManagerTexts.settingsImageAsk(), {
+      await render( ManagerTexts.settingsImageAsk() + "\n(برای انصراف /cancel را ارسال کنید)", {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -2214,7 +2228,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const expiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
       const payMethod = await settingsService.getPaymentMethod();
-      await safeRender(ctx, ManagerTexts.settingsMenuTitle("❌ تنظیم نشده", expiryMin, payMethod), {
+      await render( ManagerTexts.settingsMenuTitle("❌ تنظیم نشده", expiryMin, payMethod), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.settingsMenu(false, payMethod),
       });
@@ -2235,7 +2249,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
       const expiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
       const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
-      await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, expiryMin, newMethod), {
+      await render( ManagerTexts.settingsMenuTitle(imageStatus, expiryMin, newMethod), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId, newMethod),
       });
@@ -2244,7 +2258,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:settings:expiry") {
       managerSessions.set(ctx.from.id, { state: "settings:expiry" });
-      await safeRender(ctx, ManagerTexts.settingsExpiryAsk(), {
+      await render( ManagerTexts.settingsExpiryAsk() + "\n(برای انصراف /cancel را ارسال کنید)", {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;
@@ -2252,7 +2266,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // HELP
     if (data === "mgr:help") {
-      await safeRender(ctx, ManagerTexts.helpMessage(), {
+      await render( ManagerTexts.helpMessage(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.backToMenu(),
       });
