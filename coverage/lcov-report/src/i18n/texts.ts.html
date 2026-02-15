@@ -1,0 +1,1222 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for src/i18n/texts.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../prettify.css" />
+    <link rel="stylesheet" href="../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../index.html">All files</a> / <a href="index.html">src/i18n</a> texts.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">12.83% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>24/187</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>0/65</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">10.91% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>19/174</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">12.97% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>24/185</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a>
+<a name='L204'></a><a href='#L204'>204</a>
+<a name='L205'></a><a href='#L205'>205</a>
+<a name='L206'></a><a href='#L206'>206</a>
+<a name='L207'></a><a href='#L207'>207</a>
+<a name='L208'></a><a href='#L208'>208</a>
+<a name='L209'></a><a href='#L209'>209</a>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a>
+<a name='L226'></a><a href='#L226'>226</a>
+<a name='L227'></a><a href='#L227'>227</a>
+<a name='L228'></a><a href='#L228'>228</a>
+<a name='L229'></a><a href='#L229'>229</a>
+<a name='L230'></a><a href='#L230'>230</a>
+<a name='L231'></a><a href='#L231'>231</a>
+<a name='L232'></a><a href='#L232'>232</a>
+<a name='L233'></a><a href='#L233'>233</a>
+<a name='L234'></a><a href='#L234'>234</a>
+<a name='L235'></a><a href='#L235'>235</a>
+<a name='L236'></a><a href='#L236'>236</a>
+<a name='L237'></a><a href='#L237'>237</a>
+<a name='L238'></a><a href='#L238'>238</a>
+<a name='L239'></a><a href='#L239'>239</a>
+<a name='L240'></a><a href='#L240'>240</a>
+<a name='L241'></a><a href='#L241'>241</a>
+<a name='L242'></a><a href='#L242'>242</a>
+<a name='L243'></a><a href='#L243'>243</a>
+<a name='L244'></a><a href='#L244'>244</a>
+<a name='L245'></a><a href='#L245'>245</a>
+<a name='L246'></a><a href='#L246'>246</a>
+<a name='L247'></a><a href='#L247'>247</a>
+<a name='L248'></a><a href='#L248'>248</a>
+<a name='L249'></a><a href='#L249'>249</a>
+<a name='L250'></a><a href='#L250'>250</a>
+<a name='L251'></a><a href='#L251'>251</a>
+<a name='L252'></a><a href='#L252'>252</a>
+<a name='L253'></a><a href='#L253'>253</a>
+<a name='L254'></a><a href='#L254'>254</a>
+<a name='L255'></a><a href='#L255'>255</a>
+<a name='L256'></a><a href='#L256'>256</a>
+<a name='L257'></a><a href='#L257'>257</a>
+<a name='L258'></a><a href='#L258'>258</a>
+<a name='L259'></a><a href='#L259'>259</a>
+<a name='L260'></a><a href='#L260'>260</a>
+<a name='L261'></a><a href='#L261'>261</a>
+<a name='L262'></a><a href='#L262'>262</a>
+<a name='L263'></a><a href='#L263'>263</a>
+<a name='L264'></a><a href='#L264'>264</a>
+<a name='L265'></a><a href='#L265'>265</a>
+<a name='L266'></a><a href='#L266'>266</a>
+<a name='L267'></a><a href='#L267'>267</a>
+<a name='L268'></a><a href='#L268'>268</a>
+<a name='L269'></a><a href='#L269'>269</a>
+<a name='L270'></a><a href='#L270'>270</a>
+<a name='L271'></a><a href='#L271'>271</a>
+<a name='L272'></a><a href='#L272'>272</a>
+<a name='L273'></a><a href='#L273'>273</a>
+<a name='L274'></a><a href='#L274'>274</a>
+<a name='L275'></a><a href='#L275'>275</a>
+<a name='L276'></a><a href='#L276'>276</a>
+<a name='L277'></a><a href='#L277'>277</a>
+<a name='L278'></a><a href='#L278'>278</a>
+<a name='L279'></a><a href='#L279'>279</a>
+<a name='L280'></a><a href='#L280'>280</a>
+<a name='L281'></a><a href='#L281'>281</a>
+<a name='L282'></a><a href='#L282'>282</a>
+<a name='L283'></a><a href='#L283'>283</a>
+<a name='L284'></a><a href='#L284'>284</a>
+<a name='L285'></a><a href='#L285'>285</a>
+<a name='L286'></a><a href='#L286'>286</a>
+<a name='L287'></a><a href='#L287'>287</a>
+<a name='L288'></a><a href='#L288'>288</a>
+<a name='L289'></a><a href='#L289'>289</a>
+<a name='L290'></a><a href='#L290'>290</a>
+<a name='L291'></a><a href='#L291'>291</a>
+<a name='L292'></a><a href='#L292'>292</a>
+<a name='L293'></a><a href='#L293'>293</a>
+<a name='L294'></a><a href='#L294'>294</a>
+<a name='L295'></a><a href='#L295'>295</a>
+<a name='L296'></a><a href='#L296'>296</a>
+<a name='L297'></a><a href='#L297'>297</a>
+<a name='L298'></a><a href='#L298'>298</a>
+<a name='L299'></a><a href='#L299'>299</a>
+<a name='L300'></a><a href='#L300'>300</a>
+<a name='L301'></a><a href='#L301'>301</a>
+<a name='L302'></a><a href='#L302'>302</a>
+<a name='L303'></a><a href='#L303'>303</a>
+<a name='L304'></a><a href='#L304'>304</a>
+<a name='L305'></a><a href='#L305'>305</a>
+<a name='L306'></a><a href='#L306'>306</a>
+<a name='L307'></a><a href='#L307'>307</a>
+<a name='L308'></a><a href='#L308'>308</a>
+<a name='L309'></a><a href='#L309'>309</a>
+<a name='L310'></a><a href='#L310'>310</a>
+<a name='L311'></a><a href='#L311'>311</a>
+<a name='L312'></a><a href='#L312'>312</a>
+<a name='L313'></a><a href='#L313'>313</a>
+<a name='L314'></a><a href='#L314'>314</a>
+<a name='L315'></a><a href='#L315'>315</a>
+<a name='L316'></a><a href='#L316'>316</a>
+<a name='L317'></a><a href='#L317'>317</a>
+<a name='L318'></a><a href='#L318'>318</a>
+<a name='L319'></a><a href='#L319'>319</a>
+<a name='L320'></a><a href='#L320'>320</a>
+<a name='L321'></a><a href='#L321'>321</a>
+<a name='L322'></a><a href='#L322'>322</a>
+<a name='L323'></a><a href='#L323'>323</a>
+<a name='L324'></a><a href='#L324'>324</a>
+<a name='L325'></a><a href='#L325'>325</a>
+<a name='L326'></a><a href='#L326'>326</a>
+<a name='L327'></a><a href='#L327'>327</a>
+<a name='L328'></a><a href='#L328'>328</a>
+<a name='L329'></a><a href='#L329'>329</a>
+<a name='L330'></a><a href='#L330'>330</a>
+<a name='L331'></a><a href='#L331'>331</a>
+<a name='L332'></a><a href='#L332'>332</a>
+<a name='L333'></a><a href='#L333'>333</a>
+<a name='L334'></a><a href='#L334'>334</a>
+<a name='L335'></a><a href='#L335'>335</a>
+<a name='L336'></a><a href='#L336'>336</a>
+<a name='L337'></a><a href='#L337'>337</a>
+<a name='L338'></a><a href='#L338'>338</a>
+<a name='L339'></a><a href='#L339'>339</a>
+<a name='L340'></a><a href='#L340'>340</a>
+<a name='L341'></a><a href='#L341'>341</a>
+<a name='L342'></a><a href='#L342'>342</a>
+<a name='L343'></a><a href='#L343'>343</a>
+<a name='L344'></a><a href='#L344'>344</a>
+<a name='L345'></a><a href='#L345'>345</a>
+<a name='L346'></a><a href='#L346'>346</a>
+<a name='L347'></a><a href='#L347'>347</a>
+<a name='L348'></a><a href='#L348'>348</a>
+<a name='L349'></a><a href='#L349'>349</a>
+<a name='L350'></a><a href='#L350'>350</a>
+<a name='L351'></a><a href='#L351'>351</a>
+<a name='L352'></a><a href='#L352'>352</a>
+<a name='L353'></a><a href='#L353'>353</a>
+<a name='L354'></a><a href='#L354'>354</a>
+<a name='L355'></a><a href='#L355'>355</a>
+<a name='L356'></a><a href='#L356'>356</a>
+<a name='L357'></a><a href='#L357'>357</a>
+<a name='L358'></a><a href='#L358'>358</a>
+<a name='L359'></a><a href='#L359'>359</a>
+<a name='L360'></a><a href='#L360'>360</a>
+<a name='L361'></a><a href='#L361'>361</a>
+<a name='L362'></a><a href='#L362'>362</a>
+<a name='L363'></a><a href='#L363'>363</a>
+<a name='L364'></a><a href='#L364'>364</a>
+<a name='L365'></a><a href='#L365'>365</a>
+<a name='L366'></a><a href='#L366'>366</a>
+<a name='L367'></a><a href='#L367'>367</a>
+<a name='L368'></a><a href='#L368'>368</a>
+<a name='L369'></a><a href='#L369'>369</a>
+<a name='L370'></a><a href='#L370'>370</a>
+<a name='L371'></a><a href='#L371'>371</a>
+<a name='L372'></a><a href='#L372'>372</a>
+<a name='L373'></a><a href='#L373'>373</a>
+<a name='L374'></a><a href='#L374'>374</a>
+<a name='L375'></a><a href='#L375'>375</a>
+<a name='L376'></a><a href='#L376'>376</a>
+<a name='L377'></a><a href='#L377'>377</a>
+<a name='L378'></a><a href='#L378'>378</a>
+<a name='L379'></a><a href='#L379'>379</a>
+<a name='L380'></a><a href='#L380'>380</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
+ * Centralized text management for Amoosh Telegram Bots
+ * 
+ * All user-facing messages are defined here for easy modification.
+ * To customize texts, edit the values in this file.
+ * 
+ * Usage:
+ *   import { ClientTexts, ManagerTexts, escapeMarkdown } from "../i18n/texts.js";
+ *   await ctx.reply(ClientTexts.welcome());
+ */
+&nbsp;
+/**
+ * P2-2 Fix: Escape special characters for Telegram Markdown
+ * This prevents user-generated content from breaking message formatting.
+ */
+export function <span class="fstat-no" title="function not covered" >escapeMarkdown(t</span>ext: string | null | undefined): string {
+<span class="cstat-no" title="statement not covered" >  if (!text) <span class="cstat-no" title="statement not covered" >return '';</span></span>
+  // Escape Markdown V1 special characters: _ * ` [
+<span class="cstat-no" title="statement not covered" >  return text.replace(/([_*`\[])/g, '\\$1');</span>
+}
+&nbsp;
+/**
+ * P2-2 Fix: Escape for MarkdownV2 (more strict escaping)
+ */
+export function <span class="fstat-no" title="function not covered" >escapeMarkdownV2(t</span>ext: string | null | undefined): string {
+<span class="cstat-no" title="statement not covered" >  if (!text) <span class="cstat-no" title="statement not covered" >return '';</span></span>
+<span class="cstat-no" title="statement not covered" >  return text.replace(/([_*\[\]()~`&gt;#+\-=|{}.!\\])/g, '\\$1');</span>
+}
+&nbsp;
+// ===========================================
+// CLIENT BOT TEXTS
+// ===========================================
+&nbsp;
+export const ClientTexts = {
+  // Referral Gate
+  welcomeNewUser: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>👋 سلام! برای استفاده از فروشگاه، لطفاً یک کد معرفی معتبر وارد کنید:",</span>
+  invalidReferralCode: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>❌ کد معرفی نامعتبر یا منقضی است. دوباره تلاش کنید:",</span>
+  referralCodeAccepted: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ کد معرفی تأیید شد! به فروشگاه آموز خوش آمدید.",</span>
+  userBlocked: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🚫 حساب شما مسدود شده است. لطفاً با پشتیبانی تماس بگیرید.",</span>
+&nbsp;
+  // Welcome &amp; Start
+  welcome: () =&gt; "به فروشگاه آموز خوش آمدید. از منوی زیر برای ادامه استفاده کنید.",
+  welcomeBack: <span class="fstat-no" title="function not covered" >(n</span>ame: string) =&gt; <span class="cstat-no" title="statement not covered" >`سلام ${name}! 👋`,</span>
+&nbsp;
+  // Products
+  noProductsAvailable: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>فعلاً محصولی برای نمایش وجود ندارد.",</span>
+  productsHeader: () =&gt; "محصولات موجود:",
+  productLine: (title: string, price: number, currency: string) =&gt;
+    `${title} - ${price} ${currency}`,
+&nbsp;
+  // Cart
+  cartEmpty: () =&gt; "سبد خرید شما خالی است.",
+  cartHeader: () =&gt; "سبد خرید شما:",
+  cartItemLine: (title: string, qty: number, lineTotal: number, currency: string) =&gt;
+    `${title} x ${qty} = ${lineTotal} ${currency}`,
+  cartSubtotal: (subtotal: number) =&gt; `جمع: ${subtotal}`,
+&nbsp;
+  // Add to Cart
+  addUsage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>فرمت: /add &lt;شناسه محصول&gt; &lt;تعداد&gt;",</span>
+  productNotFound: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>محصول پیدا نشد.",</span>
+  addedToCart: (title: string, qty: number) =&gt; `به سبد خرید اضافه شد: ${title} x ${qty}.`,
+&nbsp;
+  // Remove from Cart
+  removeUsage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>فرمت: /remove &lt;شناسه محصول&gt;",</span>
+  productNotInCart: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>این محصول در سبد خرید شما نیست.",</span>
+  removedFromCart: (title: string) =&gt; `از سبد خرید حذف شد: ${title}.`,
+&nbsp;
+  // Checkout
+  orderSubmitted: (orderId: number, grandTotal: number) =&gt;
+    `✅ سفارش شما ثبت شد! شماره: ${orderId}، مبلغ: ${grandTotal}.`,
+  outOfStock: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>متأسفانه برخی اقلام موجود نیستند. لطفاً سبد خرید را اصلاح کنید.",</span>
+  checkoutError: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>ثبت سفارش با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید.",</span>
+&nbsp;
+  // Errors
+  unableToIdentify: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>امکان شناسایی شما وجود ندارد.",</span>
+&nbsp;
+  // Referrals
+  myReferralCode: <span class="fstat-no" title="function not covered" >(c</span>ode: string) =&gt; <span class="cstat-no" title="statement not covered" >`🔗 کد معرفی شما: \`${code}\``,</span>
+  noReferralCode: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>شما هنوز کد معرفی ایجاد نکرده‌اید.",</span>
+  referralCodeGenerated: <span class="fstat-no" title="function not covered" >(c</span>ode: string) =&gt; <span class="cstat-no" title="statement not covered" >`✅ کد معرفی جدید شما: \`${code}\`\n\nاین کد را برای دوستانتان ارسال کنید.`,</span>
+  referralStats: <span class="fstat-no" title="function not covered" >(c</span>ount: number) =&gt; <span class="cstat-no" title="statement not covered" >`📊 تعداد معرفی‌های شما: ${count} نفر`,</span>
+  
+  // Product View
+  productDetails: <span class="fstat-no" title="function not covered" >(t</span>itle: string, description: string | null, price: number, currency: string, stock: number | null) =&gt;
+<span class="cstat-no" title="statement not covered" >    `*${escapeMarkdown(title)}*\n\n${escapeMarkdown(description) || 'بدون توضیحات'}\n\n💰 قیمت: ${price} ${currency}${stock !== null ? `\n📦 موجودی: ${stock}` : ''}`,</span>
+  selectQuantity: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>تعداد را انتخاب کنید:",</span>
+  addedToCartSuccess: <span class="fstat-no" title="function not covered" >(t</span>itle: string, qty: number) =&gt; <span class="cstat-no" title="statement not covered" >`✅ ${qty} عدد ${title} به سبد خرید اضافه شد!`,</span>
+  
+  // Orders
+  myOrdersHeader: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📦 سفارش‌های شما:",</span>
+  noOrders: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>شما هنوز سفارشی ثبت نکرده‌اید.",</span>
+  orderDetails: <span class="fstat-no" title="function not covered" >(i</span>d: number, status: string, total: number) =&gt;
+<span class="cstat-no" title="statement not covered" >    `سفارش #${id}\nوضعیت: ${status}\nمبلغ: ${total}`,</span>
+  
+  // Cart Cleared
+  cartCleared: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🗑️ سبد خرید شما خالی شد.",</span>
+&nbsp;
+  // Pre-checkout Info Gathering
+  checkoutInfoRequired: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📋 قبل از ثبت سفارش، لطفاً اطلاعات زیر را تکمیل کنید:",</span>
+  askPhone: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📱 لطفاً شماره تماس خود را ارسال کنید:",</span>
+  askPhoneButton: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📱 ارسال شماره تماس",</span>
+  phoneReceived: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ شماره تماس ثبت شد.",</span>
+  askLocation: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📍 لطفاً موقعیت مکانی خود را ارسال کنید:",</span>
+  askLocationButton: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📍 ارسال موقعیت مکانی",</span>
+  locationReceived: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ موقعیت مکانی ثبت شد.",</span>
+  askAddress: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🏠 لطفاً آدرس کامل را به صورت متن ارسال کنید:",</span>
+  addressReceived: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ آدرس ثبت شد.",</span>
+  infoComplete: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ اطلاعات کامل شد. در حال ثبت سفارش...",</span>
+  skipInfo: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>رد کردن",</span>
+  cancelCheckout: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>❌ ثبت سفارش لغو شد.",</span>
+&nbsp;
+  // Order Status Updates
+  orderPendingApproval: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>⏳ سفارش شما در حال بررسی توسط مدیر است. نتیجه به شما اطلاع داده می‌شود.",</span>
+  orderApproved: <span class="fstat-no" title="function not covered" >(o</span>rderId: number) =&gt; <span class="cstat-no" title="statement not covered" >`✅ خبر خوب! سفارش #${orderId} تأیید شد.`,</span>
+  orderApprovedWithInvite: (orderId: number, inviteLink: string) =&gt; 
+    `✅ سفارش #${orderId} تأیید شد.\n\n📢 برای اطلاعات پرداخت وارد کانال شوید:\n${inviteLink}\n\nپس از پرداخت، عکس رسید را همینجا ارسال کنید.`,
+  orderRejected: <span class="fstat-no" title="function not covered" >(o</span>rderId: number, reason?: string) =&gt; 
+<span class="cstat-no" title="statement not covered" >    `❌ سفارش #${orderId} تأیید نشد.${reason ? `\n\nعلت: ${reason}` : ''}`,</span>
+&nbsp;
+  // Receipt Submission
+  sendReceiptPrompt: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📸 لطفاً عکس رسید پرداخت را ارسال کنید:",</span>
+  receiptReceived: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ رسید دریافت شد. مدیر به‌زودی بررسی می‌کند.",</span>
+  receiptApproved: <span class="fstat-no" title="function not covered" >(o</span>rderId: number) =&gt; <span class="cstat-no" title="statement not covered" >`✅ رسید سفارش #${orderId} تأیید شد. سفارش شما تکمیل شد.`,</span>
+  receiptRejected: <span class="fstat-no" title="function not covered" >(o</span>rderId: number, reason?: string) =&gt; 
+<span class="cstat-no" title="statement not covered" >    `❌ رسید سفارش #${orderId} تأیید نشد.${reason ? `\n\nعلت: ${reason}` : ''}\n\nلطفاً یک عکس جدید از رسید ارسال کنید.`,</span>
+  noActiveOrderForReceipt: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>❌ سفارشی که منتظر رسید باشد ندارید.",</span>
+&nbsp;
+  // Support / Chat
+  supportTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>💬 پشتیبانی",</span>
+  supportIntro: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>شما وارد بخش پشتیبانی شدید. پیام خود را ارسال کنید تا مدیر پاسخ دهد.",</span>
+  supportAskMessage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✍️ لطفاً پیام خود را ارسال کنید:",</span>
+  supportMessageSent: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ پیام شما به پشتیبانی ارسال شد.",</span>
+  supportClosed: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ گفتگو بسته شد. در صورت نیاز دوباره از پشتیبانی استفاده کنید.",</span>
+  supportReplyFromManager: <span class="fstat-no" title="function not covered" >(t</span>ext: string) =&gt; <span class="cstat-no" title="statement not covered" >`💬 پاسخ پشتیبانی:\n\n${text}`,</span>
+&nbsp;
+  // Help
+  helpMessage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >`</span></span>
+🛒 *راهنمای فروشگاه آموز*
+&nbsp;
+برای استفاده از ربات نیازی به تایپ کردن دستورها نیست؛
+از دکمه‌های منو استفاده کنید.
+&nbsp;
+*مراحل سفارش:*
+1) از بخش «محصولات» کالاها را انتخاب کنید.
+2) در «سبد خرید» اقلام را بررسی کنید.
+3) «ثبت سفارش» را بزنید و اطلاعات تماس/آدرس را تکمیل کنید.
+4) پس از تأیید مدیر، راهنمای پرداخت و ارسال رسید به شما اعلام می‌شود.
+&nbsp;
+برای ارتباط با پشتیبانی، از دکمه «پشتیبانی» استفاده کنید.
+`.trim(),
+};
+&nbsp;
+// ===========================================
+// MANAGER BOT TEXTS
+// ===========================================
+&nbsp;
+export const ManagerTexts = {
+  // Authorization
+  notAuthorized: () =&gt; "شما اجازه استفاده از این ربات را ندارید.",
+&nbsp;
+  // Start &amp; Welcome
+  welcome: (pendingCount: number) =&gt; `سلام مدیر محترم. سفارش‌های در انتظار بررسی: ${pendingCount}.`,
+&nbsp;
+  // Pending Orders
+  noPendingOrders: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ سفارشی برای بررسی وجود ندارد.",</span>
+  pendingOrdersHeader: () =&gt; "سفارش‌های در انتظار بررسی:",
+  pendingOrderLine: (orderId: number, userId: number, grandTotal: number) =&gt;
+    `#${orderId} – کاربر ${userId} – مبلغ ${grandTotal}`,
+&nbsp;
+  // Approve Order
+  approveUsage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>فرمت: /approve_order &lt;شماره سفارش&gt;",</span>
+  orderNotFound: () =&gt; "سفارش پیدا نشد یا در وضعیت بررسی نیست.",
+  orderApproved: (orderId: number) =&gt; `سفارش #${orderId} تأیید شد.`,
+&nbsp;
+  // Reject Order
+  rejectUsage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>فرمت: /reject_order &lt;شماره سفارش&gt;",</span>
+  orderRejected: (orderId: number) =&gt; `سفارش #${orderId} رد شد.`,
+&nbsp;
+  // Help
+  helpMessage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >`</span></span>
+👔 *راهنمای مدیر - فروشگاه آموز*
+&nbsp;
+برای کار با ربات مدیریتی، از دکمه‌های منو استفاده کنید.
+*مهم‌ترین بخش‌ها:*
+&nbsp;
+- «سفارش‌ها»: بررسی و تأیید/رد سفارش‌ها
+- «رسیدها»: بررسی رسیدهای پرداخت
+- «محصولات»: افزودن/ویرایش/غیرفعال‌سازی محصول
+- «پشتیبانی»: صندوق پیام‌های کاربران و پاسخ‌دهی
+`.trim(),
+&nbsp;
+  // UI Messages
+  mainMenuTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>👔 *داشبورد مدیریت*\n\nیک گزینه را انتخاب کنید:",</span>
+  
+  // Products Management
+  productsMenuTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📦 *مدیریت محصولات*",</span>
+  productListTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📦 *لیست محصولات*",</span>
+  noProducts: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ محصولی یافت نشد.",</span>
+  productCreated: <span class="fstat-no" title="function not covered" >(t</span>itle: string) =&gt; <span class="cstat-no" title="statement not covered" >`✅ محصول «${title}» با موفقیت ایجاد شد.`,</span>
+  productUpdated: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ محصول با موفقیت به‌روزرسانی شد.",</span>
+  productDeleted: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ محصول غیرفعال شد.",</span>
+  enterProductTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>عنوان محصول را وارد کنید:",</span>
+  enterProductDescription: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>توضیحات محصول را وارد کنید:",</span>
+  enterProductPrice: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>قیمت محصول را وارد کنید (فقط عدد):",</span>
+  enterProductStock: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>موجودی اولیه را وارد کنید (فقط عدد):",</span>
+  sendProductImage: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>عکس محصول را ارسال کنید:",</span>
+  invalidNumber: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>❌ لطفاً یک عدد معتبر وارد کنید.",</span>
+&nbsp;
+  // User Management
+  usersMenuTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>👥 *مدیریت کاربران*",</span>
+  userListTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>👥 *لیست کاربران*",</span>
+  noUsers: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ کاربری یافت نشد.",</span>
+  userDetails: <span class="fstat-no" title="function not covered" >(i</span>d: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean) =&gt;
+<span class="cstat-no" title="statement not covered" >    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\nتعداد سفارش: ${orderCount}`,</span>
+  userBlocked: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null) =&gt; <span class="cstat-no" title="statement not covered" >`🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,</span>
+  userUnblocked: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null) =&gt; <span class="cstat-no" title="statement not covered" >`✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,</span>
+  userReferralGranted: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null) =&gt; <span class="cstat-no" title="statement not covered" >`🔑 مجوز ساخت کد معرفی به ${username || 'کاربر'} داده شد.`,</span>
+  userReferralRevoked: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null) =&gt; <span class="cstat-no" title="statement not covered" >`🔒 مجوز ساخت کد معرفی از ${username || 'کاربر'} گرفته شد.`,</span>
+  userDeleted: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null) =&gt; <span class="cstat-no" title="statement not covered" >`🗑️ کاربر ${username || 'نامشخص'} حذف شد.`,</span>
+  userDeleteConfirm: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null) =&gt; <span class="cstat-no" title="statement not covered" >`⚠️ آیا از حذف کاربر ${username || 'نامشخص'} مطمئن هستید؟ این عمل غیرقابل بازگشت است.`,</span>
+  enterSearchQuery: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>نام کاربری یا شناسه تلگرام را وارد کنید:",</span>
+  enterUserScore: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>امتیاز جدید (۰ تا ۱۰) را وارد کنید:",</span>
+  userScoreUpdated: <span class="fstat-no" title="function not covered" >(s</span>core: number) =&gt; <span class="cstat-no" title="statement not covered" >`⭐ امتیاز کاربر به ${score} تغییر یافت.`,</span>
+&nbsp;
+  // Loyalty Score
+  enterReferralScore: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربران این کد وارد کنید:",</span>
+  invalidScore: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد.",</span>
+&nbsp;
+  // Courier Management
+  couriersMenuTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🚚 *مدیریت پیک‌ها*",</span>
+  courierListTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🚚 *لیست پیک‌ها*",</span>
+  noCouriers: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ پیکی یافت نشد.",</span>
+  courierDetails: <span class="fstat-no" title="function not covered" >(i</span>d: number, username: string | null, tgUserId: bigint, isActive: boolean) =&gt;
+<span class="cstat-no" title="statement not covered" >    `*پیک #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nشناسه تلگرام: \`${tgUserId}\`\nوضعیت: ${isActive ? '✅ فعال' : '🚫 غیرفعال'}`,</span>
+  courierAdded: <span class="fstat-no" title="function not covered" >(t</span>gUserId: string) =&gt; <span class="cstat-no" title="statement not covered" >`✅ پیک با شناسه تلگرام ${tgUserId} اضافه شد.`,</span>
+  courierAlreadyExists: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>این شناسه تلگرام قبلاً به عنوان پیک ثبت شده است.",</span>
+  courierToggled: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null, isActive: boolean) =&gt;
+<span class="cstat-no" title="statement not covered" >    isActive ? `✅ پیک ${username || 'نامشخص'} فعال شد.` : `🚫 پیک ${username || 'نامشخص'} غیرفعال شد.`,</span>
+  courierDeleted: <span class="fstat-no" title="function not covered" >(u</span>sername: string | null) =&gt; <span class="cstat-no" title="statement not covered" >`🗑️ پیک ${username || 'نامشخص'} حذف شد.`,</span>
+  enterCourierTgId: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>شناسه تلگرام پیک را وارد کنید (عدد):",</span>
+  invalidTgId: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>❌ شناسه تلگرام باید یک عدد معتبر باشد.",</span>
+&nbsp;
+  // Referral Management
+  referralsMenuTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🔗 *مدیریت کدهای معرفی*",</span>
+  referralListTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🔗 *لیست کدهای معرفی*",</span>
+  noReferralCodes: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ کد معرفی یافت نشد.",</span>
+  referralCodeCreated: <span class="fstat-no" title="function not covered" >(c</span>ode: string) =&gt; <span class="cstat-no" title="statement not covered" >`✅ کد معرفی ایجاد شد: \`${code}\``,</span>
+  referralCodeDeactivated: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ کد معرفی غیرفعال شد.",</span>
+  enterReferralMaxUses: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>حداکثر تعداد استفاده را وارد کنید:",</span>
+&nbsp;
+  // Analytics
+  analyticsMenuTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>📊 *داشبورد آمار*",</span>
+  orderAnalytics: <span class="fstat-no" title="function not covered" >(t</span>otal: number, pending: number, completed: number, revenue: number) =&gt;
+<span class="cstat-no" title="statement not covered" >    `📦 *آمار سفارش‌ها*\n\nکل سفارش‌ها: ${total}\nدر انتظار: ${pending}\nتکمیل‌شده: ${completed}\nجمع فروش: ${revenue}`,</span>
+  userAnalytics: <span class="fstat-no" title="function not covered" >(t</span>otal: number, active: number, newToday: number) =&gt;
+<span class="cstat-no" title="statement not covered" >    `👥 *آمار کاربران*\n\nکل کاربران: ${total}\nکاربران فعال: ${active}\nکاربران امروز: ${newToday}`,</span>
+  productAnalytics: <span class="fstat-no" title="function not covered" >(t</span>otal: number, active: number, lowStock: number) =&gt;
+<span class="cstat-no" title="statement not covered" >    `📦 *آمار محصولات*\n\nکل محصولات: ${total}\nفعال: ${active}\nکم‌موجودی: ${lowStock}`,</span>
+  referralAnalytics: <span class="fstat-no" title="function not covered" >(t</span>otalCodes: number, totalUses: number, topReferrer: string | null) =&gt;
+<span class="cstat-no" title="statement not covered" >    `🔗 *آمار معرفی*\n\nکل کدها: ${totalCodes}\nکل استفاده: ${totalUses}\nبهترین معرف: ${topReferrer || '—'}`,</span>
+&nbsp;
+  // Confirmations
+  confirmDelete: <span class="fstat-no" title="function not covered" >(i</span>tem: string) =&gt; <span class="cstat-no" title="statement not covered" >`⚠️ آیا از حذف ${item} مطمئن هستید؟`,</span>
+  actionCancelled: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>عملیات لغو شد.",</span>
+&nbsp;
+  // Receipt Management
+  pendingReceiptsTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🧾 *رسیدهای در انتظار بررسی*",</span>
+  noPendingReceipts: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ رسیدی برای بررسی وجود ندارد.",</span>
+  receiptDetails: <span class="fstat-no" title="function not covered" >(o</span>rderId: number, userId: number, username: string | null, submittedAt: string) =&gt;
+<span class="cstat-no" title="statement not covered" >    `🧾 *رسید سفارش #${orderId}*\n\nکاربر: ${username || `#${userId}`}\nزمان ارسال: ${submittedAt}`,</span>
+  receiptApproved: <span class="fstat-no" title="function not covered" >(o</span>rderId: number) =&gt; <span class="cstat-no" title="statement not covered" >`✅ رسید سفارش #${orderId} تأیید شد.`,</span>
+  receiptRejected: <span class="fstat-no" title="function not covered" >(o</span>rderId: number) =&gt; <span class="cstat-no" title="statement not covered" >`❌ رسید سفارش #${orderId} رد شد.`,</span>
+  enterRejectReason: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>علت رد را وارد کنید:",</span>
+&nbsp;
+  // Order Approval with Invite
+  orderApprovedInviteSent: <span class="fstat-no" title="function not covered" >(o</span>rderId: number, userTgId: bigint) =&gt; 
+<span class="cstat-no" title="statement not covered" >    `✅ سفارش #${orderId} تأیید شد. لینک کانال برای کاربر ${userTgId} ارسال شد.`,</span>
+  inviteSendFailed: <span class="fstat-no" title="function not covered" >(o</span>rderId: number) =&gt; <span class="cstat-no" title="statement not covered" >`⚠️ سفارش #${orderId} تأیید شد اما ارسال لینک کانال به کاربر ناموفق بود.`,</span>
+&nbsp;
+  // Support / Chat
+  supportInboxTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>💬 *صندوق پشتیبانی*",</span>
+  noSupportConversations: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ گفتگوی بازِ پشتیبانی وجود ندارد.",</span>
+  supportConversationTitle: <span class="fstat-no" title="function not covered" >(c</span>onversationId: number) =&gt; <span class="cstat-no" title="statement not covered" >`💬 *گفتگو #${conversationId}*`,</span>
+  supportAskReply: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✍️ پاسخ را ارسال کنید:",</span>
+  supportReplySent: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ پاسخ ارسال شد.",</span>
+  supportConversationClosed: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ گفتگو بسته شد.",</span>
+  supportNewMessageNotification: <span class="fstat-no" title="function not covered" >(c</span>onversationId: number, fromLabel: string) =&gt;
+<span class="cstat-no" title="statement not covered" >    `📩 پیام جدید پشتیبانی\nگفتگو #${conversationId}\nاز: ${fromLabel}`,</span>
+  envMissingCheckoutChannel: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>امکان تأیید سفارش نیست: CHECKOUT_CHANNEL_ID تنظیم نشده است.",</span>
+  productNotFound: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>محصول پیدا نشد.",</span>
+  productDeactivated: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>محصول غیرفعال شد.",</span>
+  productActivated: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>محصول فعال شد.",</span>
+  invalidDeliveryOrStatus: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>مقدار نامعتبر است.",</span>
+  
+  // User Info Display
+  userContactInfo: <span class="fstat-no" title="function not covered" >(p</span>hone: string | null, address: string | null, lat: number | null, lng: number | null) =&gt;
+<span class="cstat-no" title="statement not covered" >    `📋 *اطلاعات مشتری:*\nتلفن: ${escapeMarkdown(phone) || '—'}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null &amp;&amp; lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : ''}`,</span>
+&nbsp;
+  // Settings
+  settingsMenuTitle: <span class="fstat-no" title="function not covered" >(i</span>mageStatus: string, expiryMinutes: number, paymentMethod: "channel" | "direct" = <span class="branch-0 cbranch-no" title="branch not covered" >"direct") =&gt;</span>
+<span class="cstat-no" title="statement not covered" >    `⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: ${paymentMethod === "channel" ? "📢 کانال" : "� مستقیم"}\n�🖼️ تصویر پرداخت: ${imageStatus}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,</span>
+  settingsImageUpdated: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ تصویر پرداخت با موفقیت به‌روزرسانی شد.",</span>
+  settingsImageDeleted: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود.",</span>
+  settingsImageAsk: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):",</span>
+  settingsExpiryAsk: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>⏳ مهلت پرداخت را به دقیقه وارد کنید (مثلاً 60):",</span>
+  settingsExpiryUpdated: <span class="fstat-no" title="function not covered" >(m</span>inutes: number) =&gt; <span class="cstat-no" title="statement not covered" >`✅ مهلت پرداخت به ${minutes} دقیقه تغییر یافت.`,</span>
+  settingsExpiryInvalid: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>❌ لطفاً یک عدد معتبر (بزرگتر از صفر) وارد کنید.",</span>
+  settingsPayMethodToggled: <span class="fstat-no" title="function not covered" >(m</span>ethod: "channel" | "direct") =&gt;
+<span class="cstat-no" title="statement not covered" >    method === "channel"</span>
+      ? "✅ روش پرداخت به \"\u06a9\u0627\u0646\u0627\u0644\" تغییر یافت. اطلاعات پرداخت در کانال پست می‌شود."
+      : "✅ روش پرداخت به \"\u0645\u0633\u062a\u0642\u06cc\u0645\" تغییر یافت. اطلاعات پرداخت مستقیماً به کاربر ارسال می‌شود.",
+};
+&nbsp;
+export const CourierTexts = {
+  notAuthorized: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>شما به عنوان پیک مجاز نیستید.",</span>
+  dashboardTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>داشبورد پیک",</span>
+  deliveriesTitle: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>ارسال‌های شما",</span>
+  noDeliveries: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>هیچ ارسال اختصاص‌داده‌شده‌ای ندارید.",</span>
+  deliveryDetails: <span class="fstat-no" title="function not covered" >(p</span>arams: {
+    orderId: number;
+    status: string;
+    customerName: string;
+    phone: string;
+    address: string;
+    locationLat?: number | null;
+    locationLng?: number | null;
+  }) =&gt; {
+    const lines = <span class="cstat-no" title="statement not covered" >[</span>
+      `🚚 ارسال سفارش #${params.orderId}`,
+      `━━━━━━━━━━━━━━━`,
+      `📌 وضعیت: ${params.status}`,
+      ``,
+      `👤 مشتری: ${params.customerName}`,
+      `📱 تلفن: ${params.phone}`,
+      `🏠 آدرس: ${params.address}`,
+    ];
+<span class="cstat-no" title="statement not covered" >    if (params.locationLat != null &amp;&amp; params.locationLng != null) {</span>
+<span class="cstat-no" title="statement not covered" >      lines.push(`📍 موقعیت: ثبت شده`);</span>
+    } else {
+<span class="cstat-no" title="statement not covered" >      lines.push(`📍 موقعیت: ثبت نشده`);</span>
+    }
+<span class="cstat-no" title="statement not covered" >    return lines.join("\n");</span>
+  },
+  askFailureReason: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>علت عدم موفقیت را به صورت پیام ارسال کنید.",</span>
+  statusUpdated: <span class="fstat-no" title="function not covered" >(s</span>tatus: string) =&gt; <span class="cstat-no" title="statement not covered" >`وضعیت به‌روزرسانی شد: ${status}`,</span>
+  failureReasonSaved: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>علت ثبت شد.",</span>
+  invalidDelivery: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>ارسال نامعتبر است.",</span>
+  notFound: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>یافت نشد.",</span>
+  updated: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>ثبت شد.",</span>
+  askFailureReasonEmpty: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>لطفاً علت را ارسال کنید.",</span>
+  statusAssigned: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>اختصاص داده شده",</span>
+  statusPickedUp: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>تحویل گرفته شد",</span>
+  statusOutForDelivery: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>در مسیر ارسال",</span>
+  statusDelivered: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>تحویل شد",</span>
+  statusFailed: <span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >"</span>ناموفق",</span>
+};
+&nbsp;
+// ===========================================
+// NOTIFICATION TEXTS (for workers)
+// ===========================================
+&nbsp;
+export const NotificationTexts = {
+  // Invite Worker
+  orderApprovedWithInvite: <span class="fstat-no" title="function not covered" >(o</span>rderId: number, inviteLink: string) =&gt;
+<span class="cstat-no" title="statement not covered" >    `سفارش #${orderId} تأیید شد. برای پرداخت وارد کانال شوید: ${inviteLink}`,</span>
+};
+&nbsp;
+// ===========================================
+// CHANNEL TEXTS (posted inside the checkout channel)
+// ===========================================
+&nbsp;
+export const ChannelTexts = {
+  paymentMessage: (orderId: number, grandTotal: number, currency: string) =&gt;
+    `💳 *پرداخت سفارش #${orderId}*\n\n` +
+    `مبلغ قابل پرداخت: *${grandTotal.toLocaleString("fa-IR")} ${currency}*\n\n` +
+    `لطفاً مبلغ فوق را به شماره کارت/حساب ذکر شده واریز کنید ` +
+    `و سپس عکس رسید را در ربات فروشگاه ارسال نمایید.\n\n` +
+    `⏳ این پیام پس از ثبت رسید یا اتمام مهلت پرداخت حذف خواهد شد.`,
+};
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-02-15T13:25:30.345Z
+            </div>
+        <script src="../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../sorter.js"></script>
+        <script src="../../block-navigation.js"></script>
+    </body>
+</html>
+    

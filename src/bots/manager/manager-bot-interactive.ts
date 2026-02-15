@@ -2023,17 +2023,35 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         }),
       ]);
 
-      // Cleanup channel: delete payment message, revoke invite, kick user
-      if (clientBot && checkoutChannelId) {
-        await cleanupChannelForOrder(
-          { prisma, botApi: clientBot.api, checkoutChannelId },
-          {
-            orderId: receipt.orderId,
-            channelMessageId: receipt.order.channelMessageId,
-            inviteLink: receipt.order.inviteLink,
-            userTgId: receipt.order.user.tgUserId,
-          },
-        );
+      // Cleanup: channel-method orders get full channel cleanup,
+      // direct-method orders get DM payment message deletion
+      if (clientBot) {
+        if (receipt.order.inviteLink && checkoutChannelId) {
+          // Channel method — delete channel message, revoke invite, kick user
+          await cleanupChannelForOrder(
+            { prisma, botApi: clientBot.api, checkoutChannelId },
+            {
+              orderId: receipt.orderId,
+              channelMessageId: receipt.order.channelMessageId,
+              inviteLink: receipt.order.inviteLink,
+              userTgId: receipt.order.user.tgUserId,
+            },
+          );
+        } else if (receipt.order.channelMessageId) {
+          // Direct method — channelMessageId is actually the DM message ID
+          try {
+            await clientBot.api.deleteMessage(
+              receipt.order.user.tgUserId.toString(),
+              receipt.order.channelMessageId,
+            );
+          } catch (err) {
+            console.error(`[RECEIPT APPROVE] Failed to delete payment DM for order #${receipt.orderId}:`, err);
+          }
+          await prisma.order.update({
+            where: { id: receipt.orderId },
+            data: { channelMessageId: null },
+          });
+        }
       }
 
       // Notify client

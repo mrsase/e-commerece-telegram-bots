@@ -9,8 +9,6 @@ export interface AppConfig {
   managerBotToken: string;
   courierBotToken: string;
   updatesMode: "webhook" | "polling";
-  enableQueues: boolean;
-  redisUrl?: string;
   checkoutChannelId?: string;
   checkoutImageFileId?: string;
   inviteExpiryMinutes: number;
@@ -27,8 +25,6 @@ const EnvSchema = z.object({
   MANAGER_BOT_TOKEN: z.string().min(1, "MANAGER_BOT_TOKEN is required"),
   COURIER_BOT_TOKEN: z.string().min(1, "COURIER_BOT_TOKEN is required"),
   UPDATES_MODE: z.enum(["auto", "webhook", "polling"]).optional().default("auto"),
-  ENABLE_QUEUES: z.string().optional().default("false"),
-  REDIS_URL: z.string().optional(),
   CHECKOUT_CHANNEL_ID: z.string().optional(),
   CHECKOUT_IMAGE_FILE_ID: z.string().optional(),
   INVITE_EXPIRY_MINUTES: z.string().optional().default("60"),
@@ -64,16 +60,6 @@ export function loadAppConfigFromEnv(): AppConfig {
     updatesMode = env.NODE_ENV === "development" ? "polling" : "webhook";
   }
 
-  const enableQueues = env.ENABLE_QUEUES === "true";
-
-  if (enableQueues && !env.REDIS_URL) {
-    throw new Error("REDIS_URL is required when ENABLE_QUEUES=true");
-  }
-
-  if (enableQueues && !env.CHECKOUT_CHANNEL_ID) {
-    throw new Error("CHECKOUT_CHANNEL_ID is required when ENABLE_QUEUES=true");
-  }
-
   return {
     nodeEnv: env.NODE_ENV,
     port,
@@ -82,8 +68,6 @@ export function loadAppConfigFromEnv(): AppConfig {
     managerBotToken: env.MANAGER_BOT_TOKEN,
     courierBotToken: env.COURIER_BOT_TOKEN,
     updatesMode,
-    enableQueues,
-    redisUrl: env.REDIS_URL,
     checkoutChannelId: env.CHECKOUT_CHANNEL_ID,
     checkoutImageFileId: env.CHECKOUT_IMAGE_FILE_ID,
     inviteExpiryMinutes: Math.max(1, Number(env.INVITE_EXPIRY_MINUTES) || 60),

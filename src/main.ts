@@ -7,7 +7,7 @@ import { registerInteractiveClientBot } from "./bots/client/client-bot-interacti
 import { registerInteractiveCourierBot } from "./bots/courier/courier-bot-interactive.js";
 import { registerInteractiveManagerBot } from "./bots/manager/manager-bot-interactive.js";
 import { buildServer } from "./infra/http/server.js";
-import { setupQueues, type QueueManager } from "./infra/queue/bullmq.js";
+import { startScheduler, type Scheduler } from "./infra/scheduler/interval-scheduler.js";
 
 async function main(): Promise<void> {
   const config = loadAppConfigFromEnv();
@@ -62,17 +62,13 @@ async function main(): Promise<void> {
     courierBot.start();
   }
 
-  let queues: QueueManager | undefined;
-  if (config.enableQueues && config.redisUrl && config.checkoutChannelId) {
-    queues = await setupQueues({
-      prisma,
-      redisUrl: config.redisUrl,
-      clientBot,
-      checkoutChannelId: config.checkoutChannelId,
-      checkoutImageFileId: config.checkoutImageFileId,
-      inviteExpiryMinutes: config.inviteExpiryMinutes,
-    });
-  }
+  const scheduler: Scheduler = startScheduler({
+    prisma,
+    clientBot,
+    checkoutChannelId: config.checkoutChannelId,
+    checkoutImageFileId: config.checkoutImageFileId,
+    inviteExpiryMinutes: config.inviteExpiryMinutes,
+  });
 
   const app = buildServer(webhookHandlers, {
     webhookSecretToken: config.webhookSecretToken,
@@ -91,10 +87,8 @@ async function main(): Promise<void> {
       await courierBot.stop();
     }
     
-    if (queues) {
-      console.log("Closing queue connections...");
-      await queues.close();
-    }
+    console.log("Stopping scheduler...");
+    scheduler.stop();
     
     console.log("Closing HTTP server...");
     await app.close();

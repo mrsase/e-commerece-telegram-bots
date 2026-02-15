@@ -16,11 +16,9 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
-    "bullmq": "^5.64.1",
     "dotenv": "^17.2.3",
     "fastify": "^4.28.1",
     "grammy": "^1.25.0",
-    "ioredis": "^5.8.2",
     "pino": "^10.1.0",
     "zod": "^4.1.12"
   },
