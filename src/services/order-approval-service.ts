@@ -51,7 +51,7 @@ export class OrderApprovalService {
     if (!order) {
       return {
         success: false,
-        status: order?.status ?? OrderStatus.AWAITING_MANAGER_APPROVAL,
+        status: OrderStatus.AWAITING_MANAGER_APPROVAL,
         error: "Order not found",
       };
     }
@@ -103,7 +103,7 @@ export class OrderApprovalService {
         orderId,
         order.user.tgUserId.toString(),
         paymentCaption,
-        effectiveImageFileId,
+        effectiveImageFileId ?? undefined,
         effectiveExpiryMin,
       );
     } else {
@@ -111,7 +111,7 @@ export class OrderApprovalService {
         orderId,
         order.user.tgUserId.toString(),
         paymentCaption,
-        effectiveImageFileId,
+        effectiveImageFileId ?? undefined,
         effectiveExpiryMin,
       );
     }
@@ -265,6 +265,11 @@ export class OrderApprovalService {
         userTgId,
         ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
         { parse_mode: "Markdown" },
+      );
+      // Also instruct client to send receipt after paying
+      await clientBotApi.sendMessage(
+        userTgId,
+        `پس از پرداخت، لطفاً عکس رسید را در همین ربات ارسال کنید.`,
       );
     } catch (err) {
       console.error("[OrderApproval] Failed to send invite to client:", err);

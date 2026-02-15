@@ -92,10 +92,10 @@ export const ClientKeyboards = {
   },
 
   /** Referral menu */
-  referralMenu: (hasCode: boolean, canCreate: boolean = false) => {
+  referralMenu: (codeCount: number, canCreate: boolean = false) => {
     const kb = new InlineKeyboard();
     
-    if (canCreate && !hasCode) {
+    if (canCreate && codeCount < 3) {
       kb.text("🔑 ساخت کد معرفی", "client:referral:generate").row();
     }
     

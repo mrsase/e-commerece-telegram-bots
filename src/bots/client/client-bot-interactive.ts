@@ -17,6 +17,7 @@ type SessionState =
   | "checkout_address"
   | "checkout_discount"
   | "awaiting_receipt"
+  | "referral_score"
   | "support_message";
 
 interface ClientSession {
@@ -39,6 +40,7 @@ import { buildCartDisplay } from "../../utils/cart-display.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
 import { safeRender } from "../../utils/safe-reply.js";
+import { crossBotFile } from "../../utils/cross-bot-file.js";
 
 /**
  * Get or create user, checking referral status
@@ -103,10 +105,11 @@ async function validateAndUseReferralCode(
   if (!referralCode) return false;
   if (!referralCode.isActive) return false;
   if (referralCode.expiresAt && referralCode.expiresAt < new Date()) return false;
-  if (referralCode.maxUses && referralCode.usedCount >= referralCode.maxUses) return false;
+  // Each code is for 1 person only — reject if already used
+  const effectiveMaxUses = referralCode.maxUses ?? 1;
+  if (referralCode.usedCount >= effectiveMaxUses) return false;
 
-  // P1-3 Fix: Set referredById from the referral code creator
-  // Update user and referral code
+  // Update user, referral code, and deactivate the code (1 person per code)
   await prisma.$transaction([
     prisma.user.update({
       where: { id: userId },
@@ -114,11 +117,15 @@ async function validateAndUseReferralCode(
         isVerified: true,
         usedReferralCodeId: referralCode.id,
         referredById: referralCode.createdByUserId, // Link to who referred them
+        loyaltyScore: referralCode.loyaltyScore,     // Assign score from referral code
       },
     }),
     prisma.referralCode.update({
       where: { id: referralCode.id },
-      data: { usedCount: { increment: 1 } },
+      data: {
+        usedCount: { increment: 1 },
+        isActive: false, // Deactivate after single use
+      },
     }),
   ]);
 
@@ -225,17 +232,10 @@ async function continueCheckoutFlow(
     return;
   }
 
-  // All info collected - proceed to checkout
+  // All info collected - ask for discount code before checkout
   await ctx.reply(ClientTexts.infoComplete());
-  userSessions.delete(ctx.from!.id);
-
-  const cart = await prisma.cart.findFirst({
-    where: { userId: updatedUser.id, state: CartState.ACTIVE },
-  });
-
-  if (cart) {
-    await processCheckout(ctx, updatedUser, cart.id, prisma, notificationService);
-  }
+  userSessions.set(ctx.from!.id, { state: "checkout_discount" });
+  await ctx.reply("🎟️ اگر کد تخفیف دارید وارد کنید. در غیر این صورت /skip بزنید:");
 }
 
 /**
@@ -267,9 +267,23 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
-    // Show main menu
+    // Show main menu with summary
     const name = user.firstName || user.username || "دوست عزیز";
-    await ctx.reply(ClientTexts.welcomeBack(name), {
+    const pendingOrders = await prisma.order.count({
+      where: {
+        userId: user.id,
+        status: { in: [OrderStatus.AWAITING_MANAGER_APPROVAL, OrderStatus.APPROVED, OrderStatus.INVITE_SENT, OrderStatus.AWAITING_RECEIPT] },
+      },
+    });
+    const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
+    let welcomeText = ClientTexts.welcomeBack(name);
+    if (pendingOrders > 0) {
+      welcomeText += `\n📦 سفارش‌های فعال: ${pendingOrders}`;
+    }
+    if (effectiveScore > 0) {
+      welcomeText += `\n⭐ امتیاز وفاداری: ${effectiveScore}/10`;
+    }
+    await ctx.reply(welcomeText, {
       reply_markup: ClientKeyboards.mainMenu(),
       parse_mode: "Markdown",
     });
@@ -379,6 +393,34 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         await ctx.reply(`✅ کد تخفیف "${code}" اعمال شد.`);
         await processCheckout(ctx, user, cart.id, prisma, notificationService, code);
       }
+      return;
+    }
+
+    // Handle referral score input — step 2 of client referral code creation
+    if (session?.state === "referral_score") {
+      const text = ctx.message.text.trim();
+      const score = text === "/skip" ? 0 : parseInt(text);
+      if (text !== "/skip" && (!Number.isFinite(score) || score < 0 || score > 10)) {
+        await ctx.reply("❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد. دوباره وارد کنید:");
+        return;
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { tgUserId: BigInt(ctx.from.id) },
+      });
+      if (!user) return;
+
+      const code = await createReferralCodeWithRetry(prisma, {
+        createdByUserId: user.id,
+        maxUses: 1,
+        loyaltyScore: score,
+      });
+
+      userSessions.delete(ctx.from.id);
+      await ctx.reply(ClientTexts.referralCodeGenerated(code), {
+        parse_mode: "Markdown",
+        reply_markup: ClientKeyboards.backToMenu(),
+      });
       return;
     }
 
@@ -665,14 +707,26 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         product.stock
       );
 
-      // If product has image, send photo
-      if (product.photoFileId) {
-        await ctx.deleteMessage();
-        await ctx.replyWithPhoto(product.photoFileId, {
-          caption: text,
-          parse_mode: "Markdown",
-          reply_markup: ClientKeyboards.productView(productId, 1),
-        });
+      // If product has image, convert from manager bot and send photo
+      if (product.photoFileId && managerBot) {
+        try {
+          await ctx.deleteMessage();
+        } catch { /* ignore */ }
+        try {
+          const imageInput = await crossBotFile(managerBot.api, managerBot.token, product.photoFileId);
+          await ctx.replyWithPhoto(imageInput, {
+            caption: text,
+            parse_mode: "Markdown",
+            reply_markup: ClientKeyboards.productView(productId, 1),
+          });
+        } catch (err) {
+          console.error(`[CLIENT] Failed to convert product image for product #${productId}:`, err);
+          // Fallback: text only
+          await ctx.reply(text, {
+            parse_mode: "Markdown",
+            reply_markup: ClientKeyboards.productView(productId, 1),
+          });
+        }
       } else {
         await safeRender(ctx, text, {
           parse_mode: "Markdown",
@@ -1124,6 +1178,16 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
+    // CANCEL RECEIPT UPLOAD — must be checked BEFORE client:receipt: startsWith
+    if (data === "client:receipt:cancel") {
+      userSessions.delete(ctx.from.id);
+      try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      await ctx.reply("انصراف از ارسال رسید.", {
+        reply_markup: ClientKeyboards.mainMenu(),
+      });
+      return;
+    }
+
     // SEND RECEIPT - Set session to awaiting_receipt with orderId
     if (data.startsWith("client:receipt:")) {
       const orderId = parseInt(parts[2]);
@@ -1142,9 +1206,13 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       userSessions.set(ctx.from.id, { state: "awaiting_receipt", orderId });
 
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      const { InlineKeyboard: CancelKb } = await import("grammy");
       await ctx.reply(
         `📸 *سفارش #${orderId}*\n\nلطفاً عکس رسید پرداخت را ارسال کنید.`,
-        { parse_mode: "Markdown" },
+        {
+          parse_mode: "Markdown",
+          reply_markup: new CancelKb().text("❌ انصراف", `client:receipt:cancel`),
+        },
       );
       return;
     }
@@ -1248,7 +1316,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       if (referralCodes.length > 0) {
         text += "کدهای معرفی شما:\n";
         referralCodes.forEach((c) => {
-          text += `\`${c.code}\` - ${c.usedCount} بار استفاده\n`;
+          text += `\`${c.code}\` - ${c.usedCount}/${c.maxUses || '∞'} استفاده\n`;
         });
       } else {
         text += "هنوز هیچ کد معرفی‌ای نساخته‌اید.\n";
@@ -1262,7 +1330,42 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
-        reply_markup: ClientKeyboards.referralMenu(referralCodes.length > 0, canCreate),
+        reply_markup: ClientKeyboards.referralMenu(referralCodes.length, canCreate),
+      });
+      return;
+    }
+
+    // REFERRAL STATS
+    if (data === "client:referral:stats") {
+      const referralCodes = await prisma.referralCode.findMany({
+        where: { createdByUserId: user.id },
+      });
+
+      const totalReferred = referralCodes.reduce((sum, c) => sum + c.usedCount, 0);
+
+      // Find users referred by this user
+      const referredUsers = await prisma.user.findMany({
+        where: { referredById: user.id },
+        select: { username: true, firstName: true, createdAt: true },
+      });
+
+      let text = "📊 *آمار معرفی‌های من*\n\n";
+      text += `تعداد کدها: ${referralCodes.length}\n`;
+      text += `کل استفاده: ${totalReferred}\n`;
+      text += `کاربران معرفی‌شده: ${referredUsers.length}\n`;
+
+      if (referredUsers.length > 0) {
+        text += "\nافرادی که با کد شما عضو شده‌اند:\n";
+        referredUsers.forEach((u) => {
+          const name = u.username || u.firstName || "ناشناس";
+          const date = u.createdAt.toISOString().split("T")[0];
+          text += `  • ${name} — ${date}\n`;
+        });
+      }
+
+      await safeRender(ctx, text, {
+        parse_mode: "Markdown",
+        reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
     }
@@ -1292,14 +1395,9 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      const code = await createReferralCodeWithRetry(prisma, {
-        createdByUserId: user.id,
-        maxUses: 5,
-      });
-
-      await safeRender(ctx, ClientTexts.referralCodeGenerated(code), {
+      userSessions.set(ctx.from.id, { state: "referral_score" });
+      await safeRender(ctx, "⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربر این کد وارد کنید.\nبرای رد شدن /skip بزنید:", {
         parse_mode: "Markdown",
-        reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
     }

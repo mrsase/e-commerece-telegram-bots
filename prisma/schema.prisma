@@ -71,6 +71,7 @@ model ReferralCode {
   createdByManager   Manager? @relation("ReferralCodeByManager", fields: [createdByManagerId], references: [id])
   maxUses         Int?      // null = unlimited
   usedCount       Int       @default(0)
+  loyaltyScore    Int       @default(0)  // Score (0-10) assigned to users who use this code
   isActive        Boolean   @default(true)
   createdAt       DateTime  @default(now())
   expiresAt       DateTime?

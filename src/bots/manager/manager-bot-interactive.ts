@@ -20,7 +20,7 @@ type SessionState =
   | "product:edit:stock"
   | "product:edit:image"
   | "user:search"
-  | "referral:create:maxuses"
+  | "referral:create:score"
   | "receipt:reject:reason"
   | "support:reply"
   | "settings:image"
@@ -268,17 +268,18 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // REFERRAL CODE CREATION
-    if (session.state === "referral:create:maxuses") {
-      const maxUses = text === "/skip" ? null : parseInt(text);
-      if (text !== "/skip" && (isNaN(maxUses!) || maxUses! < 1)) {
-        await ctx.reply(ManagerTexts.invalidNumber());
+    // REFERRAL CODE CREATION — prompt for score, then create (1 use per code)
+    if (session.state === "referral:create:score") {
+      const score = text === "/skip" ? 0 : parseInt(text);
+      if (text !== "/skip" && (!Number.isFinite(score) || score < 0 || score > 10)) {
+        await ctx.reply(ManagerTexts.invalidScore());
         return;
       }
 
       const code = await createReferralCodeWithRetry(prisma, {
         createdByManagerId: manager.id,
-        maxUses,
+        maxUses: 1,
+        loyaltyScore: score,
         prefix: "MGR_",
         length: 6,
       });
@@ -319,7 +320,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         prisma.order.update({
           where: { id: receipt.orderId },
           data: { 
-            status: OrderStatus.INVITE_SENT,
+            status: OrderStatus.AWAITING_RECEIPT,
             events: {
               create: {
                 actorType: "manager",
@@ -363,9 +364,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await settingsService.set(SettingKeys.INVITE_EXPIRY_MINUTES, String(minutes));
       managerSessions.delete(ctx.from.id);
 
+      const payMethod = await settingsService.getPaymentMethod();
       await ctx.reply(ManagerTexts.settingsExpiryUpdated(minutes), {
         reply_markup: ManagerKeyboards.settingsMenu(
           !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
+          payMethod,
         ),
       });
       return;
@@ -527,8 +530,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await settingsService.set(SettingKeys.CHECKOUT_IMAGE_FILE_ID, fileId);
       managerSessions.delete(ctx.from.id);
 
+      const payMethod = await settingsService.getPaymentMethod();
       await ctx.reply(ManagerTexts.settingsImageUpdated(), {
-        reply_markup: ManagerKeyboards.settingsMenu(true),
+        reply_markup: ManagerKeyboards.settingsMenu(true, payMethod),
       });
       return;
     }
@@ -548,7 +552,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     const doc = ctx.message.document;
     const mime = doc.mime_type ?? "";
     if (!mime.startsWith("image/")) {
-      if (session.state === "product:add:image" || session.state === "product:edit:image") {
+      if (session.state === "product:add:image" || session.state === "product:edit:image" || session.state === "settings:image") {
         await ctx.reply("⚠️ لطفاً یک تصویر ارسال کنید (فرمت JPEG، PNG و…)\n\nبرای رد شدن /skip را ارسال کنید.");
       }
       return;
@@ -596,8 +600,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await settingsService.set(SettingKeys.CHECKOUT_IMAGE_FILE_ID, fileId);
       managerSessions.delete(ctx.from.id);
 
+      const payMethod = await settingsService.getPaymentMethod();
       await ctx.reply(ManagerTexts.settingsImageUpdated(), {
-        reply_markup: ManagerKeyboards.settingsMenu(true),
+        reply_markup: ManagerKeyboards.settingsMenu(true, payMethod),
       });
       return;
     }
@@ -777,35 +782,54 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
               console.error("[APPROVE channel] Failed to create invite link:", err);
             }
 
-            // Persist invite details
-            await prisma.order.update({
-              where: { id: orderId },
-              data: {
-                status: OrderStatus.INVITE_SENT,
-                inviteLink, inviteSentAt: now, inviteExpiresAt: expiresAt, channelMessageId,
-                events: {
-                  create: {
-                    actorType: "manager", actorId: manager.id, eventType: "invite_sent",
-                    payload: JSON.stringify({ inviteLink, channelMessageId, expiresAt: expiresAt.toISOString() }),
+            if (inviteLink) {
+              // Persist invite details
+              await prisma.order.update({
+                where: { id: orderId },
+                data: {
+                  status: OrderStatus.INVITE_SENT,
+                  inviteLink, inviteSentAt: now, inviteExpiresAt: expiresAt, channelMessageId,
+                  events: {
+                    create: {
+                      actorType: "manager", actorId: manager.id, eventType: "invite_sent",
+                      payload: JSON.stringify({ inviteLink, channelMessageId, expiresAt: expiresAt.toISOString() }),
+                    },
                   },
                 },
-              },
-            });
+              });
 
-            // Send invite to client
-            if (order.user && inviteLink) {
-              try {
-                await clientBot.api.sendMessage(
-                  order.user.tgUserId.toString(),
-                  ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
-                );
-              } catch (err) {
-                console.error("[APPROVE channel] Failed to send invite to client:", err);
+              // Send invite + receipt instruction to client
+              if (order.user) {
+                try {
+                  await clientBot.api.sendMessage(
+                    order.user.tgUserId.toString(),
+                    ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
+                  );
+                  await clientBot.api.sendMessage(
+                    order.user.tgUserId.toString(),
+                    `پس از پرداخت، لطفاً عکس رسید را در همین ربات ارسال کنید.`,
+                  );
+                } catch (err) {
+                  console.error("[APPROVE channel] Failed to send invite to client:", err);
+                }
               }
               await answerCallback({ text: `✅ سفارش #${orderId} تأیید شد و لینک کانال ارسال شد.`, show_alert: true });
             } else {
+              // Invite creation failed — keep order as APPROVED for retry
+              await prisma.order.update({
+                where: { id: orderId },
+                data: {
+                  channelMessageId,
+                  events: {
+                    create: {
+                      actorType: "manager", actorId: manager.id, eventType: "invite_creation_failed",
+                      payload: JSON.stringify({ channelMessageId }),
+                    },
+                  },
+                },
+              });
               await answerCallback({
-                text: `⚠️ سفارش #${orderId} تأیید شد ولی لینک دعوت ایجاد نشد.`,
+                text: `⚠️ سفارش #${orderId} تأیید شد ولی لینک دعوت ایجاد نشد. دوباره تلاش کنید.`,
                 show_alert: true,
               });
             }
@@ -1702,8 +1726,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:referrals:create") {
-      managerSessions.set(ctx.from.id, { state: "referral:create:maxuses" });
-      await safeRender(ctx, ManagerTexts.enterReferralMaxUses());
+      managerSessions.set(ctx.from.id, { state: "referral:create:score" });
+      await safeRender(ctx, ManagerTexts.enterReferralScore());
       return;
     }
 
@@ -1812,7 +1836,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data === "mgr:analytics:referrals") {
+    if (data === "mgr:analytics:referrals" || data === "mgr:referrals:stats") {
       const [totalCodes, totalUsesResult] = await Promise.all([
         prisma.referralCode.count(),
         prisma.referralCode.aggregate({ _sum: { usedCount: true } }),
@@ -2048,7 +2072,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       // Go back to receipt list
-      await ctx.deleteMessage();
+      try { await ctx.deleteMessage(); } catch { /* photo message may already be gone */ }
       await ctx.reply(ManagerTexts.receiptApproved(receipt.orderId), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
