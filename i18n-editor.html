@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ویرایشگر متن‌های ربات فروشگاه آموز</title>
+<style>
+  :root {
+    --bg: #f1f5f9;
+    --surface: #ffffff;
+    --border: #cbd5e1;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --success: #16a34a;
+    --accent: #f59e0b;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+    --radius: 10px;
+    --client: #dbeafe;
+    --manager: #fef3c7;
+    --courier: #d1fae5;
+    --notification: #ede9fe;
+    --channel: #fce7f3;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Vazirmatn", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 20px;
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+
+  /* Header */
+  .header {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    box-shadow: var(--shadow);
+    margin-bottom: 20px;
+  }
+  .header h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+  .header .sub { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
+  .header .stats { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-muted); }
+  .header .stats span { background: var(--bg); padding: 4px 12px; border-radius: 6px; }
+
+  /* Toolbar */
+  .toolbar {
+    display: flex; flex-wrap: wrap;
+    gap: 10px; margin-bottom: 16px;
+    align-items: center;
+  }
+  .search-box {
+    flex: 1; min-width: 200px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: var(--surface);
+  }
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-success { background: var(--success); color: #fff; }
+  .btn-success:hover { opacity: 0.9; }
+  .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn-outline:hover { background: var(--bg); }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-accent:hover { opacity: 0.9; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Group section */
+  .group { margin-bottom: 20px; }
+  .group-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    font-weight: 700;
+    font-size: 16px;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--border);
+    border-bottom: none;
+  }
+  .group-header .arrow { transition: transform 0.2s; font-size: 12px; }
+  .group-header.collapsed .arrow { transform: rotate(-90deg); }
+  .group-header .count { font-size: 12px; font-weight: 500; opacity: 0.7; }
+  .group.client .group-header { background: var(--client); }
+  .group.manager .group-header { background: var(--manager); }
+  .group.courier .group-header { background: var(--courier); }
+  .group.notification .group-header { background: var(--notification); }
+  .group.channel .group-header { background: var(--channel); }
+
+  .group-body { border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius); }
+  .group-body.collapsed { display: none; }
+
+  /* Entry card */
+  .entry {
+    background: var(--surface);
+    padding: 14px 18px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .entry:last-child { border-bottom: none; }
+  .entry-header {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .entry-key {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--primary);
+  }
+  .entry-params {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+  }
+  .entry-preview {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    background: #fafafa;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    direction: ltr;
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .entry-preview .param {
+    color: var(--primary);
+    font-weight: 600;
+  }
+  .entry-preview .expr {
+    color: #9333ea;
+    font-weight: 500;
+  }
+  .entry-textarea {
+    width: 100%;
+    min-height: 60px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    direction: rtl;
+    text-align: right;
+    line-height: 1.8;
+  }
+  .entry-textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  }
+  .entry-textarea.modified { border-color: var(--accent); }
+  .entry .reset-btn {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  .entry .reset-btn:hover { color: var(--primary); }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--text); color: #fff;
+    padding: 12px 24px; border-radius: 8px;
+    font-size: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    opacity: 0; transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 1000;
+  }
+  .toast.show { opacity: 1; }
+
+  .search-highlight { background: #fde68a; padding: 0 2px; border-radius: 2px; }
+
+  @media (max-width: 640px) {
+    body { padding: 12px; }
+    .header { padding: 20px; }
+    .header h1 { font-size: 20px; }
+    .toolbar { flex-direction: column; }
+    .search-box { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>✏️ ویرایشگر متن‌های ربات فروشگاه آموز</h1>
+  <p class="sub">متن تمام پیام‌هایی که ربات به کاربران نمایش می‌دهد را اینجا می‌توانید تغییر دهید. متغیرهایی مثل <code>{name}</code> را حذف نکنید — آن‌ها با مقادیر واقعی جایگزین می‌شوند.</p>
+  <div class="stats">
+    <span>📝 <span id="totalCount">0</span> متن قابل ویرایش</span>
+    <span>✏️ <span id="modifiedCount">0</span> تغییر یافته</span>
+    <span>🔄 کلیک روی اسم گروه برای باز/بسته شدن</span>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input type="text" class="search-box" id="searchBox" placeholder="🔍 جستجوی متن... (نام تابع یا محتوای فارسی)" oninput="filterEntries()">
+  <button class="btn btn-success" onclick="generateFile()">📥 دریافت فایل texts.ts جدید</button>
+  <button class="btn btn-accent" onclick="showChanges()">🔍 نمایش تغییرات</button>
+  <button class="btn btn-outline" onclick="resetAll()">↻ بازنشانی همه</button>
+</div>
+
+<div id="groupsContainer"></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── Data ───────────────────────────────────────────────────────
+const TEXTS_DATA = [{"group":"ClientTexts","name":"welcomeNewUser","params":[],"text":"👋 سلام! برای استفاده از فروشگاه، لطفاً یک کد معرفی معتبر وارد کنید:"},{"group":"ClientTexts","name":"invalidReferralCode","params":[],"text":"❌ کد معرفی نامعتبر یا منقضی است. دوباره تلاش کنید:"},{"group":"ClientTexts","name":"referralCodeAccepted","params":[],"text":"✅ کد معرفی تأیید شد! به فروشگاه آموز خوش آمدید."},{"group":"ClientTexts","name":"userBlocked","params":[],"text":"🚫 حساب شما مسدود شده است. لطفاً با پشتیبانی تماس بگیرید."},{"group":"ClientTexts","name":"welcome","params":[],"text":"به فروشگاه آموز خوش آمدید. از منوی زیر برای ادامه استفاده کنید."},{"group":"ClientTexts","name":"welcomeBack","params":["name"],"text":"سلام {name}! 👋"},{"group":"ClientTexts","name":"noProductsAvailable","params":[],"text":"فعلاً محصولی برای نمایش وجود ندارد."},{"group":"ClientTexts","name":"productsHeader","params":[],"text":"محصولات موجود:"},{"group":"ClientTexts","name":"productLine","params":["title","price","currency"],"text":"{title} - {price} {currency}"},{"group":"ClientTexts","name":"cartEmpty","params":[],"text":"سبد خرید شما خالی است."},{"group":"ClientTexts","name":"cartHeader","params":[],"text":"سبد خرید شما:"},{"group":"ClientTexts","name":"cartItemLine","params":["title","qty","lineTotal","currency"],"text":"{title} x {qty} = {lineTotal} {currency}"},{"group":"ClientTexts","name":"cartSubtotal","params":["subtotal"],"text":"جمع: {subtotal}"},{"group":"ClientTexts","name":"addUsage","params":[],"text":"فرمت: /add <شناسه محصول> <تعداد>"},{"group":"ClientTexts","name":"productNotFound","params":[],"text":"محصول پیدا نشد."},{"group":"ClientTexts","name":"addedToCart","params":["title","qty"],"text":"به سبد خرید اضافه شد: {title} x {qty}."},{"group":"ClientTexts","name":"removeUsage","params":[],"text":"فرمت: /remove <شناسه محصول>"},{"group":"ClientTexts","name":"productNotInCart","params":[],"text":"این محصول در سبد خرید شما نیست."},{"group":"ClientTexts","name":"removedFromCart","params":["title"],"text":"از سبد خرید حذف شد: {title}."},{"group":"ClientTexts","name":"orderSubmitted","params":["orderId","grandTotal"],"text":"✅ سفارش شما ثبت شد! شماره: {orderId}، مبلغ: {grandTotal}."},{"group":"ClientTexts","name":"outOfStock","params":[],"text":"متأسفانه برخی اقلام موجود نیستند. لطفاً سبد خرید را اصلاح کنید."},{"group":"ClientTexts","name":"checkoutError","params":[],"text":"ثبت سفارش با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید."},{"group":"ClientTexts","name":"unableToIdentify","params":[],"text":"امکان شناسایی شما وجود ندارد."},{"group":"ClientTexts","name":"myReferralCode","params":["code"],"text":"🔗 کد معرفی شما: `{code}`"},{"group":"ClientTexts","name":"noReferralCode","params":[],"text":"شما هنوز کد معرفی ایجاد نکرده‌اید."},{"group":"ClientTexts","name":"referralCodeGenerated","params":["code"],"text":"✅ کد معرفی جدید شما: `{code}`\n\nاین کد را برای دوستانتان ارسال کنید."},{"group":"ClientTexts","name":"referralStats","params":["count"],"text":"📊 تعداد معرفی‌های شما: {count} نفر"},{"group":"ClientTexts","name":"productDetails","params":["title","description","price","currency","stock"],"text":"*{escapeMarkdown(title)}*\n\n{escapeMarkdown(description) || 'بدون توضیحات'}\n\n💰 قیمت: {price} {currency}{stock !== null ? `\\n📦 موجودی: {stock}` : ''}"},{"group":"ClientTexts","name":"selectQuantity","params":[],"text":"تعداد را انتخاب کنید:"},{"group":"ClientTexts","name":"addedToCartSuccess","params":["title","qty"],"text":"✅ {qty} عدد {title} به سبد خرید اضافه شد!"},{"group":"ClientTexts","name":"myOrdersHeader","params":[],"text":"📦 سفارش‌های شما:"},{"group":"ClientTexts","name":"noOrders","params":[],"text":"شما هنوز سفارشی ثبت نکرده‌اید."},{"group":"ClientTexts","name":"orderDetails","params":["id","status","total"],"text":"سفارش #{id}\nوضعیت: {status}\nمبلغ: {total}"},{"group":"ClientTexts","name":"cartCleared","params":[],"text":"🗑️ سبد خرید شما خالی شد."},{"group":"ClientTexts","name":"checkoutInfoRequired","params":[],"text":"📋 قبل از ثبت سفارش، لطفاً اطلاعات زیر را تکمیل کنید:"},{"group":"ClientTexts","name":"askPhone","params":[],"text":"📱 لطفاً شماره تماس خود را ارسال کنید:"},{"group":"ClientTexts","name":"askPhoneButton","params":[],"text":"📱 ارسال شماره تماس"},{"group":"ClientTexts","name":"phoneReceived","params":[],"text":"✅ شماره تماس ثبت شد."},{"group":"ClientTexts","name":"askLocation","params":[],"text":"📍 لطفاً موقعیت مکانی خود را ارسال کنید:"},{"group":"ClientTexts","name":"askLocationButton","params":[],"text":"📍 ارسال موقعیت مکانی"},{"group":"ClientTexts","name":"locationReceived","params":[],"text":"✅ موقعیت مکانی ثبت شد."},{"group":"ClientTexts","name":"askAddress","params":[],"text":"🏠 لطفاً آدرس کامل را به صورت متن ارسال کنید:"},{"group":"ClientTexts","name":"addressReceived","params":[],"text":"✅ آدرس ثبت شد."},{"group":"ClientTexts","name":"infoComplete","params":[],"text":"✅ اطلاعات کامل شد. در حال ثبت سفارش..."},{"group":"ClientTexts","name":"skipInfo","params":[],"text":"رد کردن"},{"group":"ClientTexts","name":"cancelCheckout","params":[],"text":"❌ ثبت سفارش لغو شد."},{"group":"ClientTexts","name":"orderPendingApproval","params":[],"text":"⏳ سفارش شما در حال بررسی توسط مدیر است. نتیجه به شما اطلاع داده می‌شود."},{"group":"ClientTexts","name":"orderApproved","params":["orderId"],"text":"✅ خبر خوب! سفارش #{orderId} تأیید شد."},{"group":"ClientTexts","name":"orderApprovedWithInvite","params":["orderId","inviteLink"],"text":"✅ سفارش #{orderId} تأیید شد.\n\n📢 برای اطلاعات پرداخت وارد کانال شوید:\n{inviteLink}\n\nپس از پرداخت، عکس رسید را همینجا ارسال کنید."},{"group":"ClientTexts","name":"orderRejected","params":["orderId","reason"],"text":"❌ سفارش #{orderId} تأیید نشد.{reason ? `\\n\\nعلت: {reason}` : ''}"},{"group":"ClientTexts","name":"sendReceiptPrompt","params":[],"text":"📸 لطفاً عکس رسید پرداخت را ارسال کنید:"},{"group":"ClientTexts","name":"receiptReceived","params":[],"text":"✅ رسید دریافت شد. مدیر به‌زودی بررسی می‌کند."},{"group":"ClientTexts","name":"receiptApproved","params":["orderId"],"text":"✅ رسید سفارش #{orderId} تأیید شد. سفارش شما تکمیل شد."},{"group":"ClientTexts","name":"receiptRejected","params":["orderId","reason"],"text":"❌ رسید سفارش #{orderId} تأیید نشد.{reason ? `\\n\\nعلت: {reason}` : ''}\n\nلطفاً یک عکس جدید از رسید ارسال کنید."},{"group":"ClientTexts","name":"noActiveOrderForReceipt","params":[],"text":"❌ سفارشی که منتظر رسید باشد ندارید."},{"group":"ClientTexts","name":"supportTitle","params":[],"text":"💬 پشتیبانی"},{"group":"ClientTexts","name":"supportIntro","params":[],"text":"شما وارد بخش پشتیبانی شدید. پیام خود را ارسال کنید تا مدیر پاسخ دهد."},{"group":"ClientTexts","name":"supportAskMessage","params":[],"text":"✍️ لطفاً پیام خود را ارسال کنید:"},{"group":"ClientTexts","name":"supportMessageSent","params":[],"text":"✅ پیام شما به پشتیبانی ارسال شد."},{"group":"ClientTexts","name":"supportClosed","params":[],"text":"✅ گفتگو بسته شد. در صورت نیاز دوباره از پشتیبانی استفاده کنید."},{"group":"ClientTexts","name":"supportReplyFromManager","params":["text"],"text":"💬 پاسخ پشتیبانی:\n\n{text}"},{"group":"ClientTexts","name":"helpMessage","params":[],"text":"\n🛒 *راهنمای فروشگاه آموز*\n\nبرای استفاده از ربات نیازی به تایپ کردن دستورها نیست؛\nاز دکمه‌های منو استفاده کنید.\n\n*مراحل سفارش:*\n1) از بخش «محصولات» کالاها را انتخاب کنید.\n2) در «سبد خرید» اقلام را بررسی کنید.\n3) «ثبت سفارش» را بزنید و اطلاعات تماس/آدرس را تکمیل کنید.\n4) پس از تأیید مدیر، راهنمای پرداخت و ارسال رسید به شما اعلام می‌شود.\n\nبرای ارتباط با پشتیبانی، از دکمه «پشتیبانی» استفاده کنید.\n"},{"group":"ManagerTexts","name":"notAuthorized","params":[],"text":"شما اجازه استفاده از این ربات را ندارید."},{"group":"ManagerTexts","name":"welcome","params":["pendingCount"],"text":"سلام مدیر محترم. سفارش‌های در انتظار بررسی: {pendingCount}."},{"group":"ManagerTexts","name":"noPendingOrders","params":[],"text":"هیچ سفارشی برای بررسی وجود ندارد."},{"group":"ManagerTexts","name":"pendingOrdersHeader","params":[],"text":"سفارش‌های در انتظار بررسی:"},{"group":"ManagerTexts","name":"pendingOrderLine","params":["orderId","userId","grandTotal"],"text":"#{orderId} – کاربر {userId} – مبلغ {grandTotal}"},{"group":"ManagerTexts","name":"approveUsage","params":[],"text":"فرمت: /approve_order <شماره سفارش>"},{"group":"ManagerTexts","name":"orderNotFound","params":[],"text":"سفارش پیدا نشد یا در وضعیت بررسی نیست."},{"group":"ManagerTexts","name":"orderApproved","params":["orderId"],"text":"سفارش #{orderId} تأیید شد."},{"group":"ManagerTexts","name":"rejectUsage","params":[],"text":"فرمت: /reject_order <شماره سفارش>"},{"group":"ManagerTexts","name":"orderRejected","params":["orderId"],"text":"سفارش #{orderId} رد شد."},{"group":"ManagerTexts","name":"helpMessage","params":[],"text":"\n👔 *راهنمای مدیر - فروشگاه آموز*\n\nبرای کار با ربات مدیریتی، از دکمه‌های منو استفاده کنید.\n*مهم‌ترین بخش‌ها:*\n\n- «سفارش‌ها»: بررسی و تأیید/رد سفارش‌ها\n- «رسیدها»: بررسی رسیدهای پرداخت\n- «محصولات»: افزودن/ویرایش/غیرفعال‌سازی محصول\n- «پشتیبانی»: صندوق پیام‌های کاربران و پاسخ‌دهی\n"},{"group":"ManagerTexts","name":"mainMenuTitle","params":[],"text":"👔 *داشبورد مدیریت*\n\nیک گزینه را انتخاب کنید:"},{"group":"ManagerTexts","name":"productsMenuTitle","params":[],"text":"📦 *مدیریت محصولات*"},{"group":"ManagerTexts","name":"productListTitle","params":[],"text":"📦 *لیست محصولات*"},{"group":"ManagerTexts","name":"noProducts","params":[],"text":"هیچ محصولی یافت نشد."},{"group":"ManagerTexts","name":"productCreated","params":["title"],"text":"✅ محصول «{title}» با موفقیت ایجاد شد."},{"group":"ManagerTexts","name":"productUpdated","params":[],"text":"✅ محصول با موفقیت به‌روزرسانی شد."},{"group":"ManagerTexts","name":"productDeleted","params":[],"text":"✅ محصول غیرفعال شد."},{"group":"ManagerTexts","name":"enterProductTitle","params":[],"text":"عنوان محصول را وارد کنید:"},{"group":"ManagerTexts","name":"enterProductDescription","params":[],"text":"توضیحات محصول را وارد کنید:"},{"group":"ManagerTexts","name":"enterProductPrice","params":[],"text":"قیمت محصول را وارد کنید (فقط عدد):"},{"group":"ManagerTexts","name":"enterProductStock","params":[],"text":"موجودی اولیه را وارد کنید (فقط عدد):"},{"group":"ManagerTexts","name":"sendProductImage","params":[],"text":"عکس محصول را ارسال کنید:"},{"group":"ManagerTexts","name":"invalidNumber","params":[],"text":"❌ لطفاً یک عدد معتبر وارد کنید."},{"group":"ManagerTexts","name":"usersMenuTitle","params":[],"text":"👥 *مدیریت کاربران*"},{"group":"ManagerTexts","name":"userListTitle","params":[],"text":"👥 *لیست کاربران*"},{"group":"ManagerTexts","name":"noUsers","params":[],"text":"هیچ کاربری یافت نشد."},{"group":"ManagerTexts","name":"userDetails","params":["id","username","isActive","orderCount","canCreateReferral","effectiveScore","hasOverride"],"text":"*کاربر #{id}*\n\nنام کاربری: {escapeMarkdown(username) || '—'}\nوضعیت: {isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: {canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: {effectiveScore}/10{hasOverride ? ' (بازنویسی مدیر)' : ''}\nتعداد سفارش: {orderCount}"},{"group":"ManagerTexts","name":"userBlocked","params":["username"],"text":"🚫 کاربر {username || 'نامشخص'} مسدود شد."},{"group":"ManagerTexts","name":"userUnblocked","params":["username"],"text":"✅ کاربر {username || 'نامشخص'} رفع مسدود شد."},{"group":"ManagerTexts","name":"userReferralGranted","params":["username"],"text":"🔑 مجوز ساخت کد معرفی به {username || 'کاربر'} داده شد."},{"group":"ManagerTexts","name":"userReferralRevoked","params":["username"],"text":"🔒 مجوز ساخت کد معرفی از {username || 'کاربر'} گرفته شد."},{"group":"ManagerTexts","name":"userDeleted","params":["username"],"text":"🗑️ کاربر {username || 'نامشخص'} حذف شد."},{"group":"ManagerTexts","name":"userDeleteConfirm","params":["username"],"text":"⚠️ آیا از حذف کاربر {username || 'نامشخص'} مطمئن هستید؟ این عمل غیرقابل بازگشت است."},{"group":"ManagerTexts","name":"enterSearchQuery","params":[],"text":"نام کاربری یا شناسه تلگرام را وارد کنید:"},{"group":"ManagerTexts","name":"enterUserScore","params":[],"text":"امتیاز جدید (۰ تا ۱۰) را وارد کنید:"},{"group":"ManagerTexts","name":"userScoreUpdated","params":["score"],"text":"⭐ امتیاز کاربر به {score} تغییر یافت."},{"group":"ManagerTexts","name":"enterReferralScore","params":[],"text":"⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربران این کد وارد کنید:"},{"group":"ManagerTexts","name":"invalidScore","params":[],"text":"❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد."},{"group":"ManagerTexts","name":"couriersMenuTitle","params":[],"text":"🚚 *مدیریت پیک‌ها*"},{"group":"ManagerTexts","name":"courierListTitle","params":[],"text":"🚚 *لیست پیک‌ها*"},{"group":"ManagerTexts","name":"noCouriers","params":[],"text":"هیچ پیکی یافت نشد."},{"group":"ManagerTexts","name":"courierDetails","params":["id","username","tgUserId","isActive"],"text":"*پیک #{id}*\n\nنام کاربری: {escapeMarkdown(username) || '—'}\nشناسه تلگرام: `{tgUserId}`\nوضعیت: {isActive ? '✅ فعال' : '🚫 غیرفعال'}"},{"group":"ManagerTexts","name":"courierAdded","params":["tgUserId"],"text":"✅ پیک با شناسه تلگرام {tgUserId} اضافه شد."},{"group":"ManagerTexts","name":"courierAlreadyExists","params":[],"text":"این شناسه تلگرام قبلاً به عنوان پیک ثبت شده است."},{"group":"ManagerTexts","name":"courierToggled","params":["username","isActive"],"text":"{isActive ? '✅ پیک ' + (username || 'نامشخص') + ' فعال شد.' : '🚫 پیک ' + (username || 'نامشخص') + ' غیرفعال شد.'}"},{"group":"ManagerTexts","name":"courierDeleted","params":["username"],"text":"🗑️ پیک {username || 'نامشخص'} حذف شد."},{"group":"ManagerTexts","name":"enterCourierTgId","params":[],"text":"شناسه تلگرام پیک را وارد کنید (عدد):"},{"group":"ManagerTexts","name":"invalidTgId","params":[],"text":"❌ شناسه تلگرام باید یک عدد معتبر باشد."},{"group":"ManagerTexts","name":"referralsMenuTitle","params":[],"text":"🔗 *مدیریت کدهای معرفی*"},{"group":"ManagerTexts","name":"referralListTitle","params":[],"text":"🔗 *لیست کدهای معرفی*"},{"group":"ManagerTexts","name":"noReferralCodes","params":[],"text":"هیچ کد معرفی یافت نشد."},{"group":"ManagerTexts","name":"referralCodeCreated","params":["code"],"text":"✅ کد معرفی ایجاد شد: `{code}`"},{"group":"ManagerTexts","name":"referralCodeDeactivated","params":[],"text":"✅ کد معرفی غیرفعال شد."},{"group":"ManagerTexts","name":"enterReferralMaxUses","params":[],"text":"حداکثر تعداد استفاده را وارد کنید:"},{"group":"ManagerTexts","name":"analyticsMenuTitle","params":[],"text":"📊 *داشبورد آمار*"},{"group":"ManagerTexts","name":"orderAnalytics","params":["total","pending","completed","revenue"],"text":"📦 *آمار سفارش‌ها*\n\nکل سفارش‌ها: {total}\nدر انتظار: {pending}\nتکمیل‌شده: {completed}\nجمع فروش: {revenue}"},{"group":"ManagerTexts","name":"userAnalytics","params":["total","active","newToday"],"text":"👥 *آمار کاربران*\n\nکل کاربران: {total}\nکاربران فعال: {active}\nکاربران امروز: {newToday}"},{"group":"ManagerTexts","name":"productAnalytics","params":["total","active","lowStock"],"text":"📦 *آمار محصولات*\n\nکل محصولات: {total}\nفعال: {active}\nکم‌موجودی: {lowStock}"},{"group":"ManagerTexts","name":"referralAnalytics","params":["totalCodes","totalUses","topReferrer"],"text":"🔗 *آمار معرفی*\n\nکل کدها: {totalCodes}\nکل استفاده: {totalUses}\nبهترین معرف: {topReferrer || '—'}"},{"group":"ManagerTexts","name":"confirmDelete","params":["item"],"text":"⚠️ آیا از حذف {item} مطمئن هستید؟"},{"group":"ManagerTexts","name":"actionCancelled","params":[],"text":"عملیات لغو شد."},{"group":"ManagerTexts","name":"pendingReceiptsTitle","params":[],"text":"🧾 *رسیدهای در انتظار بررسی*"},{"group":"ManagerTexts","name":"noPendingReceipts","params":[],"text":"هیچ رسیدی برای بررسی وجود ندارد."},{"group":"ManagerTexts","name":"receiptDetails","params":["orderId","userId","username","submittedAt"],"text":"🧾 *رسید سفارش #{orderId}*\n\nکاربر: {username || `#{userId}`}\nزمان ارسال: {submittedAt}"},{"group":"ManagerTexts","name":"receiptApproved","params":["orderId"],"text":"✅ رسید سفارش #{orderId} تأیید شد."},{"group":"ManagerTexts","name":"receiptRejected","params":["orderId"],"text":"❌ رسید سفارش #{orderId} رد شد."},{"group":"ManagerTexts","name":"enterRejectReason","params":[],"text":"علت رد را وارد کنید:"},{"group":"ManagerTexts","name":"orderApprovedInviteSent","params":["orderId","userTgId"],"text":"✅ سفارش #{orderId} تأیید شد. لینک کانال برای کاربر {userTgId} ارسال شد."},{"group":"ManagerTexts","name":"inviteSendFailed","params":["orderId"],"text":"⚠️ سفارش #{orderId} تأیید شد اما ارسال لینک کانال به کاربر ناموفق بود."},{"group":"ManagerTexts","name":"supportInboxTitle","params":[],"text":"💬 *صندوق پشتیبانی*"},{"group":"ManagerTexts","name":"noSupportConversations","params":[],"text":"هیچ گفتگوی بازِ پشتیبانی وجود ندارد."},{"group":"ManagerTexts","name":"supportConversationTitle","params":["conversationId"],"text":"💬 *گفتگو #{conversationId}*"},{"group":"ManagerTexts","name":"supportAskReply","params":[],"text":"✍️ پاسخ را ارسال کنید:"},{"group":"ManagerTexts","name":"supportReplySent","params":[],"text":"✅ پاسخ ارسال شد."},{"group":"ManagerTexts","name":"supportConversationClosed","params":[],"text":"✅ گفتگو بسته شد."},{"group":"ManagerTexts","name":"supportNewMessageNotification","params":["conversationId","fromLabel"],"text":"📩 پیام جدید پشتیبانی\nگفتگو #{conversationId}\nاز: {fromLabel}"},{"group":"ManagerTexts","name":"envMissingCheckoutChannel","params":[],"text":"امکان تأیید سفارش نیست: CHECKOUT_CHANNEL_ID تنظیم نشده است."},{"group":"ManagerTexts","name":"productNotFound","params":[],"text":"محصول پیدا نشد."},{"group":"ManagerTexts","name":"productDeactivated","params":[],"text":"محصول غیرفعال شد."},{"group":"ManagerTexts","name":"productActivated","params":[],"text":"محصول فعال شد."},{"group":"ManagerTexts","name":"invalidDeliveryOrStatus","params":[],"text":"مقدار نامعتبر است."},{"group":"ManagerTexts","name":"userContactInfo","params":["phone","address","lat","lng"],"text":"📋 *اطلاعات مشتری:*\nتلفن: {escapeMarkdown(phone) || '—'}\nآدرس: {escapeMarkdown(address) || '—'}{lat != null && lng != null ? `\\n📍 موقعیت: {lat.toFixed(6)}, {lng.toFixed(6)}` : ''}"},{"group":"ManagerTexts","name":"settingsMenuTitle","params":["imageStatus","expiryMinutes","paymentMethod"],"text":"⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: {paymentMethod === \"channel\" ? \"📢 کانال\" : \"💳 مستقیم\"}\n🖼️ تصویر پرداخت: {imageStatus}\n⏳ مهلت پرداخت: {expiryMinutes} دقیقه"},{"group":"ManagerTexts","name":"settingsImageUpdated","params":[],"text":"✅ تصویر پرداخت با موفقیت به‌روزرسانی شد."},{"group":"ManagerTexts","name":"settingsImageDeleted","params":[],"text":"✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود."},{"group":"ManagerTexts","name":"settingsImageAsk","params":[],"text":"🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):"},{"group":"ManagerTexts","name":"settingsExpiryAsk","params":[],"text":"⏳ مهلت پرداخت را به دقیقه وارد کنید (مثلاً 60):"},{"group":"ManagerTexts","name":"settingsExpiryUpdated","params":["minutes"],"text":"✅ مهلت پرداخت به {minutes} دقیقه تغییر یافت."},{"group":"ManagerTexts","name":"settingsExpiryInvalid","params":[],"text":"❌ لطفاً یک عدد معتبر (بزرگتر از صفر) وارد کنید."},{"group":"ManagerTexts","name":"settingsPayMethodToggled","params":["method"],"text":"method === \"channel\" ? \"✅ روش پرداخت به \\\"کانال\\\" تغییر یافت. اطلاعات پرداخت در کانال پست می‌شود.\" : \"✅ روش پرداخت به \\\"مستقیم\\\" تغییر یافت. اطلاعات پرداخت مستقیماً به کاربر ارسال می‌شود.\""},{"group":"CourierTexts","name":"notAuthorized","params":[],"text":"شما به عنوان پیک مجاز نیستید."},{"group":"CourierTexts","name":"dashboardTitle","params":[],"text":"داشبورد پیک"},{"group":"CourierTexts","name":"deliveriesTitle","params":[],"text":"ارسال‌های شما"},{"group":"CourierTexts","name":"noDeliveries","params":[],"text":"هیچ ارسال اختصاص‌داده‌شده‌ای ندارید."},{"group":"CourierTexts","name":"deliveryDetails","params":["orderId","status","customerName","phone","address","locationLat","locationLng"],"text":"🚚 ارسال سفارش #{orderId}\n━━━━━━━━━━━━━━━\n📌 وضعیت: {status}\n\n👤 مشتری: {customerName}\n📱 تلفن: {phone}\n🏠 آدرس: {address}\n{locationLat != null && locationLng != null ? '📍 موقعیت: ثبت شده' : '📍 موقعیت: ثبت نشده'}"},{"group":"CourierTexts","name":"askFailureReason","params":[],"text":"علت عدم موفقیت را به صورت پیام ارسال کنید."},{"group":"CourierTexts","name":"statusUpdated","params":["status"],"text":"وضعیت به‌روزرسانی شد: {status}"},{"group":"CourierTexts","name":"failureReasonSaved","params":[],"text":"علت ثبت شد."},{"group":"CourierTexts","name":"invalidDelivery","params":[],"text":"ارسال نامعتبر است."},{"group":"CourierTexts","name":"notFound","params":[],"text":"یافت نشد."},{"group":"CourierTexts","name":"updated","params":[],"text":"ثبت شد."},{"group":"CourierTexts","name":"askFailureReasonEmpty","params":[],"text":"لطفاً علت را ارسال کنید."},{"group":"CourierTexts","name":"statusAssigned","params":[],"text":"اختصاص داده شده"},{"group":"CourierTexts","name":"statusPickedUp","params":[],"text":"تحویل گرفته شد"},{"group":"CourierTexts","name":"statusOutForDelivery","params":[],"text":"در مسیر ارسال"},{"group":"CourierTexts","name":"statusDelivered","params":[],"text":"تحویل شد"},{"group":"CourierTexts","name":"statusFailed","params":[],"text":"ناموفق"},{"group":"NotificationTexts","name":"orderApprovedWithInvite","params":["orderId","inviteLink"],"text":"سفارش #{orderId} تأیید شد. برای پرداخت وارد کانال شوید: {inviteLink}"},{"group":"ChannelTexts","name":"paymentMessage","params":["orderId","grandTotal","currency"],"text":"💳 *پرداخت سفارش #{orderId}*\n\nمبلغ قابل پرداخت: *{grandTotal.toLocaleString(\"fa-IR\")} {currency}*\n\nلطفاً مبلغ فوق را به شماره کارت/حساب ذکر شده واریز کنید و سپس عکس رسید را در ربات فروشگاه ارسال نمایید.\n\n⏳ این پیام پس از ثبت رسید یا اتمام مهلت پرداخت حذف خواهد شد."}];
+
+let modified = new Set();
+const originalTexts = {};
+
+TEXTS_DATA.forEach(e => {
+  const key = `${e.group}.${e.name}`;
+  originalTexts[key] = e.text;
+});
+
+// ─── Render ──────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function highlightText(text) {
+  // Replace {param} and {expression} with colored spans
+  return escapeHtml(text).replace(/\{(\w+)\}/g, '<span class="param">{<span class="param">$1</span>}</span>');
+}
+
+function render() {
+  const container = document.getElementById('groupsContainer');
+  const groups = [...new Set(TEXTS_DATA.map(e => e.group))];
+  const groupLabels = {
+    ClientTexts: '📱 متن‌های ربات مشتری',
+    ManagerTexts: '👔 متن‌های ربات مدیریت',
+    CourierTexts: '🚚 متن‌های ربات پیک',
+    NotificationTexts: '🔔 متن‌های نوتیفیکیشن (workers)',
+    ChannelTexts: '📢 متن‌های کانال پرداخت'
+  };
+
+  let html = '';
+  const state = getCollapseState();
+
+  groups.forEach(group => {
+    const entries = TEXTS_DATA.filter(e => e.group === group);
+    const isCollapsed = state[group] ? 'collapsed' : '';
+    const colorClass = group === 'ClientTexts' ? 'client' : group === 'ManagerTexts' ? 'manager' : group === 'CourierTexts' ? 'courier' : group === 'NotificationTexts' ? 'notification' : 'channel';
+
+    html += `<div class="group ${colorClass}" data-group="${group}">`;
+    html += `<div class="group-header ${isCollapsed}" onclick="toggleGroup('${group}')">`;
+    html += `<span class="arrow">▼</span> <span>${groupLabels[group] || group}</span> <span class="count">(${entries.length} متن)</span>`;
+    html += `</div>`;
+    html += `<div class="group-body ${isCollapsed}" id="group-${group}">`;
+
+    entries.forEach((entry, idx) => {
+      const key = `${entry.group}.${entry.name}`;
+      const isModified = modified.has(key);
+      const paramsStr = entry.params.length > 0 ? entry.params.join(', ') : 'بدون پارامتر';
+
+      html += `<div class="entry" data-key="${key}" data-group="${group}">`;
+      html += `<div class="entry-header">`;
+      html += `<span class="entry-key">${entry.name}</span>`;
+      html += `<span class="entry-params">(${escapeHtml(paramsStr)})</span>`;
+      if (isModified) html += `<span style="font-size:11px;color:#ca8a04;font-weight:600;">✏️ تغییر کرده</span>`;
+      html += `</div>`;
+      html += `<div class="entry-preview">${highlightText(entry.text)}</div>`;
+      const readOnly = IS_READONLY[key];
+      html += `<textarea class="entry-textarea" id="input-${key}" data-key="${key}" oninput="markModified('${key}')" dir="rtl"${readOnly ? ' readonly style="background:#f8f8f8;color:#888;"' : ''}>${escapeHtml(entry.text)}</textarea>`;
+      if (readOnly) {
+        html += `<div style="font-size:11px;color:#888;margin-top:2px;">🔒 این متن ساختار ثابتی دارد و در این نسخه قابل ویرایش نیست.</div>`;
+      }
+      html += `<button class="reset-btn" onclick="resetEntry('${key}')">↻ بازنشانی به پیش‌فرض</button>`;
+      html += `</div>`;
+    });
+
+    html += `</div></div>`;
+  });
+
+  container.innerHTML = html;
+  document.getElementById('totalCount').textContent = TEXTS_DATA.length;
+  updateModifiedCount();
+}
+
+// ─── State Management ────────────────────────────────────────────
+function getCollapseState() {
+  try { return JSON.parse(localStorage.getItem('i18n-editor-collapse') || '{}'); } catch { return {}; }
+}
+function setCollapseState(state) {
+  localStorage.setItem('i18n-editor-collapse', JSON.stringify(state));
+}
+function toggleGroup(group) {
+  const state = getCollapseState();
+  state[group] = !state[group];
+  setCollapseState(state);
+  const body = document.getElementById('group-' + group);
+  const header = document.querySelector(`[data-group="${group}"] .group-header`);
+  if (body) body.classList.toggle('collapsed');
+  if (header) header.classList.toggle('collapsed');
+}
+
+function getModifiedState() {
+  try { return JSON.parse(localStorage.getItem('i18n-editor-modified') || '{}'); } catch { return {}; }
+}
+function setModifiedState(state) {
+  localStorage.setItem('i18n-editor-modified', JSON.stringify(state));
+  modified = new Set(Object.keys(state).filter(k => state[k]));
+}
+
+function markModified(key) {
+  const state = getModifiedState();
+  state[key] = true;
+  setModifiedState(state);
+  const entry = document.querySelector(`[data-key="${key}"]`);
+  if (entry) {
+    const header = entry.querySelector('.entry-header');
+    if (!header.querySelector('.modified-badge')) {
+      const badge = document.createElement('span');
+      badge.className = 'modified-badge';
+      badge.style.cssText = 'font-size:11px;color:#ca8a04;font-weight:600;';
+      badge.textContent = '✏️ تغییر کرده';
+      header.appendChild(badge);
+    }
+  }
+  document.getElementById('input-' + key)?.classList.add('modified');
+  updateModifiedCount();
+}
+
+function resetEntry(key) {
+  if (originalTexts[key] === undefined) return;
+  const ta = document.getElementById('input-' + key);
+  if (ta) ta.value = originalTexts[key];
+  const state = getModifiedState();
+  delete state[key];
+  setModifiedState(state);
+  const entry = document.querySelector(`[data-key="${key}"]`);
+  if (entry) {
+    const badge = entry.querySelector('.modified-badge');
+    if (badge) badge.remove();
+  }
+  ta?.classList.remove('modified');
+  updateModifiedCount();
+  showToast('متن "${key.split(".").pop()}" به حالت اولیه بازگشت.');
+}
+
+function resetAll() {
+  if (!confirm('آیا مطمئن هستید؟ تمام تغییرات شما از بین می‌رود.')) return;
+  TEXTS_DATA.forEach(e => resetEntry(`${e.group}.${e.name}`));
+  showToast('همه متن‌ها به حالت اولیه بازگشتند.');
+}
+
+function updateModifiedCount() {
+  const count = Object.keys(getModifiedState()).length;
+  document.getElementById('modifiedCount').textContent = count;
+}
+
+// ─── Search / Filter ─────────────────────────────────────────────
+function filterEntries() {
+  const q = document.getElementById('searchBox').value.trim().toLowerCase();
+  document.querySelectorAll('.entry').forEach(el => {
+    const text = el.textContent.toLowerCase();
+    el.style.display = !q || text.includes(q) ? '' : 'none';
+  });
+  document.querySelectorAll('.group').forEach(g => {
+    const visible = [...g.querySelectorAll('.entry')].some(e => e.style.display !== 'none');
+    g.style.display = visible || !q ? '' : 'none';
+  });
+}
+
+// ─── Show Changes ────────────────────────────────────────────────
+function showChanges() {
+  const state = getModifiedState();
+  const keys = Object.keys(state);
+  if (keys.length === 0) {
+    showToast('✏️ هیچ متنی تغییر نکرده است.');
+    return;
+  }
+  // Expand all groups, show all entries, then highlight
+  document.querySelectorAll('.group-body').forEach(b => b.classList.remove('collapsed'));
+  document.querySelectorAll('.group-header').forEach(h => h.classList.remove('collapsed'));
+  document.getElementById('searchBox').value = '';
+  document.querySelectorAll('.entry').forEach(e => e.style.display = '');
+  document.querySelectorAll('.group').forEach(g => g.style.display = '');
+
+  // Hide unmodified entries
+  document.querySelectorAll('.entry').forEach(el => {
+    const key = el.dataset.key;
+    el.style.display = state[key] ? '' : 'none';
+  });
+
+  showToast(`🔍 نمایش ${keys.length} متن تغییر یافته.`);
+}
+
+// ─── Generation helpers ──────────────────────────────────────────
+const IS_READONLY = {
+  'ManagerTexts.settingsPayMethodToggled': true,
+  'ManagerTexts.courierToggled': true,
+};
+
+// Convert {expr} → ${expr} handling nested braces correctly
+function convertBraces(text) {
+  let result = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '{') {
+      let depth = 1;
+      let j = i + 1;
+      while (j < text.length && depth > 0) {
+        if (text[j] === '{') depth++;
+        else if (text[j] === '}') depth--;
+        j++;
+      }
+      const inner = text.substring(i + 1, j - 1);
+      result += '${' + convertBraces(inner) + '}';
+      i = j;
+    } else {
+      result += text[i];
+      i++;
+    }
+  }
+  return result;
+}
+
+// Escape backticks that are OUTSIDE ${...} interpolation blocks.
+// Backticks inside ${...} are nested template literal delimiters and must be kept.
+function escapeBackticks(text) {
+  let result = '';
+  let i = 0;
+  let depth = 0;
+  while (i < text.length) {
+    if (text[i] === '$' && text[i+1] === '{') {
+      depth++;
+      result += '${';
+      i += 2;
+    } else if (text[i] === '}' && depth > 0) {
+      depth--;
+      result += '}';
+      i++;
+    } else if (text[i] === '`' && depth === 0) {
+      result += '\\`';
+      i++;
+    } else {
+      result += text[i];
+      i++;
+    }
+  }
+  return result;
+}
+
+// ─── Generate File ───────────────────────────────────────────────
+function generateFile() {
+  const out = [];
+  out.push('// ===========================================');
+  out.push('// AUTO-GENERATED from i18n-editor.html');
+  out.push('// ===========================================');
+  out.push('');
+  out.push('import type { PrismaClient } from "@prisma/client";');
+  out.push('');
+  out.push('export function escapeMarkdown(text: string | null | undefined): string {');
+  out.push('  if (!text) return \'\';');
+  out.push('  return text.replace(/([_*`\\\\[\\]])/g, \'\\\\$1\');');
+  out.push('}');
+  out.push('');
+  out.push('export function escapeMarkdownV2(text: string | null | undefined): string {');
+  out.push('  if (!text) return \'\';');
+  out.push('  return text.replace(/([_*\\\\[\\\\]()~`>#+\\\\-=\\\\|{}.!\\\\])/g, \'\\\\$1\');');
+  out.push('}');
+  out.push('');
+
+  const GROUP_NAMES = {
+    ClientTexts: 'CLIENT BOT TEXTS',
+    ManagerTexts: 'MANAGER BOT TEXTS',
+    CourierTexts: 'COURIER BOT TEXTS',
+    NotificationTexts: 'NOTIFICATION TEXTS (for workers)',
+    ChannelTexts: 'CHANNEL TEXTS (posted inside the checkout channel)',
+  };
+
+  const groups = [...new Set(TEXTS_DATA.map(e => e.group))];
+
+  groups.forEach(group => {
+    const entries = TEXTS_DATA.filter(e => e.group === group);
+    out.push('// ===========================================');
+    out.push('// ' + GROUP_NAMES[group]);
+    out.push('// ===========================================');
+    out.push('');
+    out.push('export const ' + group + ' = {');
+
+    entries.forEach((entry, idx) => {
+      const key = entry.group + '.' + entry.name;
+      const ta = document.getElementById('input-' + key);
+      const editedText = ta ? ta.value : entry.text;
+      const comma = idx === entries.length - 1 ? '' : ',';
+
+      // ── Readonly: settingsPayMethodToggled (pure ternary) ──
+      if (key === 'ManagerTexts.settingsPayMethodToggled') {
+        out.push('  ' + entry.name + ': (method: "channel" | "direct") =>');
+        out.push('    method === "channel"');
+        out.push('      ? "✅ روش پرداخت به \\"کانال\\" تغییر یافت. اطلاعات پرداخت در کانال پست می‌شود."');
+        out.push('      : "✅ روش پرداخت به \\"مستقیم\\" تغییر یافت. اطلاعات پرداخت مستقیماً به کاربر ارسال می‌شود.",');
+        return;
+      }
+
+      // ── Readonly: courierToggled (ternary with backtick branches) ──
+      if (key === 'ManagerTexts.courierToggled') {
+        out.push('  ' + entry.name + ': (username: string | null, isActive: boolean) =>');
+        out.push('    isActive ? `✅ پیک ${username || \'نامشخص\'} فعال شد.` : `🚫 پیک ${username || \'نامشخص\'} غیرفعال شد.`,');
+        return;
+      }
+
+      // ── deliveryDetails: object destructuring ──
+      if (key === 'CourierTexts.deliveryDetails') {
+        const sig = 'params: {\n      orderId: number;\n      status: string;\n      customerName: string;\n      phone: string;\n      address: string;\n      locationLat?: number | null;\n      locationLng?: number | null;\n    }';
+        let body = convertBraces(editedText);
+        const ddParams = ['orderId', 'status', 'customerName', 'phone', 'address', 'locationLat', 'locationLng'];
+        ddParams.forEach(p => {
+          body = body.replace(new RegExp('\\$\\{' + p + '(?![\\w.])', 'g'), '${params.' + p);
+        });
+        body = escapeBackticks(body);
+        out.push('  ' + entry.name + ': (' + sig + ') => `' + body + '`' + comma);
+        return;
+      }
+
+      // ── helpMessage: multi-line with .trim() ──
+      if (key === 'ClientTexts.helpMessage' || key === 'ManagerTexts.helpMessage') {
+        out.push('  ' + entry.name + ': () => `');
+        out.push(editedText);
+        out.push('`.trim()' + comma);
+        return;
+      }
+
+      // ── All other entries: simple template literal ──
+      let body = convertBraces(editedText);
+      body = body.replace(/\n/g, '\\n');
+      body = escapeBackticks(body);
+      const paramsStr = entry.params.join(', ');
+      out.push('  ' + entry.name + ': (' + paramsStr + ') => `' + body + '`' + comma);
+    });
+
+    out.push('};');
+    out.push('');
+  });
+
+  const output = out.join('\n');
+  const blob = new Blob([output], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'texts.ts';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('✅ فایل texts.ts با موفقیت ساخته شد! آن را در مسیر src/i18n/texts.ts جایگزین کنید.');
+}
+
+// ─── Toast ───────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ─── Init ────────────────────────────────────────────────────────
+// Restore modified state
+(function init() {
+  setModifiedState(getModifiedState());
+  render();
+  // Apply saved modifications to textareas
+  const state = getModifiedState();
+  Object.keys(state).forEach(key => {
+    const ta = document.getElementById('input-' + key);
+    if (ta) ta.classList.add('modified');
+  });
+})();
+</script>
+</body>
+</html>

@@ -30,7 +30,11 @@ export class NotificationService {
 
     const text = NotificationServiceTexts.newOrderForManager(orderId, userLabel, grandTotal);
     for (const mgr of managers) {
-      await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      try {
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      } catch (err) {
+        console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about new order:`, err);
+      }
     }
   }
 
@@ -45,7 +49,11 @@ export class NotificationService {
 
     const text = NotificationServiceTexts.newReceiptForManager(orderId, userLabel);
     for (const mgr of managers) {
-      await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      try {
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      } catch (err) {
+        console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about new receipt:`, err);
+      }
     }
   }
 
@@ -60,7 +68,11 @@ export class NotificationService {
 
     const text = ManagerTexts.supportNewMessageNotification(conversationId, userLabel);
     for (const mgr of managers) {
-      await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      try {
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      } catch (err) {
+        console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about new support message:`, err);
+      }
     }
   }
 
@@ -156,7 +168,11 @@ export class NotificationService {
 
     const text = NotificationServiceTexts.deliveryFailedForManager(orderId, reason);
     for (const mgr of managers) {
-      await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      try {
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      } catch (err) {
+        console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about delivery failure:`, err);
+      }
     }
   }
 
@@ -171,7 +187,11 @@ export class NotificationService {
 
     const text = NotificationServiceTexts.deliveryStatusForManager(orderId, statusLabel, courierLabel);
     for (const mgr of managers) {
-      await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      try {
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+      } catch (err) {
+        console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about delivery status:`, err);
+      }
     }
   }
 }

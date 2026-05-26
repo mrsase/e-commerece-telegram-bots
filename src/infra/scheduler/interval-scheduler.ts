@@ -20,58 +20,67 @@ export interface Scheduler {
  * Simple setInterval-based scheduler that replaces BullMQ.
  * Runs periodic jobs using plain Node.js timers.
  */
+function createGuardedJob(
+  name: string,
+  fn: () => Promise<void>,
+  intervalMs: number,
+  timers: ReturnType<typeof setInterval>[],
+): void {
+  let running = false;
+  const timer = setInterval(async () => {
+    if (running) {
+      console.warn(`[Scheduler] ${name} skipped — previous run still in progress`);
+      return;
+    }
+    running = true;
+    try {
+      await fn();
+    } catch (err) {
+      console.error(`[Scheduler] ${name} job failed:`, err);
+    } finally {
+      running = false;
+    }
+  }, intervalMs);
+  timers.push(timer);
+}
+
 export function startScheduler(deps: SchedulerDeps): Scheduler {
   const timers: ReturnType<typeof setInterval>[] = [];
 
   // ── Send invites: every 60 seconds ──
   // Picks up APPROVED orders missing invite links (fallback for inline failures)
   if (deps.checkoutChannelId) {
-    const sendInvitesTimer = setInterval(async () => {
-      try {
-        await processSendInvitesBatch(
-          {
-            prisma: deps.prisma,
-            botApi: deps.clientBot.api,
-            checkoutChannelId: deps.checkoutChannelId!,
-            checkoutImageFileId: deps.checkoutImageFileId,
-            inviteExpiryMinutes: deps.inviteExpiryMinutes,
-          },
-          {},
-        );
-      } catch (err) {
-        console.error("[Scheduler] send-invites job failed:", err);
-      }
-    }, 60_000);
-    timers.push(sendInvitesTimer);
-  }
-
-  // ── Cleanup idle carts: every hour ──
-  const cleanupCartsTimer = setInterval(async () => {
-    try {
-      await expireIdleCarts(
-        { prisma: deps.prisma },
-        { idleThresholdMs: 24 * 60 * 60 * 1000 },
-      );
-    } catch (err) {
-      console.error("[Scheduler] cleanup-carts job failed:", err);
-    }
-  }, 60 * 60 * 1000);
-  timers.push(cleanupCartsTimer);
-
-  // ── Expire invites: every 2 minutes ──
-  if (deps.checkoutChannelId) {
-    const expireInvitesTimer = setInterval(async () => {
-      try {
-        await processExpiredInvites({
+    createGuardedJob("send-invites", async () => {
+      await processSendInvitesBatch(
+        {
           prisma: deps.prisma,
           botApi: deps.clientBot.api,
           checkoutChannelId: deps.checkoutChannelId!,
-        });
-      } catch (err) {
-        console.error("[Scheduler] expire-invites job failed:", err);
-      }
-    }, 2 * 60_000);
-    timers.push(expireInvitesTimer);
+          checkoutImageFileId: deps.checkoutImageFileId,
+          inviteExpiryMinutes: deps.inviteExpiryMinutes,
+        },
+        {},
+      );
+    }, 60_000, timers);
+  }
+
+  // ── Cleanup idle carts: every hour ──
+  createGuardedJob("cleanup-carts", async () => {
+    await expireIdleCarts(
+      { prisma: deps.prisma },
+      { idleThresholdMs: 24 * 60 * 60 * 1000 },
+    );
+  }, 60 * 60 * 1000, timers);
+
+  // ── Expire invites: every 2 minutes ──
+  if (deps.checkoutChannelId) {
+    createGuardedJob("expire-invites", async () => {
+      await processExpiredInvites({
+        prisma: deps.prisma,
+        botApi: deps.clientBot.api,
+        checkoutChannelId: deps.checkoutChannelId!,
+      });
+    }, 2 * 60_000, timers);
   }
 
   console.log("✓ Background scheduler started (setInterval-based)");

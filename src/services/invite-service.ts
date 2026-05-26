@@ -49,8 +49,12 @@ export class InviteService {
       throw new OrderNotFoundError();
     }
 
+    // If invite already exists, verify it came from a valid approval
     if (order.inviteLink) {
-      return { inviteLink: order.inviteLink };
+      if (order.status === OrderStatus.APPROVED || order.status === OrderStatus.INVITE_SENT) {
+        return { inviteLink: order.inviteLink };
+      }
+      // Stale invite on a non-viable order — treat as missing and re-validate
     }
 
     if (order.status !== OrderStatus.APPROVED) {
@@ -65,23 +69,28 @@ export class InviteService {
 
     const now = this.now();
 
-    await this.prisma.order.update({
-      where: { id: order.id },
+    const updated = await this.prisma.order.updateMany({
+      where: { id: order.id, status: OrderStatus.APPROVED },
       data: {
         inviteLink,
         inviteSentAt: now,
         status: OrderStatus.INVITE_SENT,
-        events: {
-          create: {
-            actorType: "system",
-            actorId: null,
-            eventType: "invite_created",
-            payload: JSON.stringify({
-              channelId,
-              inviteLink,
-            }),
-          },
-        },
+      },
+    });
+
+    if (updated.count === 0) {
+      throw new OrderNotApprovedError(
+        `Order ${order.id} was already claimed by another process (status changed)`,
+      );
+    }
+
+    await this.prisma.orderEvent.create({
+      data: {
+        orderId: order.id,
+        actorType: "system",
+        actorId: null,
+        eventType: "invite_created",
+        payload: JSON.stringify({ channelId, inviteLink }),
       },
     });
 

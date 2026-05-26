@@ -102,24 +102,29 @@ export async function safeRender(
   try {
     await ctx.editMessageText(text, options);
     return;
-  } catch {
-    // editMessageText failed — fall through to delete+reply
+  } catch (editErr) {
+    console.warn("safeRender: editMessageText failed, falling back to delete+reply:", editErr instanceof Error ? editErr.message : editErr);
   }
 
   // Delete the old message (photo or stale), then send a new one
   try {
     await ctx.deleteMessage();
-  } catch {
-    // Ignore delete failures (message may already be gone)
+  } catch (deleteErr) {
+    console.warn("safeRender: deleteMessage failed:", deleteErr instanceof Error ? deleteErr.message : deleteErr);
   }
 
   try {
     await ctx.reply(text, options);
-  } catch {
+  } catch (firstErr) {
     // If Markdown fails, retry without parse_mode as a last resort
     const { parse_mode, ...rest } = options ?? {};
     if (parse_mode) {
-      await ctx.reply(text, rest);
+      try {
+        await ctx.reply(text, rest);
+      } catch {
+        // Both attempts failed — log and give up
+        console.warn("safeRender: both editMessageText and reply failed:", firstErr instanceof Error ? firstErr.message : firstErr);
+      }
     }
   }
 }
@@ -139,7 +144,7 @@ export async function safeSendMessage(
     return true;
   } catch (err) {
     if (isIgnorableError(err)) {
-      console.warn(`safeSendMessage failed (ignorable) for chat ${chatId}:`, (err as Error).message);
+      console.warn(`safeSendMessage failed (ignorable) for chat ${chatId}:`, err instanceof Error ? err.message : err);
       return false;
     }
     throw err;

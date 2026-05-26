@@ -437,9 +437,9 @@ export const CourierKeyboards = {
     return new InlineKeyboard()
       .text("🚚 ارسال‌های فعال", "courier:deliveries")
       .row()
-      .text("� تاریخچه", "courier:history")
+      .text("📋 تاریخچه", "courier:history")
       .row()
-      .text("�🔄 بروزرسانی", "courier:menu");
+      .text("🔄 بروزرسانی", "courier:menu");
   },
   backToMenu: () => {
     return new InlineKeyboard().text("« بازگشت", "courier:menu");
@@ -462,7 +462,7 @@ export const CourierKeyboards = {
     if (!currentStatus || currentStatus === "ASSIGNED" || currentStatus === "PICKED_UP") {
       kb.text("🛵 در مسیر ارسال", `courier:status:${deliveryId}:OUT_FOR_DELIVERY`).row();
     }
-    if (!currentStatus || currentStatus !== "DELIVERED" && currentStatus !== "FAILED") {
+    if (!currentStatus || (currentStatus !== "DELIVERED" && currentStatus !== "FAILED")) {
       kb.text("✅ تحویل دادم", `courier:status:${deliveryId}:DELIVERED`).row();
       kb.text("❌ ناموفق", `courier:status:${deliveryId}:FAILED`).row();
     }

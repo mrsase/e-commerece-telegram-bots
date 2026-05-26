@@ -197,7 +197,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       }
 
       if (status === DeliveryStatus.FAILED) {
-        courierSessions.set(Number(courier.tgUserId), {
+        courierSessions.set(ctx.from!.id, {
           state: "delivery:fail:reason",
           deliveryId,
         });
@@ -216,33 +216,56 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
               ? { deliveredAt: now }
               : {};
 
-      const updatedDelivery = await prisma.delivery.update({
-        where: { id: deliveryId },
-        data: { status, ...timestampUpdate },
-        include: { order: { include: { user: true } } },
-      });
+      // Atomically update delivery status and (if delivered) order status in a single transaction
+      const updateResult = await prisma.$transaction(async (tx) => {
+        const updatedDelivery = await tx.delivery.updateMany({
+          where: { id: deliveryId, assignedCourierId: courier.id, status: delivery.status },
+          data: { status, ...timestampUpdate },
+        });
 
-      // If delivered, mark order as COMPLETED
-      if (status === DeliveryStatus.DELIVERED) {
-        await prisma.order.update({
-          where: { id: updatedDelivery.orderId },
-          data: {
-            status: OrderStatus.COMPLETED,
-            events: {
-              create: {
+        if (updatedDelivery.count === 0) {
+          throw new Error("delivery_status_changed");
+        }
+
+        if (status === DeliveryStatus.DELIVERED) {
+          const orderUpdated = await tx.order.updateMany({
+            where: { id: delivery.orderId, status: { in: [OrderStatus.INVITE_SENT, OrderStatus.AWAITING_RECEIPT] } },
+            data: {
+              status: OrderStatus.COMPLETED,
+            },
+          });
+
+          if (orderUpdated.count > 0) {
+            await tx.orderEvent.create({
+              data: {
+                orderId: delivery.orderId,
                 actorType: "courier",
                 actorId: courier.id,
                 eventType: "delivery_completed",
               },
-            },
-          },
+            });
+          }
+        }
+
+        // Re-fetch to return the updated result
+        return tx.delivery.findUnique({
+          where: { id: deliveryId },
+          include: { order: { include: { user: true } } },
         });
+      });
+
+      if (!updateResult) {
+        console.error(`[COURIER] Failed to fetch delivery after status update`);
+        await answerCallback(ctx, CourierTexts.invalidDelivery());
+        return;
       }
+
+      const updatedDelivery = updateResult;
 
       const courierLabel = courier.username || `پیک #${courier.id}`;
 
       // Notify client about delivery status change
-      if (updatedDelivery.order.user) {
+      if (updatedDelivery?.order?.user) {
         try {
           await notificationService.notifyClientDeliveryUpdate(
             updatedDelivery.order.user.tgUserId,
@@ -346,7 +369,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
     const courier = await getCourier(ctx, prisma);
     if (!courier) return;
 
-    const session = courierSessions.get(Number(courier.tgUserId));
+    const session = courierSessions.get(ctx.from!.id);
     if (!session) return;
 
     if (session.state === "delivery:fail:reason") {
@@ -376,7 +399,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       }
       await notificationService.notifyManagersDeliveryFailed(failedDelivery.orderId, reason);
 
-      courierSessions.delete(Number(courier.tgUserId));
+      courierSessions.delete(ctx.from!.id);
       await ctx.reply(CourierTexts.failureReasonSaved(), {
         reply_markup: CourierKeyboards.menu(),
       });

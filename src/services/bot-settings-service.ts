@@ -19,8 +19,9 @@ export class BotSettingsService {
     try {
       const row = await this.prisma.botSettings.findUnique({ where: { key } });
       return row?.value ?? null;
-    } catch {
+    } catch (err) {
       // Table may not exist yet (prisma db push not run)
+      console.warn("[BotSettings] Failed to read setting, table may not exist:", err instanceof Error ? err.message : err);
       return null;
     }
   }
@@ -36,8 +37,9 @@ export class BotSettingsService {
   async delete(key: string): Promise<void> {
     try {
       await this.prisma.botSettings.delete({ where: { key } });
-    } catch {
+    } catch (err) {
       // Key didn't exist — that's fine
+      console.warn("[BotSettings] Failed to delete setting:", err instanceof Error ? err.message : err);
     }
   }
 

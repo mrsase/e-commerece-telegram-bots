@@ -1,4 +1,9 @@
-import { Bot, Context } from "grammy";
+import { Bot, Context, InlineKeyboard } from "grammy";
+
+function safeId(value: string | undefined, fallback = 0): number {
+  const n = parseInt(value ?? "", 10);
+  return Number.isFinite(n) ? n : fallback;
+}
 import type { PrismaClient, Manager } from "@prisma/client";
 import { OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
@@ -297,9 +302,25 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const receiptId = session.data?.receiptId as number;
       const reason = ctx.message.text === "/skip" ? null : ctx.message.text.trim();
 
+      // Atomically claim the receipt for rejection
+      const claimed = await prisma.receipt.updateMany({
+        where: { id: receiptId, reviewStatus: ReceiptReviewStatus.PENDING },
+        data: {
+          reviewStatus: ReceiptReviewStatus.REJECTED,
+          reviewedById: manager.id,
+          reviewNotes: reason,
+        },
+      });
+
+      if (claimed.count === 0) {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply("این رسید قبلاً بررسی شده است.", { reply_markup: ManagerKeyboards.backToMenu() });
+        return;
+      }
+
       const receipt = await prisma.receipt.findUnique({
         where: { id: receiptId },
-        include: { order: { include: { user: true } } },
+        include: { order: true },
       });
 
       if (!receipt) {
@@ -308,18 +329,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await prisma.$transaction([
-        prisma.receipt.update({
-          where: { id: receiptId },
-          data: { 
-            reviewStatus: ReceiptReviewStatus.REJECTED,
-            reviewedById: manager.id,
-            reviewNotes: reason,
-          },
-        }),
-        prisma.order.update({
+      // Only regress order status if it's still awaiting receipt
+      if (receipt.order.status === OrderStatus.AWAITING_RECEIPT || receipt.order.status === OrderStatus.INVITE_SENT) {
+        await prisma.order.update({
           where: { id: receipt.orderId },
-          data: { 
+          data: {
             status: OrderStatus.AWAITING_RECEIPT,
             events: {
               create: {
@@ -330,13 +344,20 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
               },
             },
           },
-        }),
-      ]);
+        });
+      }
 
-      if (clientBot && receipt.order.user) {
+      managerSessions.delete(ctx.from.id);
+
+      // Notify client about rejection (best-effort)
+      const orderWithUser = await prisma.order.findUnique({
+        where: { id: receipt.orderId },
+        include: { user: true },
+      });
+      if (clientBot && orderWithUser?.user) {
         try {
           await clientBot.api.sendMessage(
-            receipt.order.user.tgUserId.toString(),
+            orderWithUser.user.tgUserId.toString(),
             ClientTexts.receiptRejected(receipt.orderId, reason || undefined)
           );
         } catch (error) {
@@ -344,7 +365,6 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         }
       }
 
-      managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.receiptRejected(receipt.orderId), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
@@ -400,12 +420,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // COURIER ADD BY TG ID
     if (session.state === "courier:add") {
       const input = ctx.message.text.trim();
-      const tgUserId = BigInt(input || "0");
 
-      if (!input || tgUserId <= 0n) {
+      if (!input || !/^\d+$/.test(input)) {
         await ctx.reply(ManagerTexts.invalidTgId());
         return;
       }
+
+      const tgUserId = BigInt(input);
 
       const existing = await prisma.courier.findUnique({
         where: { tgUserId },
@@ -632,8 +653,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    await answerCallback();
-
+    try {
     const data = ctx.callbackQuery.data;
     const parts = data.split(":");
 
@@ -657,7 +677,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ORDERS
     // ===========================================
     if (data === "mgr:orders" || data.startsWith("mgr:orders:")) {
-      const page = parts[2] ? parseInt(parts[2]) : 0;
+      const page = safeId(parts[2]);
       const pageSize = 5;
 
       const [orders, total] = await Promise.all([
@@ -688,7 +708,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // APPROVE ORDER - Supports two methods: "channel" and "direct"
     if (data.startsWith("mgr:approve:")) {
-      const orderId = parseInt(parts[2]);
+      const orderId = safeId(parts[2]);
 
       const order = await prisma.order.findUnique({ 
         where: { id: orderId },
@@ -726,14 +746,26 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           order.items[0]?.product?.currency ?? "IRR",
         );
 
-        // 1) Update order status to APPROVED
-        await prisma.order.update({
-          where: { id: orderId },
+        // 1) Atomically claim the order — only succeeds if still AWAITING_MANAGER_APPROVAL
+        const claimed = await prisma.order.updateMany({
+          where: { id: orderId, status: OrderStatus.AWAITING_MANAGER_APPROVAL },
+          data: { status: OrderStatus.APPROVED },
+        });
+
+        if (claimed.count === 0) {
+          await answerCallback({
+            text: "این سفارش قبلاً توسط مدیر دیگر تأیید یا رد شده است.",
+            show_alert: true,
+          });
+          return;
+        }
+
+        await prisma.orderEvent.create({
           data: {
-            status: OrderStatus.APPROVED,
-            events: {
-              create: { actorType: "manager", actorId: manager.id, eventType: "order_approved" },
-            },
+            orderId,
+            actorType: "manager",
+            actorId: manager.id,
+            eventType: "order_approved",
           },
         });
 
@@ -937,7 +969,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // REJECT ORDER
     if (data.startsWith("mgr:reject:")) {
-      const orderId = parseInt(parts[2]);
+      const orderId = safeId(parts[2]);
 
       const order = await prisma.order.findUnique({
         where: { id: orderId },
@@ -948,17 +980,22 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await prisma.order.update({
-        where: { id: orderId },
+      const rejected = await prisma.order.updateMany({
+        where: { id: orderId, status: OrderStatus.AWAITING_MANAGER_APPROVAL },
+        data: { status: OrderStatus.CANCELLED },
+      });
+
+      if (rejected.count === 0) {
+        await answerCallback({ text: "این سفارش قبلاً توسط مدیر دیگر تأیید یا رد شده است.", show_alert: true });
+        return;
+      }
+
+      await prisma.orderEvent.create({
         data: {
-          status: OrderStatus.CANCELLED,
-          events: {
-            create: {
-              actorType: "manager",
-              actorId: manager.id,
-              eventType: "order_rejected",
-            },
-          },
+          orderId,
+          actorType: "manager",
+          actorId: manager.id,
+          eventType: "order_rejected",
         },
       });
 
@@ -995,7 +1032,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ORDER DETAIL
     // ===========================================
     if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders")) {
-      const orderId = parseInt(parts[2]);
+      const orderId = safeId(parts[2]);
       const order = await prisma.order.findUnique({
         where: { id: orderId },
         include: {
@@ -1055,8 +1092,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         });
       }
 
-      const { InlineKeyboard: DK } = await import("grammy");
-      const detailKb = new DK();
+      const detailKb = new InlineKeyboard();
       if (order.status === OrderStatus.AWAITING_MANAGER_APPROVAL) {
         detailKb.text("✅ تأیید", `mgr:approve:${orderId}`).text("❌ رد", `mgr:reject:${orderId}`).row();
       }
@@ -1071,8 +1107,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // ALL ORDERS WITH STATUS FILTER
     if (data === "mgr:allorders" || data.startsWith("mgr:allorders:")) {
-      const statusFilter = parts[1] === "allorders" && parts[2] ? parts[2] : null;
-      const page = parts[3] ? parseInt(parts[3]) : 0;
+      const rawStatus = parts[1] === "allorders" && parts[2] ? parts[2] : null;
+      // Validate status filter against the OrderStatus enum
+      const statusFilter = rawStatus && Object.values(OrderStatus).includes(rawStatus as OrderStatus)
+        ? rawStatus
+        : null;
+      const page = safeId(parts[3]);
       const pageSize = 5;
 
       const where = statusFilter ? { status: statusFilter as OrderStatus } : {};
@@ -1103,8 +1143,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         });
       }
 
-      const { InlineKeyboard: AK } = await import("grammy");
-      const allKb = new AK();
+      const allKb = new InlineKeyboard();
       // Status filter buttons
       allKb
         .text("⏳ در انتظار", "mgr:allorders:AWAITING_MANAGER_APPROVAL:0")
@@ -1142,7 +1181,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // USER'S ORDERS
     if (data.startsWith("mgr:user:orders:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
       const userOrders = await prisma.order.findMany({
         where: { userId },
         orderBy: { createdAt: "desc" },
@@ -1164,8 +1203,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         });
       }
 
-      const { InlineKeyboard: UK } = await import("grammy");
-      const userKb = new UK();
+      const userKb = new InlineKeyboard();
       userOrders.forEach((o) => {
         userKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`).row();
       });
@@ -1180,7 +1218,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // USER'S REFERRALS
     if (data.startsWith("mgr:user:referrals:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
 
       const targetUser = await prisma.user.findUnique({
         where: { id: userId },
@@ -1230,7 +1268,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:products:list" || data.startsWith("mgr:products:list:")) {
-      const page = parts[3] ? parseInt(parts[3]) : 0;
+      const page = safeId(parts[3]);
       const pageSize = 5;
 
       const [products, total] = await Promise.all([
@@ -1264,7 +1302,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:product:edit:") && parts.length === 4) {
-      const productId = parseInt(parts[3]);
+      const productId = safeId(parts[3]);
       const product = await prisma.product.findUnique({ where: { id: productId } });
 
       if (!product) {
@@ -1274,7 +1312,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const text = `*ویرایش محصول: ${escapeMarkdown(product.title)}*\n\n` +
         `📝 عنوان: ${escapeMarkdown(product.title)}\n` +
-        `📄 توضیحات: ${escapeMarkdown(product.description) || '—'}\n` +
+        `📄 توضیحات: ${product.description ? escapeMarkdown(product.description) : '—'}\n` +
         `💰 قیمت: ${product.price} ${product.currency}\n` +
         `📦 موجودی: ${product.stock ?? 'نامحدود'}\n` +
         `🖼️ تصویر: ${product.photoFileId ? 'دارد' : 'ندارد'}\n` +
@@ -1288,7 +1326,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:product:edit:") && parts.length === 5) {
-      const productId = parseInt(parts[3]);
+      const productId = safeId(parts[3]);
       const field = parts[4];
 
       // Handle remove image immediately (no user input needed)
@@ -1297,15 +1335,19 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           where: { id: productId },
           data: { photoFileId: null },
         });
-        
+
         const product = await prisma.product.findUnique({ where: { id: productId } });
-        const text = `*ویرایش محصول: ${escapeMarkdown(product!.title)}*\n\n` +
-          `📝 عنوان: ${escapeMarkdown(product!.title)}\n` +
-          `📄 توضیحات: ${escapeMarkdown(product!.description) || '—'}\n` +
-          `💰 قیمت: ${product!.price} ${product!.currency}\n` +
-          `📦 موجودی: ${product!.stock ?? 'نامحدود'}\n` +
+        if (!product) {
+          await answerCallback({ text: "محصول یافت نشد" });
+          return;
+        }
+        const text = `*ویرایش محصول: ${escapeMarkdown(product.title)}*\n\n` +
+          `📝 عنوان: ${escapeMarkdown(product.title)}\n` +
+          `📄 توضیحات: ${product.description ? escapeMarkdown(product.description) : '—'}\n` +
+          `💰 قیمت: ${product.price} ${product.currency}\n` +
+          `📦 موجودی: ${product.stock ?? 'نامحدود'}\n` +
           `🖼️ تصویر: ندارد\n` +
-          `وضعیت: ${product!.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
+          `وضعیت: ${product.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
         await safeRender(ctx, text, {
           parse_mode: "Markdown",
@@ -1329,7 +1371,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:product:toggle:")) {
-      const productId = parseInt(parts[3]);
+      const productId = safeId(parts[3]);
       const product = await prisma.product.findUnique({ where: { id: productId } });
 
       if (!product) {
@@ -1348,17 +1390,21 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       // Refresh edit view
       const updated = await prisma.product.findUnique({ where: { id: productId } });
-      const text = `*ویرایش محصول: ${escapeMarkdown(updated!.title)}*\n\n` +
-        `📝 عنوان: ${escapeMarkdown(updated!.title)}\n` +
-        `📄 توضیحات: ${escapeMarkdown(updated!.description) || '—'}\n` +
-        `💰 قیمت: ${updated!.price} ${updated!.currency}\n` +
-        `📦 موجودی: ${updated!.stock ?? 'نامحدود'}\n` +
-        `🖼️ تصویر: ${updated!.photoFileId ? 'دارد' : 'ندارد'}\n` +
-        `وضعیت: ${updated!.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
+      if (!updated) {
+        await answerCallback({ text: "محصول یافت نشد" });
+        return;
+      }
+      const text = `*ویرایش محصول: ${escapeMarkdown(updated.title)}*\n\n` +
+        `📝 عنوان: ${escapeMarkdown(updated.title)}\n` +
+        `📄 توضیحات: ${escapeMarkdown(updated.description) || '—'}\n` +
+        `💰 قیمت: ${updated.price} ${updated.currency}\n` +
+        `📦 موجودی: ${updated.stock ?? 'نامحدود'}\n` +
+        `🖼️ تصویر: ${updated.photoFileId ? 'دارد' : 'ندارد'}\n` +
+        `وضعیت: ${updated.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.productEdit(productId, !!updated!.photoFileId),
+        reply_markup: ManagerKeyboards.productEdit(productId, !!updated.photoFileId),
       });
       return;
     }
@@ -1375,7 +1421,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:users:list" || data.startsWith("mgr:users:list:")) {
-      const page = parts[3] ? parseInt(parts[3]) : 0;
+      const page = safeId(parts[3]);
       const pageSize = 10;
 
       const [users, total] = await Promise.all([
@@ -1409,7 +1455,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "message"].includes(parts[2])) {
-      const userId = parseInt(parts[2]);
+      const userId = safeId(parts[2]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
@@ -1432,7 +1478,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:user:toggle:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
@@ -1453,15 +1499,19 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       // Refresh user view
       const updated = await prisma.user.findUnique({ where: { id: userId } });
+      if (!updated) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
       const orderCount = await prisma.order.count({ where: { userId } });
-      const eScore = updated!.loyaltyScoreOverride ?? updated!.loyaltyScore;
-      const hasOvr = updated!.loyaltyScoreOverride != null;
+      const eScore = updated.loyaltyScoreOverride ?? updated.loyaltyScore;
+      const hasOvr = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral, eScore, hasOvr),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated!.isActive, updated!.canCreateReferral),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral),
         }
       );
       return;
@@ -1469,7 +1519,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // TOGGLE USER REFERRAL PERMISSION
     if (data.startsWith("mgr:user:toggleref:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
@@ -1489,15 +1539,19 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await answerCallback({ text: message, show_alert: true });
 
       const updated = await prisma.user.findUnique({ where: { id: userId } });
+      if (!updated) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
       const orderCount = await prisma.order.count({ where: { userId } });
-      const eScore2 = updated!.loyaltyScoreOverride ?? updated!.loyaltyScore;
-      const hasOvr2 = updated!.loyaltyScoreOverride != null;
+      const eScore2 = updated.loyaltyScoreOverride ?? updated.loyaltyScore;
+      const hasOvr2 = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated!.id, updated!.username, updated!.isActive, orderCount, updated!.canCreateReferral, eScore2, hasOvr2),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated!.isActive, updated!.canCreateReferral),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral),
         }
       );
       return;
@@ -1505,7 +1559,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // USER CONTACT INFO
     if (data.startsWith("mgr:user:contact:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
@@ -1525,7 +1579,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // SET USER LOYALTY SCORE (override)
     if (data.startsWith("mgr:user:setscore:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
       managerSessions.set(ctx.from.id, { state: "user:setscore", data: { userId } });
       await safeRender(ctx, ManagerTexts.enterUserScore(), {
         reply_markup: ManagerKeyboards.backToMenu(),
@@ -1535,7 +1589,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // INITIATE SUPPORT CONVERSATION WITH USER
     if (data.startsWith("mgr:user:message:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
@@ -1569,7 +1623,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // DELETE USER
     if (data.startsWith("mgr:user:delete:")) {
-      const userId = parseInt(parts[3]);
+      const userId = safeId(parts[3]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
@@ -1636,7 +1690,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:courier:") && parts[2] !== "toggle" && parts[2] !== "delete") {
-      const courierId = parseInt(parts[2]);
+      const courierId = safeId(parts[2]);
       const courier = await prisma.courier.findUnique({ where: { id: courierId } });
 
       if (!courier) {
@@ -1655,7 +1709,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:courier:toggle:")) {
-      const courierId = parseInt(parts[3]);
+      const courierId = safeId(parts[3]);
       const courier = await prisma.courier.findUnique({ where: { id: courierId } });
 
       if (!courier) {
@@ -1684,7 +1738,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:courier:delete:")) {
-      const courierId = parseInt(parts[3]);
+      const courierId = safeId(parts[3]);
       const courier = await prisma.courier.findUnique({ where: { id: courierId } });
 
       if (!courier) {
@@ -1850,8 +1904,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         include: { createdByUser: { select: { username: true } } },
       });
 
-      const { InlineKeyboard: RK } = await import("grammy");
-      const refKb = new RK();
+      const refKb = new InlineKeyboard();
       refKb.text("🌳 مشاهده درخت معرفی‌ها", "mgr:analytics:referraltree").row();
       refKb.text("« بازگشت به منو", "mgr:menu");
 
@@ -1900,7 +1953,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // RECEIPTS MANAGEMENT
     // ===========================================
     if (data === "mgr:receipts" || data.startsWith("mgr:receipts:page:")) {
-      const page = parts[3] ? parseInt(parts[3]) : 0;
+      const page = safeId(parts[3]);
       const pageSize = 5;
 
       const [receipts, total] = await Promise.all([
@@ -1934,7 +1987,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // VIEW RECEIPT
     if (data.startsWith("mgr:receipt:view:")) {
-      const receiptId = parseInt(parts[3]);
+      const receiptId = safeId(parts[3]);
       const receipt = await prisma.receipt.findUnique({
         where: { id: receiptId },
         include: { 
@@ -1988,29 +2041,41 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // APPROVE RECEIPT
     if (data.startsWith("mgr:receipt:approve:")) {
-      const receiptId = parseInt(parts[3]);
+      const receiptId = safeId(parts[3]);
       const receipt = await prisma.receipt.findUnique({
         where: { id: receiptId },
         include: { order: { include: { user: true } } },
       });
 
-      if (!receipt || receipt.reviewStatus !== ReceiptReviewStatus.PENDING) {
-        await answerCallback({ text: "رسید یافت نشد یا قبلاً بررسی شده است" });
+      if (!receipt) {
+        await answerCallback({ text: "رسید یافت نشد" });
         return;
       }
 
-      // Update receipt and order status to PAID
-      await prisma.$transaction([
-        prisma.receipt.update({
-          where: { id: receiptId },
-          data: { 
-            reviewStatus: ReceiptReviewStatus.ACCEPTED,
-            reviewedById: manager.id,
-          },
-        }),
-        prisma.order.update({
+      // Atomically claim the receipt — only succeeds if reviewStatus is still PENDING
+      const claimed = await prisma.receipt.updateMany({
+        where: { id: receiptId, reviewStatus: ReceiptReviewStatus.PENDING },
+        data: {
+          reviewStatus: ReceiptReviewStatus.ACCEPTED,
+          reviewedById: manager.id,
+        },
+      });
+
+      if (claimed.count === 0) {
+        await answerCallback({ text: "این رسید قبلاً بررسی شده است" });
+        return;
+      }
+
+      // Update order + create delivery inside a transaction
+      const txResult = await prisma.$transaction(async (tx) => {
+        // Pick an active courier inside the transaction to avoid TOCTOU races
+        const activeCourier = await tx.courier.findFirst({
+          where: { isActive: true },
+        });
+
+        await tx.order.update({
           where: { id: receipt.orderId },
-          data: { 
+          data: {
             status: OrderStatus.PAID,
             events: {
               create: {
@@ -2020,8 +2085,19 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
               },
             },
           },
-        }),
-      ]);
+        });
+
+        if (activeCourier) {
+          await tx.delivery.create({
+            data: {
+              orderId: receipt.orderId,
+              assignedCourierId: activeCourier.id,
+            },
+          });
+        }
+
+        return { courier: activeCourier };
+      });
 
       // Cleanup: channel-method orders get full channel cleanup,
       // direct-method orders get DM payment message deletion
@@ -2055,32 +2131,22 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
 
       // Notify client
-      await notificationService.notifyClientReceiptApproved(
-        receipt.order.user.tgUserId,
-        receipt.orderId,
-      );
+      if (receipt.order.user) {
+        await notificationService.notifyClientReceiptApproved(
+          receipt.order.user.tgUserId,
+          receipt.orderId,
+        );
+      }
 
-      // Auto-assign delivery to first active courier
-      const activeCourier = await prisma.courier.findFirst({
-        where: { isActive: true },
-      });
-
-      if (activeCourier) {
-        await prisma.delivery.create({
-          data: {
-            orderId: receipt.orderId,
-            assignedCourierId: activeCourier.id,
-          },
-        });
-
-        // Notify courier
+      // Notify courier if assigned
+      if (txResult.courier) {
         const orderUser = receipt.order.user;
         await notificationService.notifyCourierNewDelivery(
-          activeCourier.tgUserId,
+          txResult.courier.tgUserId,
           receipt.orderId,
-          `${orderUser.firstName ?? ""} ${orderUser.lastName ?? ""}`.trim() || "-",
-          orderUser.phone ?? "-",
-          orderUser.address ?? "-",
+          `${orderUser?.firstName ?? ""} ${orderUser?.lastName ?? ""}`.trim() || "-",
+          orderUser?.phone ?? "-",
+          orderUser?.address ?? "-",
         );
       }
 
@@ -2099,7 +2165,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // REJECT RECEIPT - Ask for reason
     if (data.startsWith("mgr:receipt:reject:")) {
-      const receiptId = parseInt(parts[3]);
+      const receiptId = safeId(parts[3]);
       managerSessions.set(ctx.from.id, { 
         state: "receipt:reject:reason", 
         data: { receiptId } 
@@ -2152,7 +2218,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // VIEW SUPPORT CONVERSATION
     if (data.startsWith("mgr:support:conv:")) {
-      const convId = parseInt(parts[3]);
+      const convId = safeId(parts[3]);
       const conversation = await prisma.supportConversation.findUnique({
         where: { id: convId },
         include: {
@@ -2191,7 +2257,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // SET REPLY SESSION FOR SUPPORT
     if (data.startsWith("mgr:support:reply:")) {
-      const convId = parseInt(parts[3]);
+      const convId = safeId(parts[3]);
       managerSessions.set(ctx.from.id, {
         state: "support:reply",
         data: { conversationId: convId },
@@ -2204,7 +2270,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // CLOSE SUPPORT CONVERSATION
     if (data.startsWith("mgr:support:close:")) {
-      const convId = parseInt(parts[3]);
+      const convId = safeId(parts[3]);
       const conversation = await prisma.supportConversation.findUnique({
         where: { id: convId },
         include: { user: true },
@@ -2304,6 +2370,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // NO-OP
     if (data === "noop") {
       return;
+    }
+    } finally {
+      await answerCallback();
     }
   });
 

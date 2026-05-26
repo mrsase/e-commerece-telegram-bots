@@ -20,6 +20,7 @@ export function orderStatusLabel(status: OrderStatus): string {
     case OrderStatus.CANCELLED:
       return "❌ لغو شده";
     default:
+      console.warn(`[orderStatusLabel] Unknown OrderStatus: ${status}`);
       return status;
   }
 }

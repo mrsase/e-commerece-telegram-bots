@@ -48,7 +48,8 @@ export async function createReferralCodeWithRetry(
       if (
         error instanceof Error &&
         "code" in error &&
-        (error as { code: string }).code === "P2002"
+        typeof (error as Record<string, unknown>).code === "string" &&
+        (error as Record<string, unknown>).code === "P2002"
       ) {
         if (attempt === maxRetries - 1) {
           throw new Error(

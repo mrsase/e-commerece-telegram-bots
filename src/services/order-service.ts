@@ -22,6 +22,20 @@ export class InsufficientStockError extends Error {
   }
 }
 
+export class ProductNotAvailableError extends Error {
+  constructor(message = "Product is not available") {
+    super(message);
+    this.name = "ProductNotAvailableError";
+  }
+}
+
+export class CartEmptyError extends Error {
+  constructor(message = "Cart is empty") {
+    super(message);
+    this.name = "CartEmptyError";
+  }
+}
+
 export interface CreateOrderFromCartArgs {
   userId: number;
   cartId: number;
@@ -50,8 +64,12 @@ export class OrderService {
         include: { items: true },
       });
 
-      if (!cart || cart.userId !== userId) {
+      if (!cart) {
         throw new CartNotFoundError();
+      }
+
+      if (cart.userId !== userId) {
+        throw new CartNotFoundError("Cart does not belong to this user");
       }
 
       if (cart.state !== CartState.ACTIVE) {
@@ -59,7 +77,7 @@ export class OrderService {
       }
 
       if (cart.items.length === 0) {
-        throw new Error("Cart is empty");
+        throw new CartEmptyError();
       }
 
       const productIds = cart.items.map((item) => item.productId);
@@ -71,7 +89,9 @@ export class OrderService {
       for (const item of cart.items) {
         const product = productById.get(item.productId);
         if (!product || !product.isActive) {
-          throw new InsufficientStockError("Product is not available");
+          throw new ProductNotAvailableError(
+            `Product ${item.productId} is not available`,
+          );
         }
 
         if (product.stock != null && product.stock < item.qty) {
@@ -84,12 +104,15 @@ export class OrderService {
       for (const item of cart.items) {
         const product = productById.get(item.productId)!;
         if (product.stock != null) {
-          const newStock = product.stock - item.qty;
-          await tx.product.update({
-            where: { id: product.id },
-            data: { stock: newStock },
+          const result = await tx.product.updateMany({
+            where: { id: product.id, stock: { gte: item.qty } },
+            data: { stock: { decrement: item.qty } },
           });
-          productById.set(product.id, { ...product, stock: newStock });
+          if (result.count === 0) {
+            throw new InsufficientStockError(
+              `Insufficient stock for product ${product.id} (concurrent update)`,
+            );
+          }
         }
       }
 
@@ -139,6 +162,32 @@ export class OrderService {
       });
 
       if (appliedDiscounts.length > 0) {
+        // Re-validate discount limits inside the transaction to prevent races
+        for (const ad of appliedDiscounts) {
+          const discount = await tx.discount.findUnique({
+            where: { id: ad.discountId },
+          });
+          if (!discount || !discount.isActive) {
+            throw new Error(`Discount ${ad.discountId} is no longer active`);
+          }
+          if (discount.maxUses != null) {
+            const usageCount = await tx.discountUsage.count({
+              where: { discountId: discount.id },
+            });
+            if (usageCount >= discount.maxUses) {
+              throw new Error(`Discount ${ad.discountId} has reached max uses`);
+            }
+          }
+          if (discount.perUserLimit != null) {
+            const perUserCount = await tx.discountUsage.count({
+              where: { discountId: discount.id, userId },
+            });
+            if (perUserCount >= discount.perUserLimit) {
+              throw new Error(`Discount ${ad.discountId} per-user limit reached`);
+            }
+          }
+        }
+
         await tx.discountUsage.createMany({
           data: appliedDiscounts.map((d) => ({
             userId,

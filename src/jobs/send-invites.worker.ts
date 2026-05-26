@@ -59,7 +59,20 @@ export async function processSendInvitesBatch(
 
   for (const order of orders) {
     try {
-      // 1) Post payment message to channel
+      // 1) Create time-limited invite link FIRST (before channel message)
+      //    so that any failure after this point won't cause duplicate messages on retry.
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + effectiveExpiryMin * 60 * 1000);
+      const expireUnix = Math.floor(expiresAt.getTime() / 1000);
+
+      const result = await botApi.createChatInviteLink(checkoutChannelId, {
+        member_limit: 1,
+        name: `Order #${order.id}`,
+        expire_date: expireUnix,
+      });
+      const inviteLink = result.invite_link;
+
+      // 2) Post payment message to channel
       const paymentCaption = ChannelTexts.paymentMessage(
         order.id,
         order.grandTotal,
@@ -84,44 +97,51 @@ export async function processSendInvitesBatch(
         console.error(`[SendInvites] Failed to post channel message for order #${order.id}:`, error);
       }
 
-      // 2) Create time-limited invite link
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + effectiveExpiryMin * 60 * 1000);
-      const expireUnix = Math.floor(expiresAt.getTime() / 1000);
+      // 3) Notify client FIRST (before DB mutation) so a notification failure
+      //    doesn't leave the order stuck in INVITE_SENT with no user awareness.
+      if (!order.user) {
+        console.error(`[SendInvites] Order #${order.id} has no user — skipping`);
+        continue;
+      }
 
-      const result = await botApi.createChatInviteLink(checkoutChannelId, {
-        member_limit: 1,
-        name: `Order #${order.id}`,
-        expire_date: expireUnix,
-      });
-      const inviteLink = result.invite_link;
+      try {
+        await botApi.sendMessage(
+          order.user.tgUserId.toString(),
+          ClientTexts.orderApprovedWithInvite(order.id, inviteLink),
+          { parse_mode: "Markdown" },
+        );
+      } catch (notifyError) {
+        console.error(`[SendInvites] Failed to notify user for order #${order.id}:`, notifyError);
+        // Continue anyway — the invite exists and the scheduler will retry.
+      }
 
-      // 3) Update order
-      await prisma.order.update({
-        where: { id: order.id },
+      // 4) Update order (persist invite + optional channelMessageId)
+      // Use updateMany with status guard to prevent duplicate processing
+      const updateResult = await prisma.order.updateMany({
+        where: { id: order.id, status: OrderStatus.APPROVED },
         data: {
           status: OrderStatus.INVITE_SENT,
           inviteLink,
           inviteSentAt: now,
           inviteExpiresAt: expiresAt,
           channelMessageId,
-          events: {
-            create: {
-              actorType: "system",
-              actorId: null,
-              eventType: "invite_sent",
-              payload: JSON.stringify({ inviteLink, channelMessageId, expiresAt: expiresAt.toISOString() }),
-            },
-          },
         },
       });
 
-      // 4) Notify client
-      await botApi.sendMessage(
-        order.user.tgUserId.toString(),
-        ClientTexts.orderApprovedWithInvite(order.id, inviteLink),
-        { parse_mode: "Markdown" },
-      );
+      if (updateResult.count === 0) {
+        console.error(`[SendInvites] Order #${order.id} was already processed (status changed) — skipping`);
+        continue;
+      }
+
+      await prisma.orderEvent.create({
+        data: {
+          orderId: order.id,
+          actorType: "system",
+          actorId: null,
+          eventType: "invite_sent",
+          payload: JSON.stringify({ inviteLink, channelMessageId, expiresAt: expiresAt.toISOString() }),
+        },
+      });
 
       processedCount += 1;
     } catch (error) {

@@ -70,7 +70,10 @@ export function loadAppConfigFromEnv(): AppConfig {
     updatesMode,
     checkoutChannelId: env.CHECKOUT_CHANNEL_ID,
     checkoutImageFileId: env.CHECKOUT_IMAGE_FILE_ID,
-    inviteExpiryMinutes: Math.max(1, Number(env.INVITE_EXPIRY_MINUTES) || 60),
+    inviteExpiryMinutes: (() => {
+      const parsed = Number(env.INVITE_EXPIRY_MINUTES);
+      return Math.max(1, Number.isFinite(parsed) && parsed > 0 ? parsed : 60);
+    })(),
     webhookSecretToken: env.WEBHOOK_SECRET_TOKEN,
   };
 }

@@ -5,6 +5,9 @@ import {
   InsufficientStockError,
 } from "../../services/order-service.js";
 import { ClientTexts } from "../../i18n/index.js";
+import { addItemToCart, PerUserMutex } from "../../utils/cart-utils.js";
+
+const cartMutex = new PerUserMutex();
 
 export interface ClientContext {
   from?: {
@@ -24,6 +27,7 @@ export interface ClientCommandBot {
     command: string,
     handler: (ctx: ClientContext) => Promise<void> | void,
   ): void;
+  catch?(handler: (err: unknown) => void): void;
 }
 
 export interface ClientBotDeps {
@@ -68,6 +72,10 @@ export function registerClientBotHandlers(
 ): void {
   const { prisma } = deps;
 
+  bot.catch?.((err) => {
+    console.error("Client bot handler error:", err instanceof Error ? err.message : err);
+  });
+
   bot.command("start", async (ctx) => {
     await ensureUser(ctx, prisma);
 
@@ -79,7 +87,6 @@ export function registerClientBotHandlers(
 
     const products = await prisma.product.findMany({
       where: { isActive: true },
-      // Show newest products first so the most recently created test product is always included
       orderBy: { id: "desc" },
       take: 10,
     });
@@ -101,67 +108,40 @@ export function registerClientBotHandlers(
       return;
     }
 
-    const text = ctx.message?.text ?? "";
-    const parts = text.trim().split(/\s+/);
-    // Expect "/add <productId> <qty>"
-    if (parts.length < 3) {
-      await ctx.reply(ClientTexts.addUsage());
-      return;
-    }
+    const unlock = await cartMutex.lock(user.id);
+    try {
+      const text = ctx.message?.text;
+      if (!text) return;
 
-    const productId = Number(parts[1]);
-    const qty = Number(parts[2]);
+      const parts = text.trim().split(/\s+/);
+      if (parts.length < 3) {
+        await ctx.reply(ClientTexts.addUsage());
+        return;
+      }
 
-    if (!Number.isFinite(productId) || productId <= 0 || !Number.isFinite(qty) || qty <= 0) {
-      await ctx.reply(ClientTexts.addUsage());
-      return;
-    }
+      const productId = Number(parts[1]);
+      const qty = Number(parts[2]);
 
-    const product = await prisma.product.findFirst({
-      where: { id: productId, isActive: true },
-    });
+      if (!Number.isFinite(productId) || productId <= 0 || !Number.isFinite(qty) || qty <= 0) {
+        await ctx.reply(ClientTexts.addUsage());
+        return;
+      }
 
-    if (!product) {
-      await ctx.reply(ClientTexts.productNotFound());
-      return;
-    }
-
-    let cart = await prisma.cart.findFirst({
-      where: { userId: user.id, state: CartState.ACTIVE },
-    });
-
-    if (!cart) {
-      cart = await prisma.cart.create({
-        data: {
-          userId: user.id,
-        },
+      const product = await prisma.product.findFirst({
+        where: { id: productId, isActive: true },
       });
+
+      if (!product) {
+        await ctx.reply(ClientTexts.productNotFound());
+        return;
+      }
+
+      await addItemToCart(prisma, user.id, product.id, qty);
+
+      await ctx.reply(ClientTexts.addedToCart(product.title, qty));
+    } finally {
+      unlock();
     }
-
-    const existingItem = await prisma.cartItem.findFirst({
-      where: { cartId: cart.id, productId: product.id },
-    });
-
-    if (existingItem) {
-      await prisma.cartItem.update({
-        where: { id: existingItem.id },
-        data: {
-          qty: existingItem.qty + qty,
-          unitPriceSnapshot: product.price,
-        },
-      });
-    } else {
-      await prisma.cartItem.create({
-        data: {
-          cartId: cart.id,
-          productId: product.id,
-          qty,
-          unitPriceSnapshot: product.price,
-        },
-      });
-    }
-
-    await ctx.reply(ClientTexts.addedToCart(product.title, qty));
   });
 
   bot.command("remove", async (ctx) => {
@@ -171,61 +151,67 @@ export function registerClientBotHandlers(
       return;
     }
 
-    const text = ctx.message?.text ?? "";
-    const parts = text.trim().split(/\s+/);
-    // Expect "/remove <productId>"
-    if (parts.length < 2) {
-      await ctx.reply(ClientTexts.removeUsage());
-      return;
+    const unlock = await cartMutex.lock(user.id);
+    try {
+      const text = ctx.message?.text;
+      if (!text) return;
+
+      const parts = text.trim().split(/\s+/);
+      if (parts.length < 2) {
+        await ctx.reply(ClientTexts.removeUsage());
+        return;
+      }
+
+      const productId = Number(parts[1]);
+      if (!Number.isFinite(productId)) {
+        await ctx.reply(ClientTexts.removeUsage());
+        return;
+      }
+
+      const cart = await prisma.cart.findFirst({
+        where: { userId: user.id, state: CartState.ACTIVE },
+        include: { items: { include: { product: true } } },
+      });
+
+      if (!cart) {
+        await ctx.reply(ClientTexts.cartEmpty());
+        return;
+      }
+
+      const item = cart.items.find((i) => i.productId === productId);
+      if (!item) {
+        await ctx.reply(ClientTexts.productNotInCart());
+        return;
+      }
+
+      if (item.qty > 1) {
+        await prisma.cartItem.update({
+          where: { id: item.id },
+          data: { qty: item.qty - 1 },
+        });
+      } else {
+        await prisma.cartItem.delete({
+          where: { id: item.id },
+        });
+      }
+
+      await ctx.reply(ClientTexts.removedFromCart(item.product.title));
+    } finally {
+      unlock();
     }
-
-    const productId = Number(parts[1]);
-    if (!Number.isFinite(productId) || productId <= 0) {
-      await ctx.reply(ClientTexts.removeUsage());
-      return;
-    }
-
-    const cart = await prisma.cart.findFirst({
-      where: { userId: user.id, state: CartState.ACTIVE },
-    });
-
-    if (!cart) {
-      await ctx.reply(ClientTexts.cartEmpty());
-      return;
-    }
-
-    const item = await prisma.cartItem.findFirst({
-      where: { cartId: cart.id, productId },
-    });
-
-    if (!item) {
-      await ctx.reply(ClientTexts.productNotInCart());
-      return;
-    }
-
-    await prisma.cartItem.delete({ where: { id: item.id } });
-
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    const title = product?.title ?? `محصول ${productId}`;
-
-    await ctx.reply(ClientTexts.removedFromCart(title));
   });
 
   bot.command("cart", async (ctx) => {
     const user = await ensureUser(ctx, prisma);
     if (!user) {
-      await ctx.reply(ClientTexts.cartEmpty());
+      await ctx.reply(ClientTexts.unableToIdentify());
       return;
     }
 
     const cart = await prisma.cart.findFirst({
       where: { userId: user.id, state: CartState.ACTIVE },
       include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
+        items: { include: { product: true } },
       },
     });
 
@@ -234,23 +220,11 @@ export function registerClientBotHandlers(
       return;
     }
 
-    const lines = cart.items.map((item) => {
-      const lineTotal = item.qty * item.unitPriceSnapshot;
-      const currency = item.product.currency;
-      return ClientTexts.cartItemLine(item.product.title, item.qty, lineTotal, currency);
-    });
-
-    const subtotal = cart.items.reduce(
-      (sum, item) => sum + item.qty * item.unitPriceSnapshot,
-      0,
+    const lines = cart.items.map(
+      (item) => `• ${item.product.title} — ${item.qty} × ${item.unitPriceSnapshot} = ${item.qty * item.unitPriceSnapshot}`,
     );
 
-    await ctx.reply([
-      ClientTexts.cartHeader(),
-      ...lines,
-      "",
-      ClientTexts.cartSubtotal(subtotal),
-    ].join("\n"));
+    await ctx.reply([ClientTexts.cartHeader(), ...lines].join("\n"));
   });
 
   bot.command("checkout", async (ctx) => {
@@ -260,38 +234,40 @@ export function registerClientBotHandlers(
       return;
     }
 
-    const cart = await prisma.cart.findFirst({
-      where: { userId: user.id, state: CartState.ACTIVE },
-      include: { items: true },
-    });
-
-    if (!cart || cart.items.length === 0) {
-      await ctx.reply(ClientTexts.cartEmpty());
-      return;
-    }
-
-    const orderService = new OrderService(prisma);
-
     try {
+      const cart = await prisma.cart.findFirst({
+        where: { userId: user.id, state: CartState.ACTIVE },
+        include: { items: { include: { product: true } } },
+      });
+
+      if (!cart || cart.items.length === 0) {
+        await ctx.reply(ClientTexts.cartEmpty());
+        return;
+      }
+
+      const orderService = new OrderService(prisma);
+
       const result = await orderService.createOrderFromCart({
         userId: user.id,
         cartId: cart.id,
         appliedDiscounts: [],
       });
 
-      await ctx.reply(ClientTexts.orderSubmitted(result.orderId, result.grandTotal));
+      await ctx.reply(
+        ClientTexts.orderSubmitted(result.orderId, result.grandTotal) +
+          "\n\n" +
+          ClientTexts.orderPendingApproval(),
+      );
     } catch (error) {
       if (error instanceof InsufficientStockError) {
         await ctx.reply(ClientTexts.outOfStock());
         return;
       }
-
       await ctx.reply(ClientTexts.checkoutError());
     }
   });
 
   bot.command("help", async (ctx) => {
-    await ensureUser(ctx, prisma);
-    await ctx.reply(ClientTexts.helpMessage(), { parse_mode: "Markdown" });
+    await ctx.reply(ClientTexts.helpMessage());
   });
 }

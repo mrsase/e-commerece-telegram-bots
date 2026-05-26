@@ -206,7 +206,6 @@ async function continueCheckoutFlow(
   ctx: Context,
   user: User,
   prisma: PrismaClient,
-  notificationService?: NotificationService,
 ): Promise<void> {
   // Refresh user data
   const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
@@ -340,7 +339,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       await ctx.reply(ClientTexts.addressReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma, notificationService);
+      await continueCheckoutFlow(ctx, user, prisma);
       return;
     }
 
@@ -486,7 +485,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       await ctx.reply(ClientTexts.phoneReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma, notificationService);
+      await continueCheckoutFlow(ctx, user, prisma);
     }
   });
 
@@ -517,7 +516,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       await ctx.reply(ClientTexts.locationReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma, notificationService);
+      await continueCheckoutFlow(ctx, user, prisma);
     }
   });
 

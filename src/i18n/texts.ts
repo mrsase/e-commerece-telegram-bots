@@ -298,7 +298,7 @@ export const ManagerTexts = {
 
   // Settings
   settingsMenuTitle: (imageStatus: string, expiryMinutes: number, paymentMethod: "channel" | "direct" = "direct") =>
-    `⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: ${paymentMethod === "channel" ? "📢 کانال" : "� مستقیم"}\n�🖼️ تصویر پرداخت: ${imageStatus}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
+    `⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: ${paymentMethod === "channel" ? "📢 کانال" : "💳 مستقیم"}\n🖼️ تصویر پرداخت: ${imageStatus}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
   settingsImageUpdated: () => "✅ تصویر پرداخت با موفقیت به‌روزرسانی شد.",
   settingsImageDeleted: () => "✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود.",
   settingsImageAsk: () => "🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):",

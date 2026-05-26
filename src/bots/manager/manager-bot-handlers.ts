@@ -17,6 +17,7 @@ export interface ManagerCommandBot {
     command: string,
     handler: (ctx: ManagerContext) => Promise<void> | void,
   ): void;
+  catch?(handler: (err: unknown) => void): void;
 }
 
 export interface ManagerBotDeps {
@@ -50,6 +51,12 @@ export function registerManagerBotHandlers(
   deps: ManagerBotDeps,
 ): void {
   const { prisma } = deps;
+
+  if (bot.catch) {
+    bot.catch((err) => {
+      console.error("Manager bot handler error:", err instanceof Error ? err.message : err);
+    });
+  }
 
   bot.command("start", async (ctx) => {
     const manager = await getManager(ctx, prisma);
@@ -114,24 +121,22 @@ export function registerManagerBotHandlers(
       return;
     }
 
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const claimed = await prisma.order.updateMany({
+      where: { id: orderId, status: OrderStatus.AWAITING_MANAGER_APPROVAL },
+      data: { status: OrderStatus.APPROVED },
+    });
 
-    if (!order || order.status !== OrderStatus.AWAITING_MANAGER_APPROVAL) {
+    if (claimed.count === 0) {
       await ctx.reply(ManagerTexts.orderNotFound());
       return;
     }
 
-    await prisma.order.update({
-      where: { id: orderId },
+    await prisma.orderEvent.create({
       data: {
-        status: OrderStatus.APPROVED,
-        events: {
-          create: {
-            actorType: "manager",
-            actorId: manager.id,
-            eventType: "order_approved",
-          },
-        },
+        orderId,
+        actorType: "manager",
+        actorId: manager.id,
+        eventType: "order_approved",
       },
     });
 
@@ -159,24 +164,22 @@ export function registerManagerBotHandlers(
       return;
     }
 
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const claimed = await prisma.order.updateMany({
+      where: { id: orderId, status: OrderStatus.AWAITING_MANAGER_APPROVAL },
+      data: { status: OrderStatus.CANCELLED },
+    });
 
-    if (!order || order.status !== OrderStatus.AWAITING_MANAGER_APPROVAL) {
+    if (claimed.count === 0) {
       await ctx.reply(ManagerTexts.orderNotFound());
       return;
     }
 
-    await prisma.order.update({
-      where: { id: orderId },
+    await prisma.orderEvent.create({
       data: {
-        status: OrderStatus.CANCELLED,
-        events: {
-          create: {
-            actorType: "manager",
-            actorId: manager.id,
-            eventType: "order_rejected",
-          },
-        },
+        orderId,
+        actorType: "manager",
+        actorId: manager.id,
+        eventType: "order_rejected",
       },
     });
 

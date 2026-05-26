@@ -32,10 +32,15 @@ export async function cleanupChannelForOrder(
   const { botApi, checkoutChannelId, prisma } = deps;
   const { orderId, channelMessageId, inviteLink, userTgId } = target;
 
+  let messageDeleted = false;
+  let linkRevoked = false;
+  let userKicked = false;
+
   // 1) Delete the payment message from the channel
   if (channelMessageId) {
     try {
       await botApi.deleteMessage(checkoutChannelId, channelMessageId);
+      messageDeleted = true;
     } catch (error) {
       console.error(`[ChannelCleanup] Failed to delete channel message ${channelMessageId} for order #${orderId}:`, error);
     }
@@ -45,6 +50,7 @@ export async function cleanupChannelForOrder(
   if (inviteLink) {
     try {
       await botApi.revokeChatInviteLink(checkoutChannelId, inviteLink);
+      linkRevoked = true;
     } catch (error) {
       console.error(`[ChannelCleanup] Failed to revoke invite link for order #${orderId}:`, error);
     }
@@ -53,21 +59,30 @@ export async function cleanupChannelForOrder(
   // 3) Kick the user from the channel (ban then unban so they can be re-invited later)
   try {
     await botApi.banChatMember(checkoutChannelId, Number(userTgId));
-    // Immediately unban so they aren't permanently blocked from the channel
     await botApi.unbanChatMember(checkoutChannelId, Number(userTgId), {
       only_if_banned: true,
     });
+    userKicked = true;
   } catch (error) {
     // User might not have joined the channel — that's OK
     console.error(`[ChannelCleanup] Failed to kick user ${userTgId} from channel for order #${orderId}:`, error);
   }
 
-  // 4) Clear channel fields on the order so we don't try again
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      channelMessageId: null,
-      inviteLink: null,
-    },
-  });
+  // 4) Only clear fields that were successfully cleaned up.
+  //    If an operation failed, keep the field so retry can attempt again.
+  const updateData: Record<string, null> = {};
+  if (messageDeleted) updateData.channelMessageId = null;
+  if (linkRevoked) updateData.inviteLink = null;
+  if (userKicked) {
+    // Clear all channel fields only after all critical operations succeed
+    updateData.channelMessageId = null;
+    updateData.inviteLink = null;
+  }
+
+  if (Object.keys(updateData).length > 0) {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: updateData,
+    });
+  }
 }
