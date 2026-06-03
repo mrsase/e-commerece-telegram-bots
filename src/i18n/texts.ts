@@ -37,7 +37,7 @@ export const ClientTexts = {
   // Referral Gate
   welcomeNewUser: () => "برای استفاده از فروشگاه لطفا کد ورود را وارد کنید",
   invalidReferralCode: () => "❌ کد معرفی نامعتبر یا منقضی است. دوباره تلاش کنید:",
-  referralCodeAccepted: () => "به فروشگاه ایرانی خوش آمدید، برای ثبت سفارش از منوی زیر استفاده کنید",
+  referralCodeAccepted: () => "کد معرفی تایید شد، به فروشگاه ایرانی خوش آمدید",
   userBlocked: () => "🚫 حساب شما مسدود شده است. لطفاً با پشتیبانی تماس بگیرید.",
 
   // Welcome & Start
