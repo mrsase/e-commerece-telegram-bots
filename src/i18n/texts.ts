@@ -35,9 +35,9 @@ export function escapeMarkdownV2(text: string | null | undefined): string {
 
 export const ClientTexts = {
   // Referral Gate
-  welcomeNewUser: () => "👋 سلام! برای استفاده از فروشگاه، لطفاً یک کد معرفی معتبر وارد کنید:",
+  welcomeNewUser: () => "برای استفاده از فروشگاه لطفا کد ورود را وارد کنید",
   invalidReferralCode: () => "❌ کد معرفی نامعتبر یا منقضی است. دوباره تلاش کنید:",
-  referralCodeAccepted: () => "✅ کد معرفی تأیید شد! به فروشگاه آموز خوش آمدید.",
+  referralCodeAccepted: () => "به فروشگاه ایرانی خوش آمدید، برای ثبت سفارش از منوی زیر استفاده کنید",
   userBlocked: () => "🚫 حساب شما مسدود شده است. لطفاً با پشتیبانی تماس بگیرید.",
 
   // Welcome & Start
@@ -145,7 +145,7 @@ export const ClientTexts = {
 
   // Help
   helpMessage: () => `
-🛒 *راهنمای فروشگاه آموز*
+🛒 *راهنمای فروشگاه ایرانی*
 
 برای استفاده از ربات نیازی به تایپ کردن دستورها نیست؛
 از دکمه‌های منو استفاده کنید.
@@ -189,7 +189,7 @@ export const ManagerTexts = {
 
   // Help
   helpMessage: () => `
-👔 *راهنمای مدیر - فروشگاه آموز*
+👔 *راهنمای مدیر - فروشگاه ایرانی*
 
 برای کار با ربات مدیریتی، از دکمه‌های منو استفاده کنید.
 *مهم‌ترین بخش‌ها:*

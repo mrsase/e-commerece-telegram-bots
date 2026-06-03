@@ -489,23 +489,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
-    // Show main menu with summary
-    const name = user.firstName || user.username || "دوست عزیز";
-    const pendingOrders = await prisma.order.count({
-      where: {
-        userId: user.id,
-        status: { in: [OrderStatus.APPROVED, OrderStatus.INVITE_SENT, OrderStatus.AWAITING_RECEIPT] },
-      },
-    });
-    const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
-    let welcomeText = ClientTexts.welcomeBack(name);
-    if (pendingOrders > 0) {
-      welcomeText += `\n📦 سفارش‌های فعال: ${pendingOrders}`;
-    }
-    if (effectiveScore > 0) {
-      welcomeText += `\n⭐ امتیاز وفاداری: ${effectiveScore}/10`;
-    }
-    await ctx.reply(welcomeText, {
+    // Show main menu
+    await ctx.reply(ClientTexts.referralCodeAccepted(), {
       reply_markup: ClientKeyboards.mainMenu(),
       parse_mode: "Markdown",
     });
@@ -934,7 +919,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // MAIN MENU
     if (data === "client:menu") {
-      await safeRender(ctx, ClientTexts.welcome(), {
+      await safeRender(ctx, ClientTexts.referralCodeAccepted(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
