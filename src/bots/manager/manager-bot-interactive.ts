@@ -5,7 +5,7 @@ function safeId(value: string | undefined, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 import type { PrismaClient, Manager } from "@prisma/client";
-import { OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
+import { OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType, ManagerRole } from "@prisma/client";
 import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 
@@ -65,12 +65,29 @@ async function getManager(ctx: Context, prisma: PrismaClient): Promise<Manager |
   if (!ctx.from) return null;
 
   const tgUserId = BigInt(ctx.from.id);
-  const manager = await prisma.manager.findUnique({
+  let manager = await prisma.manager.findUnique({
     where: { tgUserId },
   });
 
-  if (!manager || !manager.isActive) return null;
-  return manager;
+  if (manager) {
+    return manager.isActive ? manager : null;
+  }
+
+  // Auto-register admin from env var if not in DB yet
+  const adminTgUserId = process.env.ADMIN_TG_USER_ID;
+  if (adminTgUserId && String(ctx.from.id) === adminTgUserId) {
+    manager = await prisma.manager.create({
+      data: {
+        tgUserId,
+        role: ManagerRole.ADMIN,
+        isActive: true,
+      },
+    });
+    console.log(`✓ Auto-registered admin manager (tgUserId: ${tgUserId})`);
+    return manager;
+  }
+
+  return null;
 }
 
 /**

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>گزارش نهایی بهبود کیفیت - Amoosh Telegram Bots</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 2rem auto; padding: 1rem; background: #f5f5f5; color: #222; line-height: 1.7; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #e94560; padding-bottom: .5rem; display: flex; align-items: center; gap: .5rem; }
+  h1 small { font-size: .6em; font-weight: 400; color: #666; margin-right: auto; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 1rem; margin: 1.5rem 0; }
+  .summary-card { background: #fff; border-radius: 12px; padding: 1rem; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .summary-card .num { font-size: 2rem; font-weight: 700; }
+  .summary-card .label { font-size: .85rem; color: #666; margin-top: .25rem; }
+  .green { color: #16a34a; } .orange { color: #d97706; } .red { color: #dc2626; } .blue { color: #2563eb; }
+  .phase { background: #fff; border-radius: 12px; margin: 1rem 0; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+  .phase-title { padding: .75rem 1rem; font-weight: 600; font-size: 1.05rem; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; gap: .5rem; user-select: none; }
+  .phase-title .badge { font-size: .7rem; padding: 2px 8px; border-radius: 999px; color: #fff; }
+  .badge-done { background: #16a34a; } .badge-partial { background: #d97706; } .badge-todo { background: #9ca3af; }
+  .item { padding: .6rem 1rem; display: flex; align-items: flex-start; gap: .75rem; border-bottom: 1px solid #f0f0f0; }
+  .item:last-child { border: 0; }
+  .item .icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 2px; }
+  .item .body { flex: 1; }
+  .item .code { font-size: .8rem; font-family: monospace; background: #f0f0f0; padding: 1px 5px; border-radius: 4px; }
+  .item .desc { font-size: .9rem; }
+  .item .file { font-size: .75rem; color: #666; margin-top: 2px; }
+  .tag { display: inline-block; font-size: .65rem; padding: 1px 6px; border-radius: 6px; margin-right: 4px; }
+  .tag-fix { background: #dcfce7; color: #16a34a; }
+  .tag-cleanup { background: #dbeafe; color: #2563eb; }
+  .tag-verify { background: #fef9c3; color: #a16207; }
+  .toggle-content { display: none; }
+  .expanded .toggle-content { display: block; }
+  .phase-title .arrow { margin-right: auto; transition: transform .2s; }
+  .expanded .phase-title .arrow { transform: rotate(180deg); }
+  .footer { text-align: center; color: #999; font-size: .85rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #eee; }
+  .check-group { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+  .check { background: #f9fafb; border-radius: 8px; padding: .5rem .75rem; font-size: .8rem; flex: 1; min-width: 140px; display: flex; align-items: center; gap: 6px; }
+  .check.pass { background: #f0fdf4; } .check.pass .icon { color: #16a34a; }
+  .check.fail { background: #fef2f2; } .check.fail .icon { color: #dc2626; }
+</style>
+</head>
+<body>
+
+<h1>
+  📋 گزارش نهایی بهبود کیفیت
+  <small>Amoosh Telegram Bots</small>
+</h1>
+
+<div class="summary-grid">
+  <div class="summary-card"><div class="num green">۷</div><div class="label">✅ موانع انتشار (فاز ۱)</div></div>
+  <div class="summary-card"><div class="num green">۶</div><div class="label">🐛 باگ‌های کاربردی (فاز ۲)</div></div>
+  <div class="summary-card"><div class="num green">۲</div><div class="label">🛡️ باگ‌های بالقوه</div></div>
+  <div class="summary-card"><div class="num green">۱</div><div class="label">🧹 پاک‌سازی (فاز ۵)</div></div>
+</div>
+
+<div class="check-group">
+  <div class="check pass"><span class="icon">✓</span> TypeScript: بدون خطا</div>
+  <div class="check pass"><span class="icon">✓</span> ESLint: بدون خطا</div>
+  <div class="check pass"><span class="icon">✓</span> تست‌ها: ۵۷ از ۵۷ قبول</div>
+</div>
+
+<!-- PHASE 1 -->
+<div class="phase expanded">
+<div class="phase-title" onclick="this.parentNode.classList.toggle('expanded')">
+  <span class="badge badge-done">فاز ۱</span> موانع انتشار (Ship Blockers)
+  <span class="badge badge-done">۷/۷</span>
+  <span class="arrow">▾</span>
+</div>
+<div class="toggle-content">
+
+<!-- C1 -->
+<div class="item">
+  <div class="icon">🔒</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>C1</strong> — کاهش اتمی موجودی و اعتبارسنجی تخفیف در تراکنش</div>
+    <div class="file"><code>src/services/order-service.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      استفاده از <code>updateMany</code> با شرط <code>stock &gt;= qty</code> بجای read-then-write.
+      اعتبارسنجی مجدد تخفیف‌ها داخل تراکنش.
+      کلاس‌های خطای <code>ProductNotAvailableError</code> و <code>CartEmptyError</code> اضافه شد.
+    </div>
+  </div>
+</div>
+
+<!-- C2 -->
+<div class="item">
+  <div class="icon">🔔</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>C2</strong> — بازگرداندن بازخورد callback buttons</div>
+    <div class="file"><code>src/bots/client/client-bot-interactive.ts</code>, <code>src/bots/manager/manager-bot-interactive.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      حذف <code>answerCallback()</code> زودهنگام. بدنه handler‌ها در try-finally برای fallback acknowledge پیچیده شد.
+    </div>
+  </div>
+</div>
+
+<!-- C3 -->
+<div class="item">
+  <div class="icon">🛡️</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>C3</strong> — فرار از Markdown در نام کاربری</div>
+    <div class="file"><code>src/bots/client/client-bot-interactive.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      استفاده از <code>escapeMarkdown()</code> برای <code>name</code> در handler <code>/start</code>.
+    </div>
+  </div>
+</div>
+
+<!-- C4 -->
+<div class="item">
+  <div class="icon">🪤</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>C4</strong> — try-catch در safeRender fallback</div>
+    <div class="file"><code>src/utils/safe-reply.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      اضافه شدن try-catch به <code>ctx.reply</code> در fallback <code>safeRender</code>.
+    </div>
+  </div>
+</div>
+
+<!-- C5 -->
+<div class="item">
+  <div class="icon">📨</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>C5</strong> — تغییر ترتیب ارسال دعوتنامه</div>
+    <div class="file"><code>src/jobs/send-invites.worker.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      لینک دعوت <strong>قبل از</strong> پیام کانال ساخته می‌شود تا از پیام‌های تکراری هنگام خطا جلوگیری شود.
+    </div>
+  </div>
+</div>
+
+<!-- C6 -->
+<div class="item">
+  <div class="icon">🔄</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>C6</strong> — اعلان قبل از تغییر وضعیت دیتابیس</div>
+    <div class="file"><code>src/jobs/send-invites.worker.ts</code>, <code>src/jobs/expire-invites.worker.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      ابتدا کاربر مطلع می‌شود، سپس وضعیت دیتابیس تغییر می‌کند.
+    </div>
+  </div>
+</div>
+
+<!-- B8 -->
+<div class="item">
+  <div class="icon">⏱️</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>B8</strong> — جلوگیری از اجرای هم‌پوشان jobها</div>
+    <div class="file"><code>src/infra/scheduler/interval-scheduler.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      تابع <code>createGuardedJob</code> با پرچم running-flag از overlap جلوگیری می‌کند.
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- PHASE 2 -->
+<div class="phase expanded">
+<div class="phase-title" onclick="this.parentNode.classList.toggle('expanded')">
+  <span class="badge badge-done">فاز ۲</span> باگ‌های رابط کاربری
+  <span class="badge badge-done">۶/۹</span>
+  <span class="arrow">▾</span>
+</div>
+<div class="toggle-content">
+
+<!-- B1 -->
+<div class="item">
+  <div class="icon">🔤</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>B1</strong> — یونیکد خراب در منوها</div>
+    <div class="file"><code>src/i18n/texts.ts</code>, <code>src/utils/keyboards.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      کاراکترهای مخدوش در منوی تنظیمات (texts.ts) و منوی کوریر (keyboards.ts) اصلاح شدند.
+    </div>
+  </div>
+</div>
+
+<!-- B2 -->
+<div class="item">
+  <div class="icon">🔗</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>B2</strong> — بازگشت لینک دعوت کهنه</div>
+    <div class="file"><code>src/services/invite-service.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      قبل از بازگرداندن لینک موجود، وضعیت سفارش بررسی می‌شود. فقط برای APPROVED/INVITE_SENT مجاز است.
+    </div>
+  </div>
+</div>
+
+<!-- B3 -->
+<div class="item">
+  <div class="icon">🔁</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>B3</strong> — بررسی مجدد canCreateReferral</div>
+    <div class="file"><code>src/bots/client/client-bot-interactive.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      در handler امتیاز ارجاع، <code>canCreateReferral</code> دوباره چک می‌شود.
+    </div>
+  </div>
+</div>
+
+<!-- B4 -->
+<div class="item">
+  <div class="icon">🛡️</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>B4</strong> — محافظت escapeMarkdown مقابل null</div>
+    <div class="file"><code>src/bots/manager/manager-bot-interactive.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      <code>escapeMarkdown(product.description)</code> با گارد null در ۲ مکان محافظت شد.
+    </div>
+  </div>
+</div>
+
+<!-- B9 -->
+<div class="item">
+  <div class="icon">🔄</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>B9</strong> — try-catch در حلقه expire-invites</div>
+    <div class="file"><code>src/jobs/expire-invites.worker.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      هر iteration در try-catch مجزا قرار گرفت تا یک سفارش مشکل‌دار کل حلقه را متوقف نکند.
+    </div>
+  </div>
+</div>
+
+<!-- B10 -->
+<div class="item">
+  <div class="icon">🧹</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>B10</strong> — پاک‌سازی شرطی کانال</div>
+    <div class="file"><code>src/services/channel-cleanup-service.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      بجای پاک کردن تمام فیلدها، فقط فیلدهایی که با موفقیت پاک‌سازی شده‌اند پاک می‌شوند.
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- POTENTIAL BUGS -->
+<div class="phase expanded">
+<div class="phase-title" onclick="this.parentNode.classList.toggle('expanded')">
+  <span class="badge badge-done">باگ‌های بالقوه</span>
+  <span class="badge badge-done">۲</span>
+  <span class="arrow">▾</span>
+</div>
+<div class="toggle-content">
+
+<!-- P1 -->
+<div class="item">
+  <div class="icon">🔢</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-fix">اصلاح</span> <strong>P1</strong> — اعتبارسنجی callback data (NaN)</div>
+    <div class="file"><code>src/bots/client/client-bot-interactive.ts</code>, <code>src/bots/manager/manager-bot-interactive.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      تابع <code>safeId()</code> اضافه شد که مقدار پیش‌فرض ۰ را برمی‌گرداند اگر <code>parseInt</code> منجر به NaN شود. تمام <code>parseInt(parts[...])</code> با <code>safeId(parts[...])</code> جایگزین شدند.
+    </div>
+  </div>
+</div>
+
+<!-- N2 -->
+<div class="item">
+  <div class="icon">⚡</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-cleanup">بهبود</span> <strong>N2</strong> — حذف import داینامیک grammy</div>
+    <div class="file"><code>src/bots/client/client-bot-interactive.ts</code>, <code>src/bots/manager/manager-bot-interactive.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      ۹ مورد <code>await import("grammy")</code> با import ایستای <code>InlineKeyboard</code> جایگزین شدند.
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- PHASE 5 -->
+<div class="phase expanded">
+<div class="phase-title" onclick="this.parentNode.classList.toggle('expanded')">
+  <span class="badge badge-done">فاز ۵</span> پاک‌سازی
+  <span class="badge badge-done">۲</span>
+  <span class="arrow">▾</span>
+</div>
+<div class="toggle-content">
+
+<div class="item">
+  <div class="icon">🧹</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-cleanup">حذف</span> <strong>I6</strong> — فایل ESLint تکراری</div>
+    <div class="file"><code>.eslintrc.cjs</code> (حذف شد)</div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      ESLint v9 از flat config استفاده می‌کند (<code>eslint.config.mjs</code>). فایل قدیمی <code>.eslintrc.cjs</code> حذف شد.
+    </div>
+  </div>
+</div>
+
+<div class="item">
+  <div class="icon">🧹</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-cleanup">پاک‌سازی</span> متغیر استفاده نشده</div>
+    <div class="file"><code>src/bots/client/client-bot-interactive.ts</code></div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem">
+      پارامتر استفاده‌نشده <code>notificationService</code> از تابع <code>continueCheckoutFlow</code> حذف شد.
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- VERIFICATION -->
+<div class="phase expanded">
+<div class="phase-title" onclick="this.parentNode.classList.toggle('expanded')">
+  <span class="badge badge-done">تأیید نهایی</span>
+  <span class="arrow">▾</span>
+</div>
+<div class="toggle-content">
+
+<div class="item">
+  <div class="icon">📐</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-verify">نوع‌شناسی</span> TypeScript Compiler</div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem"><code>npx tsc --noEmit</code> — بدون خطا ✓</div>
+  </div>
+</div>
+
+<div class="item">
+  <div class="icon">🔍</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-verify">لینت</span> ESLint</div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem"><code>npm run lint</code> — بدون خطا ✓</div>
+  </div>
+</div>
+
+<div class="item">
+  <div class="icon">🧪</div>
+  <div class="body">
+    <div class="desc"><span class="tag tag-verify">تست</span> Vitest</div>
+    <div class="desc" style="margin-top:4px;font-size:.85rem"><code>npm test -- --run</code> — ۵۷ تست از ۵۷ قبول ✓</div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- FILES CHANGED -->
+<div class="phase expanded">
+<div class="phase-title" onclick="this.parentNode.classList.toggle('expanded')">
+  <span class="badge badge-done">فایل‌های تغییر یافته</span>
+  <span class="arrow">▾</span>
+</div>
+<div class="toggle-content">
+
+<div class="item">
+  <div class="icon">📄</div>
+  <div class="body">
+    <div class="file" style="font-family:monospace;font-size:.85rem">
+      src/services/order-service.ts<br>
+      src/bots/client/client-bot-interactive.ts<br>
+      src/bots/manager/manager-bot-interactive.ts<br>
+      src/utils/safe-reply.ts<br>
+      src/jobs/send-invites.worker.ts<br>
+      src/jobs/expire-invites.worker.ts<br>
+      src/infra/scheduler/interval-scheduler.ts<br>
+      src/services/invite-service.ts<br>
+      src/services/channel-cleanup-service.ts<br>
+      src/utils/session-store.ts<br>
+      src/i18n/texts.ts<br>
+      src/utils/keyboards.ts<br>
+      src/bots/courier/courier-bot-interactive.ts<br>
+      <s>.eslintrc.cjs</s> (حذف شد)
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<div class="footer">
+  تولید شده در ۲ خرداد ۱۴۰۵ &middot; شاخه <code>production-prep</code>
+</div>
+
+<script>
+document.querySelectorAll('.phase').forEach(p => {
+  const title = p.querySelector('.phase-title');
+  if (!title) return;
+  title.addEventListener('click', () => p.classList.toggle('expanded'));
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amoosh Telegram Bots — Code Quality Audit</title>
+<style>
+  :root {
+    --bg: #0b0d14;
+    --surface: #161923;
+    --surface2: #1e2235;
+    --surface3: #262b44;
+    --border: #2a2f4a;
+    --border2: #3a3f5a;
+    --text: #e2e4ed;
+    --text2: #b0b4c8;
+    --muted: #7a7f9a;
+    --critical: #ef4444;
+    --critical-bg: rgba(239,68,68,0.1);
+    --bug: #f97316;
+    --bug-bg: rgba(249,115,22,0.1);
+    --potential: #eab308;
+    --potential-bg: rgba(234,179,8,0.08);
+    --bottleneck: #a855f7;
+    --bottleneck-bg: rgba(168,85,247,0.1);
+    --issue: #3b82f6;
+    --issue-bg: rgba(59,130,246,0.08);
+    --practice: #06b6d4;
+    --practice-bg: rgba(6,182,212,0.08);
+    --suggestion: #22c55e;
+    --suggestion-bg: rgba(34,197,94,0.08);
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #1e1b4b 0%, #0b0d14 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 40px 32px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle at 30% 50%, rgba(124,58,237,0.06) 0%, transparent 60%);
+  }
+  .header h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; position:relative; }
+  .header h1 span { color: #a78bfa; }
+  .header .subtitle { color: var(--muted); margin-top: 6px; font-size: 0.95rem; position:relative; }
+  .header .disclaimer {
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.2);
+    color: var(--critical);
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 12px;
+    position: relative;
+  }
+
+  /* Container */
+  .container { max-width: 1100px; margin: 0 auto; padding: 28px 24px; }
+
+  /* Section */
+  .section { margin-bottom: 40px; }
+  .section-title {
+    font-size: 1.3rem; font-weight: 700;
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; padding-bottom: 8px;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-title .badge-count {
+    font-size: 0.7rem; font-weight: 600; padding: 2px 10px; border-radius: 999px;
+    margin-left: 6px;
+  }
+  .badge-count.critical { background: var(--critical-bg); color: var(--critical); }
+  .badge-count.bug { background: var(--bug-bg); color: var(--bug); }
+  .badge-count.potential { background: var(--potential-bg); color: var(--potential); }
+  .badge-count.total { background: rgba(168,85,247,0.1); color: var(--bottleneck); }
+
+  /* Stat Bar */
+  .stat-row {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px;
+  }
+  .stat-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
+  }
+  .stat-pill .num { font-size: 1.2rem; }
+  .stat-pill.critical { background: var(--critical-bg); color: var(--critical); }
+  .stat-pill.bug { background: var(--bug-bg); color: var(--bug); }
+  .stat-pill.potential { background: var(--potential-bg); color: var(--potential); }
+  .stat-pill.bottleneck { background: var(--bottleneck-bg); color: var(--bottleneck); }
+  .stat-pill.issue { background: var(--issue-bg); color: var(--issue); }
+  .stat-pill.practice { background: var(--practice-bg); color: var(--practice); }
+  .stat-pill.suggestion { background: var(--suggestion-bg); color: var(--suggestion); }
+  .stat-pill.total { background: rgba(255,255,255,0.05); color: var(--text2); }
+
+  /* Finding Cards */
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .finding:hover { border-color: var(--border2); }
+  .finding-header {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px 18px; cursor: default;
+  }
+  .finding-header .sev {
+    flex-shrink: 0;
+    width: 72px; padding: 3px 0; border-radius: 4px;
+    font-size: 0.65rem; font-weight: 700; text-align: center; text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+  .sev.critical { background: var(--critical-bg); color: var(--critical); }
+  .sev.bug { background: var(--bug-bg); color: var(--bug); }
+  .sev.potential-bug { background: var(--potential-bg); color: var(--potential); }
+  .sev.bottleneck { background: var(--bottleneck-bg); color: var(--bottleneck); }
+  .sev.issue { background: var(--issue-bg); color: var(--issue); }
+  .sev.best-practice { background: var(--practice-bg); color: var(--practice); }
+  .sev.suggestion { background: var(--suggestion-bg); color: var(--suggestion); }
+  .sev.missing { background: rgba(107,114,128,0.1); color: #9ca3af; }
+
+  .finding-body { flex: 1; min-width: 0; }
+  .finding-body .loc {
+    font-size: 0.72rem; color: var(--muted); font-family: 'SF Mono', 'Fira Code', monospace;
+    margin-bottom: 2px;
+  }
+  .finding-body .loc strong { color: var(--text2); }
+  .finding-body .desc { font-size: 0.88rem; color: var(--text2); line-height: 1.55; }
+  .finding-body .desc code {
+    background: var(--surface2); padding: 1px 5px; border-radius: 3px;
+    font-size: 0.82rem; color: var(--text);
+  }
+
+  .finding-toggle {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    padding: 4px 6px; border-radius: 4px; font-size: 0.8rem; margin-top: 8px;
+  }
+  .finding-toggle:hover { background: var(--surface2); color: var(--text); }
+  .finding-detail {
+    display: none;
+    padding: 0 18px 14px 18px; margin-left: 84px;
+    font-size: 0.84rem; color: var(--muted); line-height: 1.6;
+    border-top: 1px solid var(--border);
+  }
+  .finding-detail.show { display: block; padding-top: 12px; }
+  .finding-detail code {
+    background: var(--surface2); padding: 1px 5px; border-radius: 3px;
+    font-size: 0.8rem; color: var(--text2);
+  }
+
+  /* Quick Links */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 28px;
+  }
+  .toc h3 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+  .toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
+  .toc-grid a {
+    color: var(--text2); text-decoration: none; font-size: 0.84rem; padding: 3px 6px; border-radius: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .toc-grid a:hover { background: var(--surface2); color: var(--text); }
+  .toc-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+
+  /* Subsection */
+  .sub-title {
+    font-size: 1rem; font-weight: 600; margin: 24px 0 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sub-title .count { font-size: 0.75rem; color: var(--muted); font-weight: 400; }
+
+  /* Detail box */
+  .detail-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .detail-box h4 { font-size: 0.9rem; margin-bottom: 8px; }
+  .detail-box p, .detail-box li { font-size: 0.84rem; color: var(--text2); }
+  .detail-box ul { padding-left: 18px; }
+  .detail-box ul li { margin-bottom: 4px; }
+
+  /* Footer */
+  .footer {
+    text-align: center; padding: 28px 0; color: var(--muted);
+    font-size: 0.78rem; border-top: 1px solid var(--border);
+  }
+
+  /* Badge dot colors */
+  .dot-critical { background: var(--critical); }
+  .dot-bug { background: var(--bug); }
+  .dot-potential { background: var(--potential); }
+  .dot-bottleneck { background: var(--bottleneck); }
+  .dot-issue { background: var(--issue); }
+  .dot-practice { background: var(--practice); }
+  .dot-suggestion { background: var(--suggestion); }
+  .dot-missing { background: #6b7280; }
+
+  @media (max-width: 700px) {
+    .finding-header { flex-direction: column; gap: 8px; }
+    .finding-detail { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>Amoosh</span> Telegram Bots — Quality Audit</h1>
+  <div class="subtitle">Deep code review for production readiness &middot; 18 source files analyzed across 4 parallel reviews</div>
+  <div class="disclaimer">&#9888; No code changes — analysis only. Decision-ready report.</div>
+</div>
+
+<div class="container">
+
+<div class="toc">
+  <h3>Quick Navigation</h3>
+  <div class="toc-grid">
+    <a href="#critical"><span class="toc-dot dot-critical"></span>Critical Bugs (6)</a>
+    <a href="#bug"><span class="toc-dot dot-bug"></span>Bugs (14)</a>
+    <a href="#potential"><span class="toc-dot dot-potential"></span>Potential Bugs (17)</a>
+    <a href="#bottleneck"><span class="toc-dot dot-bottleneck"></span>Bottlenecks (9)</a>
+    <a href="#issue"><span class="toc-dot dot-issue"></span>Issues (22)</a>
+    <a href="#practice"><span class="toc-dot dot-practice"></span>Best Practices (9)</a>
+    <a href="#suggestion"><span class="toc-dot dot-suggestion"></span>Suggestions (14)</a>
+    <a href="#missing"><span class="toc-dot dot-missing"></span>Missing Tests (26)</a>
+    <a href="#crosscut"><span class="toc-dot dot-bottleneck"></span>Cross-Cutting (4)</a>
+  </div>
+</div>
+
+<div class="section">
+  <div class="stat-row">
+    <div class="stat-pill critical"><span class="num">6</span> Critical</div>
+    <div class="stat-pill bug"><span class="num">14</span> Bug</div>
+    <div class="stat-pill potential"><span class="num">17</span> Potential Bug</div>
+    <div class="stat-pill bottleneck"><span class="num">9</span> Bottleneck</div>
+    <div class="stat-pill issue"><span class="num">22</span> Issue</div>
+    <div class="stat-pill practice"><span class="num">9</span> Best Practice</div>
+    <div class="stat-pill suggestion"><span class="num">14</span> Suggestion</div>
+    <div class="stat-pill missing"><span class="num">26</span> Missing Tests</div>
+    <div class="stat-pill total"><span class="num">117</span> Total</div>
+  </div>
+</div>
+
+<!-- ==================== CRITICAL ==================== -->
+<div class="section" id="critical">
+<div class="section-title">&#9888; Critical Bugs <span class="badge-count critical">Fix before shipping</span></div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev critical">Critical</div>
+    <div class="finding-body">
+      <div class="loc"><strong>C1</strong> &middot; <code>src/services/order-service.ts:84-94</code> + <code>src/services/discount-service.ts:189-205</code></div>
+      <div class="desc"><strong>Race condition: stock can oversell and discount limits can be exceeded</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><strong>Stock oversell (order-service.ts:77-94):</strong> The stock check and decrement are two separate operations inside the same transaction but without any locking. SQLite's default isolation allows two concurrent transactions for different carts containing the same product to both read <code>stock = 5</code>, both pass the check, and both deduct, resulting in <code>stock = -1</code>.</p>
+    <p><strong>Fix:</strong> Use an atomic <code>updateMany</code> with a <code>where: { stock: { gte: item.qty } }</code> guard and check <code>result.count</code>.</p>
+    <p style="margin-top: 8px;"><strong>Discount limit race (discount-service.ts + order-service.ts):</strong> <code>isDiscountApplicable</code> reads usage counts, but the actual <code>DiscountUsage</code> record is created later in a separate transaction in order-service.ts. Two concurrent requests both read <code>totalUsage = 0</code> (maxUses = 1), both pass, and both create usage records. The <code>DiscountUsage</code> table has <em>no unique constraint</em> on <code>(discountId, userId)</code> — duplicates are silently permitted.</p>
+    <p><strong>Fix:</strong> Move the usage check + increment into the same transaction, or add a unique constraint and handle the violation.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev critical">Critical</div>
+    <div class="finding-body">
+      <div class="loc"><strong>C2</strong> &middot; <code>src/bots/client/client-bot-interactive.ts:618-631,808-811</code> and many more in <code>manager-bot-interactive.ts</code></div>
+      <div class="desc"><strong>Callback answer dedup guard silently eats all user-facing feedback</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>The pattern starts every callback handler with <code>await answerCallback()</code> (setting <code>callbackAnswered = true</code>), then later calls like <code>answerCallback({ text: "محصول یافت نشد", show_alert: true })</code> are all silently skipped because the guard (<code>if (callbackAnswered) return</code>) triggers.</p>
+    <p><strong>Impact:</strong> Users see zero toast notifications. "Added to cart", "Product not found", "Error processing order" — none of these alerts ever appear. This affects every callback in both client and manager bots (~40+ call sites).</p>
+    <p><strong>Fix:</strong> Remove the initial <code>answerCallback()</code> call. Only call <code>answerCallback</code> when you actually have feedback text to show. Or restructure to call the default only if no explicit answer was given.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev critical">Critical</div>
+    <div class="finding-body">
+      <div class="loc"><strong>C3</strong> &middot; <code>src/bots/client/client-bot-interactive.ts:286</code></div>
+      <div class="desc"><strong>Markdown parse error crashes bot on /start when user name contains special characters</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><code>ctx.reply(welcomeText, { parse_mode: "Markdown" })</code> without error handling. If the welcome text contains Telegram-special Markdown characters (<code>_</code>, <code>*</code>, <code>[</code>, etc.) — which come from user input like <code>user.firstName</code> — Telegram's API throws <code>Can't parse entities</code>.</p>
+    <p><strong>At risk:</strong> Every user whose name, phone number, or free-text input includes Markdown metacharacters will crash the /start handler. This affects all 3 bots, not just the client.</p>
+    <p><strong>Fix:</strong> Always pass user-provided strings through <code>escapeMarkdown()</code> before sending with <code>parse_mode: "Markdown"</code>. Or use <code>safeRender</code> which already has the fallback pattern.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev critical">Critical</div>
+    <div class="finding-body">
+      <div class="loc"><strong>C4</strong> &middot; <code>src/utils/safe-reply.ts:116-124</code></div>
+      <div class="desc"><strong>safeRender retry path has no error handling — can crash the bot</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><code>safeRender</code> catches the first <code>editMessageText</code> call, but the fallback (<code>delete + reply</code> on line 122) has <em>zero</em> try/catch. If the fallback also fails (bot blocked, chat not found, message to delete not found), the error propagates unhandled — crashing the current handler.</p>
+    <p><strong>Fix:</strong> Wrap the fallback block in a try/catch with <code>isIgnorableError</code> check, and log any non-ignorable errors.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev critical">Critical</div>
+    <div class="finding-body">
+      <div class="loc"><strong>C5</strong> &middot; <code>src/jobs/send-invites.worker.ts:70-127</code></div>
+      <div class="desc"><strong>Duplicate channel messages on retry after partial failure — spams checkout channel</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>The channel message is sent (line 71-82), and if the invite link creation <em>after it</em> fails (line 92-96), the <code>order.update</code> is never called, so <code>channelMessageId</code> is lost (only in a local variable). On the next tick, a <em>new</em> channel message is sent — creating duplicate messages in the checkout channel.</p>
+    <p><strong>Fix:</strong> Either (a) create the invite link <em>first</em>, then send the channel message, or (b) persist <code>channelMessageId</code> early in a separate DB update.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev critical">Critical</div>
+    <div class="finding-body">
+      <div class="loc"><strong>C6</strong> &middot; <code>src/jobs/send-invites.worker.ts:100-124</code> + <code>src/jobs/expire-invites.worker.ts:63-88</code></div>
+      <div class="desc"><strong>DB state mutated before user notification — if notify fails, user is left in the dark</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>Both workers update the order status <em>before</em> notifying the user:</p>
+    <p><strong>send-invites.worker.ts:</strong> Order status set to <code>INVITE_SENT</code> (line 103) before notifying (line 120-124). If notification fails, the order is stuck at <code>INVITE_SENT</code> with a valid invite link but the user never receives it.</p>
+    <p><strong>expire-invites.worker.ts:</strong> Order cancelled (line 63-78) before notifying (line 81-88). If notification fails, the user's order is cancelled without their knowledge.</p>
+    <p><strong>Fix:</strong> Swap the order: notify first, then update DB. Or use an outbox pattern where the notification is a fire-and-forget side effect after successful DB write.</p>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== BUGS ==================== -->
+<div class="section" id="bug">
+<div class="section-title">&#128273; Bugs <span class="badge-count bug">14 verified logic errors</span></div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B1</strong> &middot; <code>src/i18n/texts.ts:300-301</code> + <code>src/utils/keyboards.ts:440-442</code></div>
+      <div class="desc"><strong>Corrupted Unicode replacement characters (U+FFFD) displayed to users</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>Three locations contain <code>&#65533;</code> (U+FFFD replacement character):</p>
+    <ul>
+      <li><code>texts.ts:301</code> — <code>"&#65533; مستقیم"</code> (corrupted money emoji)</li>
+      <li><code>texts.ts:301</code> — <code>"&#65533;&#127576;"</code> (corrupted emoji before the image icon)</li>
+      <li><code>keyboards.ts:440-442</code> — <code>"&#65533; تاریخچه"</code> and <code>"&#65533;&#128260; بروزرسانی"</code></li>
+    </ul>
+    <p><strong>Impact:</strong> Courier bot menu shows garbled characters. Settings display shows garbage instead of proper emoji.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B2</strong> &middot; <code>src/services/invite-service.ts:52-60</code></div>
+      <div class="desc"><strong>Stale/expired invite link returned without validation — broken links sent to users</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>If <code>order.inviteLink</code> is already set, the method returns it immediately (line 52-54) without checking: (a) whether the Telegram link has been revoked (e.g., by <code>cleanupChannelForOrder</code>), or (b) whether the order status is still valid — the status check on line 56 is skipped entirely.</p>
+    <p><strong>Impact:</strong> A cancelled order with a stale <code>inviteLink</code> field would have its dead link returned as if valid.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B3</strong> &middot; <code>src/bots/client/client-bot-interactive.ts:398-425</code></div>
+      <div class="desc"><strong>Referral code created even after canCreateReferral permission revoked mid-flow</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>The callback handler checks <code>canCreateReferral</code> before setting session state <code>referral_score</code>. But the text handler (line 398) where the user <em>submits</em> the score does <strong>not</strong> re-check the permission. If the manager revokes the permission between entering the state and submitting, the referral code is still created.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B4</strong> &middot; <code>src/bots/manager/manager-bot-interactive.ts:1277</code></div>
+      <div class="desc"><strong>escapeMarkdown(null) throws — product description shown as "null" crash</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><code>escapeMarkdown(product.description) || '—'</code> — if <code>product.description</code> is <code>null</code>, <code>escapeMarkdown(null)</code> is called, which likely throws (the function calls <code>.replace</code> on its argument). Should be <code>product.description ? escapeMarkdown(product.description) : '—'</code>.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B5</strong> &middot; <code>src/bots/client/client-bot-handlers.ts:113</code></div>
+      <div class="desc"><strong>Fractional quantity accepted via text command — corrupts cart data</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><code>qty</code> is parsed as <code>Number()</code> but never validated to be an integer. User passes <code>/add 1 1.5</code> and gets a fractional cart item quantity. Prisma's <code>Int</code> field truncates silently or throws depending on the driver.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B6</strong> &middot; <code>src/bots/client/client-bot-handlers.ts:146-152</code></div>
+      <div class="desc"><strong>Price snapshot overwritten on re-add — undermines price protection guarantee</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>When re-adding an existing cart item, <code>unitPriceSnapshot</code> is overwritten to the current product price AND quantity is incremented. If the price changed between additions, the old units are re-priced too. The README advertises "protects against price changes" but does the opposite for repeat additions — customers could be charged mixed prices for the same product.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B7</strong> &middot; <code>src/bots/client/client-bot-handlers.ts:113-290</code></div>
+      <div class="desc"><strong>Blocked users bypass isActive check — can still interact via legacy handlers</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><code>ensureUser</code> never checks <code>user.isActive</code>. <code>ClientTexts.userBlocked()</code> exists in <code>texts.ts:39</code> but is never called. Blocked users can still browse products, add to cart, and checkout via the command-based handlers. The interactive bot does check this correctly — but the legacy handlers don't. (Low impact if legacy handlers are truly unused, but they're still in the codebase and compiled.)</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B8</strong> &middot; <code>src/infra/scheduler/interval-scheduler.ts:29-75</code></div>
+      <div class="desc"><strong>setInterval causes overlapping job runs — concurrent DB operations corrupt state</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>If a job takes longer than its interval (e.g., the 2-minute expire-invites job hits Telegram rate limits and takes 3 minutes), a new instance starts executing <em>concurrently</em> on shared data. Both workers process the same orders, both clean up the same channels, both send duplicate notifications.</p>
+    <p><strong>Fix:</strong> Use a running-flag guard or switch to recursive <code>setTimeout</code> pattern (<code>setTimeout(job, interval)</code> at the end of each run).</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B9</strong> &middot; <code>src/jobs/expire-invites.worker.ts:52-60</code></div>
+      <div class="desc"><strong>Unhandled error in loop halts all subsequent order processing</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>If <code>cleanupChannelForOrder</code> throws (non-ignorable Telegram error, DB timeout), the entire <code>for</code> loop halts. All subsequent expired orders are skipped until the next cron run. Each order's processing should be wrapped in its own try-catch.</p>
+    <p>Same pattern exists in <code>notification-service.ts</code> where one failing manager blocks all remaining notifications (no <code>Promise.allSettled</code>).</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B10</strong> &middot; <code>src/services/channel-cleanup-service.ts:66-72</code></div>
+      <div class="desc"><strong>Channel fields cleared even if Telegram cleanup fails — retry becomes no-op</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>The <code>order.update</code> setting <code>channelMessageId: null</code> and <code>inviteLink: null</code> runs <em>unconditionally</em> after three Telegram operations. If those operations fail with non-ignorable errors (caught and logged), the order fields are still cleared. On the next retry, the cleanup logic sees <code>null</code> fields and skips all cleanup — leaving the user potentially still in the channel and the invite active.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B11</strong> &middot; <code>src/services/order-service.ts:53-54</code></div>
+      <div class="desc"><strong>Wrong error class on cart ownership mismatch — misleads callers</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><code>if (!cart || cart.userId !== userId) { throw new CartNotFoundError() }</code> — when cart exists but doesn't belong to this user, the error says "cart not found". This is misleading for logging, debugging, and any calling code that catches this error. Needs a dedicated <code>CartNotOwnedByUserError</code>.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B12</strong> &middot; <code>src/services/order-service.ts:73-74</code></div>
+      <div class="desc"><strong>Inactive/missing product throws semantically wrong error</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>Throws <code>InsufficientStockError("Product is not available")</code> when the product is inactive or doesn't exist. This is not a stock issue — it's a product availability issue. Needs a separate error class like <code>ProductNotAvailableError</code>.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B13</strong> &middot; <code>src/services/bot-settings-service.ts:19-42</code></div>
+      <div class="desc"><strong>Catch-all error swallowing masks DB connection failures</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p>Both <code>get()</code> and <code>delete()</code> wrap their database operations in <code>try { ... } catch { return null; }</code>. This catches <em>everything</em> — including DB connection failures, permission errors, and constraint violations — and silently returns <code>null</code>. A database outage would cause all settings to silently fall back to defaults instead of throwing an error that could be surfaced.</p>
+    <p><strong>Fix:</strong> Only catch specific Prisma errors (<code>P2021</code> for missing table, <code>P2025</code> for missing record).</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bug">Bug</div>
+    <div class="finding-body">
+      <div class="loc"><strong>B14</strong> &middot; <code>src/utils/session-store.ts:14</code></div>
+      <div class="desc"><strong>Session key type is number — breaks for large Telegram user IDs</strong></div>
+      <button class="finding-toggle" onclick="toggleDetail(this)">&#9654; Details</button>
+    </div>
+  </div>
+  <div class="finding-detail">
+    <p><code>SessionStore&lt;T&gt;</code> uses <code>number</code> as its key type, but Telegram user IDs can exceed <code>Number.MAX_SAFE_INTEGER</code> (9,007,199,254,740,991). In <code>courier-bot-interactive.ts:200,349</code>, <code>Number(courier.tgUserId)</code> is used as a session key — this silently loses precision for large IDs. Should use <code>string</code> keys or <code>bigint</code>.</p>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== POTENTIAL BUGS ==================== -->
+<div class="section" id="potential">
+<div class="section-title">&#9881; Potential Bugs <span class="badge-count potential">17 edge cases &amp; race windows</span></div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P1</strong> &middot; <code>client-bot-interactive.ts:660,691,741,764,830,940,...</code> many callbacks</div>
+      <div class="desc"><strong>Callback data not validated — malicious/malformed callbacks produce NaN</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P2</strong> &middot; <code>client-bot-interactive.ts:402</code></div>
+      <div class="desc"><strong>parseInt accepts partial numbers — "123abc" passes as valid</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P3</strong> &middot; <code>client-bot-handlers.ts:129-139</code></div>
+      <div class="desc"><strong>Concurrent /add calls can create duplicate ACTIVE carts for same user</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P4</strong> &middot; <code>manager-bot-interactive.ts:1695</code></div>
+      <div class="desc"><strong>Hard courier delete causes FK constraint violation on active deliveries</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P5</strong> &middot; <code>manager-bot-interactive.ts:2063-2065</code></div>
+      <div class="desc"><strong>New deliveries always assigned to the first active courier — no load balancing</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P6</strong> &middot; <code>manager-bot-interactive.ts:893-903</code></div>
+      <div class="desc"><strong>setTimeout for auto-deleting messages — unreliable after server restart</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P7</strong> &middot; <code>manager-bot-interactive.ts:250</code></div>
+      <div class="desc"><strong>Case-sensitive username search misses partial matches</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P8</strong> &middot; <code>manager-bot-interactive.ts:2029</code></div>
+      <div class="desc"><strong>Ambiguous channelMessageId field — fragile distinction between channel vs DM</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P9</strong> &middot; <code>src/utils/cross-bot-file.ts:27</code></div>
+      <div class="desc"><strong>Extension extraction breaks for files without dots</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P10</strong> &middot; <code>src/services/channel-cleanup-service.ts:55</code></div>
+      <div class="desc"><strong>BigInt-to-Number precision loss for banChatMember</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P11</strong> &middot; <code>prisma/schema.prisma:293-302</code></div>
+      <div class="desc"><strong>OrderEvent.payload stores JSON.stringify without read validation</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P12</strong> &middot; <code>manager-bot-handlers.ts:117,162</code></div>
+      <div class="desc"><strong>TOCTOU race on order approve/reject — concurrent manager actions</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P13</strong> &middot; <code>src/utils/order-status.ts:23</code></div>
+      <div class="desc"><strong>Non-exhaustive switch on OrderStatus — new values return raw enum string</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P14</strong> &middot; <code>vitest.config.ts:12-17</code> + shared dev.db</div>
+      <div class="desc"><strong>Tests share SQLite database with no isolation — parallel runs corrupt each other</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P15</strong> &middot; <code>src/infra/http/server.ts:21-31</code></div>
+      <div class="desc"><strong>Webhook auth bypass when WEBHOOK_SECRET_TOKEN is unset — no warning in production</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P16</strong> &middot; <code>client-bot-interactive.ts:564</code></div>
+      <div class="desc"><strong>ctx.message.photo[length-1] may be undefined for empty photo array</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev potential-bug">Potential</div>
+    <div class="finding-body">
+      <div class="loc"><strong>P17</strong> &middot; <code>src/infra/telegram/webhooks.ts:14</code></div>
+      <div class="desc"><strong>Unsafe cast to BotUpdate — no runtime validation of incoming payloads</strong></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== BOTTLENECKS ==================== -->
+<div class="section" id="bottleneck">
+<div class="section-title">&#9889; Bottlenecks &amp; Performance <span class="badge-count bottleneck">9 performance concerns</span></div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N1</strong> &middot; <code>client-bot-interactive.ts:272-411+</code></div>
+      <div class="desc"><strong>Repeated user DB lookups by tgUserId on every handler invocation — cache in session</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N2</strong> &middot; <code>client-bot-interactive.ts:1050+</code> + <code>manager-bot-interactive.ts:1058+</code></div>
+      <div class="desc"><strong>Dynamic await import("grammy") in hot callback paths — unnecessary microtask delays</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N3</strong> &middot; <code>src/utils/session-store.ts:41-48</code></div>
+      <div class="desc"><strong>O(n) linear scan on every get/has for TTL pruning — wasteful at scale</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N4</strong> &middot; <code>manager-bot-interactive.ts:999-1008</code></div>
+      <div class="desc"><strong>Order detail query loads 6 relations eagerly — heavy multi-join on every view</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N5</strong> &middot; <code>src/services/referral-analytics-service.ts:28-130</code></div>
+      <div class="desc"><strong>N+1 queries for referral tree traversal — 2000+ queries for 1000-node tree</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N6</strong> &middot; <code>src/services/discount-service.ts:66-87</code></div>
+      <div class="desc"><strong>N+1 queries for auto discount applicability — each triggers up to 2 count queries</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N7</strong> &middot; <code>src/services/notification-service.ts</code> all notifyManagers methods</div>
+      <div class="desc"><strong>Sequential await per-manager — 10 managers = 10 sequential network roundtrips</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N8</strong> &middot; <code>src/services/referral-analytics-service.ts:86-89</code></div>
+      <div class="desc"><strong>Referral trees built sequentially — should use Promise.all with concurrency control</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev bottleneck">Bottleneck</div>
+    <div class="finding-body">
+      <div class="loc"><strong>N9</strong> &middot; <code>client-bot-handlers.ts:208-209</code></div>
+      <div class="desc"><strong>Extra DB query after cart item delete — product already available in context</strong></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== ISSUES ==================== -->
+<div class="section" id="issue">
+<div class="section-title">&#9888; Code Issues <span class="badge-count issue">22 code smells &amp; design concerns</span></div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I1</strong> &middot; <code>src/utils/safe-reply.ts:12-24</code></div>
+      <div class="desc"><strong>Fragile string-matching error detection — breaks if Telegram localizes error messages</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I2</strong> &middot; <code>src/infra/http/server.ts:65-108</code></div>
+      <div class="desc"><strong>Triple route registration duplication — adding a bot requires copying boilerplate</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I3</strong> &middot; <code>src/infra/http/server.ts:44-57</code></div>
+      <div class="desc"><strong>Error handler treats all errors as 500s — 404s and validations are misclassified</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I4</strong> &middot; <code>src/infra/http/server.ts:72-103</code></div>
+      <div class="desc"><strong>Body validation passes arrays — typeof [] is "object"</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I5</strong> &middot; <code>src/infra/telegram/bots.ts</code> + <code>src/infra/telegram/webhooks.ts</code></div>
+      <div class="desc"><strong>Three identical factory functions — replace with single factory</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I6</strong> &middot; <code>eslint.config.mjs</code> + <code>.eslintrc.cjs</code></div>
+      <div class="desc"><strong>Dual ESLint configs compete — .cjs is ignored by ESLint v9, missing important rules</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I7</strong> &middot; <code>.env.example:59-67</code></div>
+      <div class="desc"><strong>Dead config — Redis/BullMQ env vars reference removed queue system</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I8</strong> &middot; <code>src/config/bot-commands.ts:8-22</code></div>
+      <div class="desc"><strong>Only /start registered — text commands won't show in Telegram menu</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I9</strong> &middot; <code>src/config/app-config.ts:53-61</code></div>
+      <div class="desc"><strong>auto mode resolution hidden inside config — surprises production users</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I10</strong> &middot; <code>src/infra/scheduler/interval-scheduler.ts:79-84</code></div>
+      <div class="desc"><strong>No graceful shutdown integration for scheduler — jobs die mid-execution</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I11</strong> &middot; <code>src/services/order-service.ts:62</code></div>
+      <div class="desc"><strong>Generic Error("Cart is empty") — callers cannot catch specifically</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I12</strong> &middot; <code>src/services/order-service.ts:92</code></div>
+      <div class="desc"><strong>productById.set in stock loop — map is written but never read (dead code)</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I13</strong> &middot; <code>src/services/notification-service.ts</code> passim</div>
+      <div class="desc"><strong>Bypasses notification service in expire worker — hardcoded Persian strings duplicated</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I14</strong> &middot; <code>src/services/notification-service.ts:25,40</code></div>
+      <div class="desc"><strong>Silent return on missing bot — no log, notifications silently disappear</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I15</strong> &middot; <code>prisma/schema.prisma:210-225</code></div>
+      <div class="desc"><strong>Delivery has no cancelledAt — no way to record revoked assignments</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I16</strong> &middot; <code>client-bot-interactive.ts:763-903</code></div>
+      <div class="desc"><strong>40+ lines of duplicate cart manipulation logic — extract into helper</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I17</strong> &middot; <code>src/utils/cart-display.ts:33-37</code></div>
+      <div class="desc"><strong>Hardcodes own cart-item text format — diverges from ClientTexts.cartItemLine()</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I18</strong> &middot; <code>src/utils/escape-markdown.ts</code></div>
+      <div class="desc"><strong>Dead code file — imported by nothing, canonical version is in i18n/texts.ts</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I19</strong> &middot; <code>README.md:124-126</td></code></div>
+      <div class="desc"><strong>Stale TODO — says "run seed script once implemented" but seed.ts already exists</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I20</strong> &middot; <code>README.md:231-241</code></div>
+      <div class="desc"><strong>Documents text commands as primary — actual UI is interactive keyboards</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I21</strong> &middot; <code>prisma/seed.ts:94-106</code></div>
+      <div class="desc"><strong>Seed checks product duplicates by title — title has no unique constraint</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev issue">Issue</div>
+    <div class="finding-body">
+      <div class="loc"><strong>I22</strong> &middot; <code>client-bot-handlers.ts:60</code></div>
+      <div class="desc"><strong>Referral code embeds raw Telegram user ID — privacy concern</strong></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== BEST PRACTICES ==================== -->
+<div class="section" id="practice">
+<div class="section-title">&#128736; Best Practices <span class="badge-count practice">9 violations &amp; improvements</span></div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP1</strong> &middot; <code>src/services/bot-settings-service.ts:57-63</code></div>
+      <div class="desc"><strong>Invalid DB value silently falls back to default — corrupt data goes undetected</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP2</strong> &middot; <code>src/i18n/texts.ts:85</code></div>
+      <div class="desc"><strong>|| used instead of ?? for escapeMarkdown — falsy strings like "0" replaced</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP3</strong> &middot; <code>src/main.ts:110</code></div>
+      <div class="desc"><strong>ESM direct-run check fails on Windows — path format mismatch</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP4</strong> &middot; <code>src/main.ts:100</code></div>
+      <div class="desc"><strong>process.exit(0) masks cleanup failures — use process.exitCode instead</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP5</strong> &middot; <code>src/services/referral-analytics-service.ts:132-141</code></div>
+      <div class="desc"><strong>Mutating function arguments (stats parameter) — minor code smell</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP6</strong> &middot; <code>src/i18n/texts.ts:16-28</code></div>
+      <div class="desc"><strong>escapeMarkdownV2 defined but never used — dangerous if anyone switches parse_mode</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP7</strong> &middot; <code>src/config/app-config.ts</code></div>
+      <div class="desc"><strong>Config loader mutates process.env — not thread-safe for tests</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP8</strong> &middot; <code>manager-bot-handlers.ts:130,176</code></div>
+      <div class="desc"><strong>Hardcoded "manager" actorType — risk of inconsistent event history</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev best-practice">Best Practice</div>
+    <div class="finding-body">
+      <div class="loc"><strong>BP9</strong> &middot; <code>src/services/order-service.ts:101-105</code></div>
+      <div class="desc"><strong>Discount cap silently discards excess — no audit trail when discounts exceed subtotal</strong></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== SUGGESTIONS ==================== -->
+<div class="section" id="suggestion">
+<div class="section-title">&#128161; Suggestions <span class="badge-count suggestion">14 recommendations</span></div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S1</strong> &middot; <code>src/main.ts:35-53</code></div>
+      <div class="desc">Parallelize setMyCommands with Promise.allSettled for faster startup</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S2</strong> &middot; <code>src/main.ts:77</code></div>
+      <div class="desc">Make host configurable instead of hardcoded "0.0.0.0"</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S3</strong> &middot; <code>src/services/channel-cleanup-service.ts</code></div>
+      <div class="desc">Run independent cleanup steps (delete, revoke, kick) in parallel via Promise.allSettled</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S4</strong> &middot; <code>client-bot-interactive.ts:216</code></div>
+      <div class="desc">Extract needsLocation(user) helper — duplicated null check pattern</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S5</strong> &middot; <code>manager-bot-handlers.ts:86</code></div>
+      <div class="desc">Add pagination for /pending_orders — limited to 10 with no "show more"</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S6</strong> &middot; <code>courier-bot-interactive.ts:43-62</code></div>
+      <div class="desc">Import safeRender from safe-reply.ts instead of duplicating it</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S7</strong> &middot; <code>src/utils/referral-utils.ts:53-56</code></div>
+      <div class="desc">Include original P2002 error as cause in final throw for debugging</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S8</strong> &middot; <code>prisma/schema.prisma:304-307</code></div>
+      <div class="desc">Consider structured BotSettings if settings count grows — key-value is fragile</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S9</strong> &middot; <code>prisma/schema.prisma:245</code></div>
+      <div class="desc">Document that NULL discount.code = auto discount rule</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S10</strong> &middot; <code>prisma/seed.ts:111</code></div>
+      <div class="desc">Update WELCOME2024 to WELCOME2026 (or remove year entirely)</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S11</strong> &middot; <code>src/infra/http/server.ts:37</code></div>
+      <div class="desc">Validate maxBodySize <= 0 prevents confusing Fastify errors</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S12</strong> &middot; <code>src/infra/telegram/bots.ts:3</code></div>
+      <div class="desc">Remove tautological AnyBot type alias — adds no value</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S13</strong> &middot; <code>src/index.ts</code></div>
+      <div class="desc">Remove unused getServiceStartupMessage export — placeholder dead code</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <div class="sev suggestion">Suggestion</div>
+    <div class="finding-body">
+      <div class="loc"><strong>S14</strong> &middot; <code>client-bot-handlers.ts:279</code></div>
+      <div class="desc">Legacy checkout hardcodes appliedDiscounts: [] — discount codes never work via text commands</div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== MISSING TESTS ==================== -->
+<div class="section" id="missing">
+<div class="section-title">&#128270; Missing Tests <span class="badge-count missing">26 test gaps identified</span></div>
+
+<div class="detail-box">
+  <h4>Services — order-service.test.ts</h4>
+  <ul>
+    <li>CartNotFoundError (wrong/invalid cart ID)</li>
+    <li>CartNotActiveError (cart already SUBMITTED or EXPIRED)</li>
+    <li>Empty cart error</li>
+    <li>Inactive/deleted product in cart</li>
+  </ul>
+</div>
+
+<div class="detail-box">
+  <h4>Services — discount-service.test.ts</h4>
+  <ul>
+    <li>startsAt/endsAt time-bounded discounts</li>
+    <li>Stackable manual + auto discount combination</li>
+    <li>minQty filtering</li>
+    <li>Inactive discount being ignored</li>
+    <li>Discount value > subtotal (grand total floor at 0)</li>
+  </ul>
+</div>
+
+<div class="detail-box">
+  <h4>Services — invite-service.test.ts</h4>
+  <ul>
+    <li>OrderNotFoundError (non-existent order ID)</li>
+    <li>Telegram API failure (createInviteLink throws)</li>
+  </ul>
+</div>
+
+<div class="detail-box">
+  <h4>Infrastructure</h4>
+  <ul>
+    <li><strong>server.test.ts:</strong> webhookSecretToken auth (never exercised), invalid payload types, handler throwing exceptions</li>
+    <li><strong>webhooks.test.ts:</strong> Error handling inside handlers (catch-and-swallow), 404 on unknown paths</li>
+  </ul>
+</div>
+
+<div class="detail-box">
+  <h4>Bots — client-bot-handlers.test.ts</h4>
+  <ul>
+    <li>Blocked users being denied</li>
+    <li>Out-of-stock during checkout</li>
+    <li>/remove on empty cart or non-existent item</li>
+    <li>/checkout after cart already submitted</li>
+  </ul>
+</div>
+
+<div class="detail-box">
+  <h4>Bots — manager-bot-handlers.test.ts</h4>
+  <ul>
+    <li>Approving already-approved order (idempotency)</li>
+    <li>Rejecting with a reason</li>
+    <li>Deactivated manager being denied</li>
+    <li>/pending_orders when non-manager calls it</li>
+  </ul>
+</div>
+
+<div class="detail-box">
+  <h4>Jobs</h4>
+  <ul>
+    <li><strong>send-invites.worker.test.ts:</strong> checkoutImageFileId path (sendPhoto vs sendMessage), Telegram API failure inside loop, onlyUserIds filtering</li>
+    <li><strong>cleanup-carts.worker.test.ts:</strong> prisma.updateMany throwing (DB connection lost), explicit assertion that SUBMITTED carts are not expired</li>
+  </ul>
+</div>
+
+<div class="detail-box">
+  <h4>Utility Tests</h4>
+  <ul>
+    <li><strong>order-status.test.ts:</strong> Unknown/unhandled OrderStatus (default branch returns raw enum)</li>
+    <li><strong>referral-utils.test.ts:</strong> createReferralCodeWithRetry — only generateReferralCode is tested</li>
+    <li><strong>session-store.test.ts:</strong> Timing test fragile on slow runners (vi.advanceTimersByTime(600) barely exceeds 2000ms TTL)</li>
+  </ul>
+</div>
+
+</div>
+
+<!-- ==================== CROSS-CUTTING ==================== -->
+<div class="section" id="crosscut">
+<div class="section-title">&#128279; Cross-Cutting Concerns <span class="badge-count bottleneck">4 systemic themes</span></div>
+
+<div class="detail-box">
+  <h4 style="color:var(--critical);">1. Side Effects Before DB Writes — notification order is wrong everywhere</h4>
+  <p><strong>Pattern:</strong> In send-invites.worker, expire-invites.worker, and various handler paths: DB is mutated first, then the user is notified. If the notification fails, the DB state is already committed.</p>
+  <p><strong>Fix:</strong> Notify <em>first</em> (best-effort), then write to DB. Or write to DB + add a "notification pending" flag and have a worker retry. The current pattern leaves users in inconsistent states.</p>
+</div>
+
+<div class="detail-box">
+  <h4 style="color:var(--bug);">2. No Concurrency Safety — race conditions are systemic</h4>
+  <p><strong>Affects:</strong> Stock decrement, discount usage recording, cart creation, order status transitions, scheduler job overlapping, setInterval without overlap guards.</p>
+  <p>Since the project uses SQLite which doesn't support concurrent write connections, the practical concurrency is limited — but async/await within a single process still interleaves operations. The scheduler overlap bug (B8) is the most likely to manifest.</p>
+</div>
+
+<div class="detail-box">
+  <h4 style="color:var(--potential);">3. The Interactive Bots Are Untested — 4,174 lines of critical UI logic have zero coverage</h4>
+  <p><strong>Files:</strong> client-bot-interactive.ts (1,479), manager-bot-interactive.ts (2,310), courier-bot-interactive.ts (385).</p>
+  <p>All the bugs found (C2, C3, B3, P1, P2, P16, N1, N2, N4, I16, S4, S6) are in these files. The legacy command handlers have tests but aren't used in production. The actual production code paths have zero automated tests.</p>
+</div>
+
+<div class="detail-box">
+  <h4 style="color:var(--issue);">4. Test Infrastructure Fragility — shared SQLite DB, no isolation, skipped tests</h4>
+  <p><strong>Problems:</strong></p>
+  <ul>
+    <li>All tests share the same <code>dev.db</code> file — parallel execution causes cross-test pollution</li>
+    <li><code>manager-bot-handlers.test.ts</code> has a <code>.skip</code>ped test because of this (P14)</li>
+    <li>No separate test database or transaction rollback strategy</li>
+    <li>Coverage thresholds are set to 90% but likely unmet for interactive code</li>
+    <li>Consider using <code>:memory:</code> SQLite for tests and wrapping each test file in a transaction</li>
+  </ul>
+</div>
+
+</div>
+
+<!-- ==================== RECOMMENDATION SUMMARY ==================== -->
+<div class="section">
+<div class="section-title">&#128203; Recommended Order of Action</div>
+
+<div class="detail-box" style="border-left: 3px solid var(--critical);">
+  <h4 style="color:var(--critical);">Phase 1 — Ship Blockers (fix before production)</h4>
+  <ul>
+    <li><strong>C1</strong> — Atomic stock decrement + discount usage in same transaction</li>
+    <li><strong>C2</strong> — Fix callbackAnswered pattern (restore user feedback)</li>
+    <li><strong>C3</strong> — Escape markdown metacharacters in user-provided strings</li>
+    <li><strong>C4</strong> — Add try/catch to safeRender fallback path</li>
+    <li><strong>C5</strong> — Reorder invite sending (create link before channel message)</li>
+    <li><strong>C6</strong> — Notify before mutating DB state, or add retry queue</li>
+    <li><strong>B8</strong> — Add running guard to scheduler to prevent overlap</li>
+  </ul>
+</div>
+
+<div class="detail-box" style="border-left: 3px solid var(--bug);">
+  <h4 style="color:var(--bug);">Phase 2 — Correctness (user-facing bugs)</h4>
+  <ul>
+    <li><strong>B1</strong> — Fix corrupted Unicode characters</li>
+    <li><strong>B2</strong> — Validate invite link is still valid before returning</li>
+    <li><strong>B3</strong> — Re-check canCreateReferral in text handler</li>
+    <li><strong>B4</strong> — Guard against escapeMarkdown(null)</li>
+    <li><strong>B9</strong> — Wrap each order in try-catch inside expire-invites loop</li>
+    <li><strong>B10</strong> — Only clear channel fields on successful cleanup</li>
+    <li><strong>B11-B13</strong> — Fix error classes and catch scope</li>
+    <li><strong>B14</strong> — Change SessionStore key to string</li>
+  </ul>
+</div>
+
+<div class="detail-box" style="border-left: 3px solid var(--potential);">
+  <h4 style="color:var(--potential);">Phase 3 — Robustness (potential bugs)</h4>
+  <ul>
+    <li>All P1-P17 — validations, guards, edge case handling</li>
+    <li><strong>P14</strong> — Fix test isolation (separate test DB or transaction rollback)</li>
+  </ul>
+</div>
+
+<div class="detail-box" style="border-left: 3px solid var(--bottleneck);">
+  <h4 style="color:var(--bottleneck);">Phase 4 — Performance (nice to have)</h4>
+  <ul>
+    <li><strong>N1</strong> — Cache user in session after first lookup</li>
+    <li><strong>N2</strong> — Static import of InlineKeyboard (remove dynamic imports)</li>
+    <li><strong>N5-N9</strong> — Promise.allSettled for parallel Telegram calls, batch DB queries</li>
+    <li><strong>N3</strong> — Replace linear scan with periodic TTL cleanup</li>
+  </ul>
+</div>
+
+<div class="detail-box" style="border-left: 3px solid var(--issue);">
+  <h4 style="color:var(--issue);">Phase 5 — Cleanup (low-risk improvements)</h4>
+  <ul>
+    <li>Remove dead files (escape-markdown.ts, .eslintrc.cjs)</li>
+    <li>Update README inconsistencies (stale TODO, interactive-first docs)</li>
+    <li>Clean up .env.example (remove dead Redis config)</li>
+    <li>DRY up infrastructure code (bot factories, webhook handlers, routes)</li>
+    <li>Consolidate i18n patterns (texts.ts vs inline strings in workers)</li>
+  </ul>
+</div>
+
+</div>
+
+<div class="footer">
+  Amoosh Telegram Bots &middot; Code Quality Audit &middot; 117 findings across 4 parallel reviews &middot; Generated May 23, 2026
+</div>
+
+</div>
+
+<script>
+function toggleDetail(btn) {
+  const detail = btn.parentElement.parentElement.nextElementSibling;
+  if (detail && detail.classList.contains('finding-detail')) {
+    detail.classList.toggle('show');
+    btn.textContent = detail.classList.contains('show') ? '\u25BC Details' : '\u25B4 Details';
+  }
+}
+</script>
+</body>
+</html>

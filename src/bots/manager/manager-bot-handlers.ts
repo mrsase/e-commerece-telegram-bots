@@ -1,5 +1,5 @@
 import type { PrismaClient, Manager } from "@prisma/client";
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, ManagerRole } from "@prisma/client";
 import { ManagerTexts } from "../../i18n/index.js";
 
 export interface ManagerContext {
@@ -35,15 +35,29 @@ async function getManager(
 
   const tgUserId = BigInt(from.id);
 
-  const manager = await prisma.manager.findUnique({
+  let manager = await prisma.manager.findUnique({
     where: { tgUserId },
   });
 
-  if (!manager || !manager.isActive) {
-    return null;
+  if (manager) {
+    return manager.isActive ? manager : null;
   }
 
-  return manager;
+  // Auto-register admin from env var if not in DB yet
+  const adminTgUserId = process.env.ADMIN_TG_USER_ID;
+  if (adminTgUserId && String(from.id) === adminTgUserId) {
+    manager = await prisma.manager.create({
+      data: {
+        tgUserId,
+        role: ManagerRole.ADMIN,
+        isActive: true,
+      },
+    });
+    console.log(`✓ Auto-registered admin manager (tgUserId: ${tgUserId})`);
+    return manager;
+  }
+
+  return null;
 }
 
 export function registerManagerBotHandlers(

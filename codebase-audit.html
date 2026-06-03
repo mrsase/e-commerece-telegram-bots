@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amoosh Telegram Bots — Codebase Audit</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d28;
+    --surface2: #232738;
+    --border: #2d3248;
+    --text: #e8eaed;
+    --text-secondary: #9aa0b0;
+    --red: #f44336;
+    --orange: #ff9800;
+    --yellow: #ffca28;
+    --blue: #42a5f5;
+    --green: #66bb6a;
+    --purple: #ab47bc;
+    --teal: #26a69a;
+    --red-bg: rgba(244,67,54,.12);
+    --orange-bg: rgba(255,152,0,.12);
+    --yellow-bg: rgba(255,202,40,.1);
+    --blue-bg: rgba(66,165,245,.1);
+    --green-bg: rgba(102,187,106,.1);
+    --purple-bg: rgba(171,71,188,.1);
+  }
+  body {
+    font-family: 'SF Mono','Fira Code','Cascadia Code','JetBrains Mono',monospace;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem 1.5rem;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  
+  /* Header */
+  header {
+    text-align: center;
+    padding: 2rem 0 2.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    margin-bottom: .3rem;
+  }
+  header .subtitle {
+    color: var(--text-secondary);
+    font-size: .85rem;
+  }
+  header .meta {
+    display: flex;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-top: .6rem;
+    font-size: .75rem;
+    color: var(--text-secondary);
+  }
+
+  /* Stats bar */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .stat-card {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 1.2rem 1rem;
+    text-align: center;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card .num {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .stat-card .label {
+    font-size: .7rem;
+    color: var(--text-secondary);
+    margin-top: .3rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .stat-card .bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    transition: width .6s;
+  }
+  .bar-critical { background: var(--red); }
+  .bar-high { background: var(--orange); }
+  .bar-medium { background: var(--yellow); }
+  .bar-low { background: var(--blue); }
+
+  /* Section */
+  .section {
+    margin-bottom: 2rem;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: 1rem 0;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-header:hover { opacity: .8; }
+  .section-header h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    flex: 1;
+  }
+  .section-count {
+    font-size: .7rem;
+    padding: 2px 10px;
+    border-radius: 99px;
+    font-weight: 600;
+  }
+  .section-count.critical { background: var(--red-bg); color: var(--red); }
+  .section-count.high { background: var(--orange-bg); color: var(--orange); }
+  .section-count.medium { background: var(--yellow-bg); color: var(--yellow); }
+  .section-count.low { background: var(--blue-bg); color: var(--blue); }
+  .section-count.all { background: var(--surface2); color: var(--text-secondary); }
+  .section-arrow {
+    transition: transform .2s;
+    color: var(--text-secondary);
+    font-size: .8rem;
+  }
+  .collapsed .section-arrow { transform: rotate(-90deg); }
+  .collapsed .section-body { display: none; }
+
+  /* Finding card */
+  .finding {
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin-top: .6rem;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    transition: border-color .15s;
+  }
+  .finding:hover { border-color: var(--text-secondary); }
+  .finding.sev-critical { border-left-color: var(--red); }
+  .finding.sev-high { border-left-color: var(--orange); }
+  .finding.sev-medium { border-left-color: var(--yellow); }
+  .finding.sev-low { border-left-color: var(--blue); }
+  
+  .finding-header {
+    display: flex;
+    align-items: flex-start;
+    gap: .6rem;
+    margin-bottom: .4rem;
+  }
+  .finding-id {
+    font-size: .7rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 5px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .finding-id.critical { background: var(--red-bg); color: var(--red); }
+  .finding-id.high { background: var(--orange-bg); color: var(--orange); }
+  .finding-id.medium { background: var(--yellow-bg); color: var(--yellow); }
+  .finding-id.low { background: var(--blue-bg); color: var(--blue); }
+
+  .finding-title {
+    font-size: .85rem;
+    font-weight: 600;
+    flex: 1;
+  }
+  .finding-desc {
+    font-size: .8rem;
+    color: var(--text-secondary);
+    margin: .4rem 0 .6rem;
+    line-height: 1.55;
+  }
+  .finding-location {
+    font-size: .72rem;
+    color: var(--teal);
+    margin-bottom: .4rem;
+    word-break: break-all;
+  }
+  .finding-code {
+    background: var(--bg);
+    border-radius: 6px;
+    padding: .6rem .8rem;
+    font-size: .75rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin-top: .4rem;
+    border: 1px solid var(--border);
+  }
+  .finding-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: .5rem;
+  }
+  .tag {
+    font-size: .62rem;
+    padding: 1px 7px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .tag-type { background: var(--purple-bg); color: var(--purple); }
+  .tag-error { background: var(--red-bg); color: var(--red); }
+  .tag-race { background: var(--orange-bg); color: var(--orange); }
+  .tag-input { background: var(--blue-bg); color: var(--blue); }
+  .tag-quality { background: var(--green-bg); color: var(--green); }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    padding: 1rem 0 2rem;
+    font-size: .72rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    body { padding: 1rem .8rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    header h1 { font-size: 1.2rem; }
+  }
+
+  /* Fade-in */
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .finding { animation: fadeIn .3s ease; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>⌘ Codebase Audit Report</h1>
+  <div class="subtitle">Amoosh Telegram Bots — comprehensive static analysis across 49 source files (36,074 lines)</div>
+  <div class="meta">
+    <span>Branch: <strong>production-prep</strong></span>
+    <span>Generated: <strong>2026-05-23</strong></span>
+    <span>Scope: <strong>src/</strong></span>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="num" style="color:var(--red)">17</div>
+    <div class="label">Critical</div>
+    <div class="bar bar-critical" style="width:100%"></div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:var(--orange)">28</div>
+    <div class="label">High</div>
+    <div class="bar bar-high" style="width:100%"></div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:var(--yellow)">34</div>
+    <div class="label">Medium</div>
+    <div class="bar bar-medium" style="width:100%"></div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:var(--blue)">51</div>
+    <div class="label">Low</div>
+    <div class="bar bar-low" style="width:100%"></div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:var(--text)">130</div>
+    <div class="label">Total Findings</div>
+    <div class="bar" style="width:100%;background:var(--surface2)"></div>
+  </div>
+</div>
+
+<div class="legend">
+  <span class="legend-item"><span class="legend-dot" style="background:var(--red)"></span> Critical</span>
+  <span class="legend-item"><span class="legend-dot" style="background:var(--orange)"></span> High</span>
+  <span class="legend-item"><span class="legend-dot" style="background:var(--yellow)"></span> Medium</span>
+  <span class="legend-item"><span class="legend-dot" style="background:var(--blue)"></span> Low</span>
+  <span class="legend-item" style="margin-left:.5rem;color:var(--text-secondary)">▸ Click any section to collapse/expand</span>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: RACE CONDITIONS & CONCURRENCY -->
+<!-- ============================================================ -->
+<div class="section" id="race">
+<div class="section-header">
+  <h2>⚡ 1 &nbsp;Race Conditions &amp; Concurrency</h2>
+  <span class="section-count critical">6 critical</span>
+  <span class="section-count high">2 high</span>
+  <span class="section-count medium">3 medium</span>
+  <span class="section-count low">2 low</span>
+  <span class="section-arrow">▾</span>
+</div>
+<div class="section-body">
+
+<div class="finding sev-critical">
+  <div class="findging-header">
+    <span class="finding-id critical">R1</span>
+    <span class="finding-title">Cart operations not wrapped in transactions — duplicate carts, lost quantities</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:784-816, 849-882 · client-bot-handlers.ts:129-162</div>
+  <div class="finding-desc">
+    Three separate locations implement an add-to-cart flow using 3–4 sequential Prisma queries (find cart, create-if-missing, find item, upsert) with <strong>no transaction boundary</strong>. Two concurrent requests for the same user can create duplicate carts, duplicate cart items, or lose a qty increment.
+  </div>
+  <div class="finding-code">let cart = await prisma.cart.findFirst({ where: { userId: user.id, state: CartState.ACTIVE } });  // RACE: both see no cart
+if (!cart) {
+  cart = await prisma.cart.create({ ... });  // Two active carts created
+}
+const existingItem = await prisma.cartItem.findFirst({ ... });  // RACE: both see no item
+if (existingItem) {
+  await prisma.cartItem.update({ ... data: { qty: existingItem.qty + qty } });
+} else {
+  await prisma.cartItem.create({ ... });  // Two items created for same product
+}</div>
+  <div class="finding-tags">
+    <span class="tag tag-race">race condition</span>
+  </div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">R2</span>
+    <span class="finding-title">TOCTOU in referral code validation — single-use code can be redeemed twice</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:100-138</div>
+  <div class="finding-desc">
+    The <code>usedCount >= effectiveMaxUses</code> check at line 115 and the <code>increment: 1</code> update at line 131 are separated by async boundaries. Two concurrent users can both pass the check and both successfully redeem a single-use code, since the <code>isActive: false</code> write happens after both checks have passed.
+  </div>
+  <div class="finding-code">if (referralCode.usedCount >= effectiveMaxUses) return false;  // ✓ both pass here
+await prisma.$transaction([                                       // ✗ window opens
+  prisma.user.update({ ... }),
+  prisma.referralCode.update({                                    // too late — both already past the gate
+    data: { usedCount: { increment: 1 }, isActive: false },
+  }),
+]);</div>
+  <div class="finding-tags"><span class="tag tag-race">race condition</span><span class="tag tag-input">TOCTOU</span></div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">R3</span>
+    <span class="finding-title">Double order approval / approve-vs-reject race — duplicate invites, double messages</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:694-939 (approve) · 943-995 (reject)</div>
+  <div class="finding-desc">
+    Two managers clicking "approve" on the same order simultaneously: both see <code>AWAITING_MANAGER_APPROVAL</code>, then proceed through ~30 sequential await operations (DB reads, Telegram API calls, file downloads, invite link creation, notifications) before the final <code>order.update</code>. Result: two payment messages posted, two invite links created, two client notifications sent. The same race exists between approve and reject — an order can end up both approved and rejected.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">race condition</span><span class="tag tag-error">TOCTOU</span></div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">R4</span>
+    <span class="finding-title">Session state read-modify-write race — lost qty increments, corrupted state transitions</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:750-769 · manager-bot-interactive.ts:126-128 · (14+ occurrences)</div>
+  <div class="finding-desc">
+    The <code>SessionStore.get()</code> → modify → <code>.set()</code> pattern spans no atomic boundary. Two rapid callback queries from the same user (e.g., rapid inc/dec clicks) can both read the same <code>selectedQty</code> value, compute independently, and write back — one increment is silently lost. Same pattern in the manager text handler where session data accumulates across async steps.
+  </div>
+  <div class="finding-code">const session = userSessions.get(ctx.from.id) || { state: "viewing_product", selectedQty: 1 };
+let qty = session.selectedQty || 1;  // RACE: both read 3
+if (action === "inc") qty = Math.min(qty + 1, 99);  // both compute 4
+userSessions.set(ctx.from.id, { ...session, selectedQty: qty });  // both write 4 — intended: 5</div>
+  <div class="finding-tags"><span class="tag tag-race">race condition</span></div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">R5</span>
+    <span class="finding-title">Receipt approval race — double delivery assignment</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:1990-2097</div>
+  <div class="finding-desc">
+    Two managers approving the same receipt simultaneously: both check <code>reviewStatus === PENDING</code> and pass. The <code>$transaction</code> at lines 2003-2024 updates receipt + order, but the courier assignment at lines 2069-2074 is <strong>outside the transaction</strong>. Two deliveries get created for the same order, and two couriers get notified.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">race condition</span></div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">R6</span>
+    <span class="finding-title">TOCTOU in discount usage validation — discounts can exceed maxUses</span>
+  </div>
+  <div class="finding-location">discount-service.ts:172-205 · order-service.ts:166-188</div>
+  <div class="finding-desc">
+    The <code>isDiscountApplicable()</code> method reads <code>discountUsage.count</code>, checks <code>maxUses</code>, and returns <code>true</code>. But the actual <code>discountUsage.create</code> happens later in a transaction. Two concurrent checkouts can both pass the gate and both record usage, exceeding the intended limit. The re-validation inside the transaction suffers from the same TOCTOU.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">TOCTOU</span><span class="tag tag-input">validation</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">R7</span>
+    <span class="finding-title">Concurrent webhook processing — no update serialization per user</span>
+  </div>
+  <div class="finding-location">webhooks.ts:12-34</div>
+  <div class="finding-desc">
+    Telegram sends updates via HTTP POST to Fastify. Each POST runs in its own async handler with no queuing or serialization. Two callback queries from the same user (e.g., rapid inc + dec) arrive concurrently, amplifying all session race conditions above. Grammy's polling mode serializes per bot, but webhook mode does not.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">concurrency</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">R8</span>
+    <span class="finding-title">Background scheduler runs concurrently with bot handlers — races on same DB rows</span>
+  </div>
+  <div class="finding-location">interval-scheduler.ts · expire-invites.worker.ts · send-invites.worker.ts</div>
+  <div class="finding-desc">
+    The interval scheduler runs <code>processExpiredInvites</code> (every 2 min), <code>processSendInvitesBatch</code> (every 60s), and <code>expireIdleCarts</code> (every hour) concurrently with bot handlers. A manager could approve an order while the expire worker cancels it. The approve flow could process an order whose cart was just expired by the cleanup worker.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">concurrency</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">R9</span>
+    <span class="finding-title">Stock check outside transaction (partially mitigated)</span>
+  </div>
+  <div class="finding-location">order-service.ts:89-117</div>
+  <div class="finding-desc">
+    The initial <code>product.stock >= item.qty</code> check at line 97 is outside the transaction and could see a stale value. However, the <code>updateMany</code> with <code>stock: { gte: item.qty }</code> acts as an optimistic lock, so this is partially mitigated. Still, the outer check is misleading and could throw a different error than the inner one.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">TOCTOU</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">R10</span>
+    <span class="finding-title">Shared mutable state across all users — SessionStore is module-level singleton</span>
+  </div>
+  <div class="finding-location">session-store.ts · all three bot-interactive files</div>
+  <div class="finding-desc">
+    All three session stores (<code>userSessions</code>, <code>managerSessions</code>, <code>courierSessions</code>) are module-level Map singletons. While Map operations are individually atomic, the <code>get() → modify → set()</code> pattern spans async boundaries with no synchronization. The <code>pruneExpired()</code> method iterates and deletes synchronously, but can interleave with concurrent handler code.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">concurrency</span><span class="tag tag-quality">design</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">R11</span>
+    <span class="finding-title">Manager session data stale across multi-step flows</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:124-165, 189-238, 277-433</div>
+  <div class="finding-desc">
+    Multi-step product creation/editing flows accumulate session fields across async handler hops. An interleaving callback query handler could read, overwrite, or clear the same session key, corrupting the multi-step flow.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">race condition</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">R12</span>
+    <span class="finding-title">Unprotected setTimeout for auto-delete — stale reference, no cancellation</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:898-908</div>
+  <div class="finding-desc">
+    After sending a payment message, a <code>setTimeout</code> captures <code>clientBot!</code> and <code>directMessageId!</code> via closure. If the order is processed before the timeout fires (receipt approved, order cancelled), the timeout could attempt to delete a different message or a message that no longer exists. No cancellation mechanism exists.
+  </div>
+  <div class="finding-tags"><span class="tag tag-race">concurrency</span></div>
+</div>
+
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: TYPE SAFETY -->
+<!-- ============================================================ -->
+<div class="section" id="types">
+<div class="section-header">
+  <h2>🔒 2 &nbsp;TypeScript Type Safety</h2>
+  <span class="section-count high">6 high</span>
+  <span class="section-count medium">12 medium</span>
+  <span class="section-count low">8 low</span>
+  <span class="section-arrow">▾</span>
+</div>
+<div class="section-body">
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">T1</span>
+    <span class="finding-title">Non-null assertions after findUnique — crashes if record deleted between calls</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:1302-1309, 1351-1358, 1456-1466, 1492-1503</div>
+  <div class="finding-desc">
+    Four locations call <code>prisma.product.findUnique()</code> and immediately use <code>!</code> to access fields like <code>product!.title</code>. <code>findUnique</code> returns <code>T | null</code>. A concurrent delete operation (or any other race) could make the record vanish between the DB query and the access, causing a runtime <code>TypeError</code>.
+  </div>
+  <div class="finding-code">const product = await prisma.product.findUnique({ where: { id: productId } });
+const text = `*ویرایش محصول: ${escapeMarkdown(product!.title)}*`;  // crash if product deleted</div>
+  <div class="finding-tags"><span class="tag tag-type">non-null assertion</span><span class="tag tag-error">crash</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">T2</span>
+    <span class="finding-title">Unsafe as-assertions on caught errors — .message may not exist</span>
+  </div>
+  <div class="finding-location">safe-reply.ts:126, 147</div>
+  <div class="finding-desc">
+    Catch variables are <code>unknown</code>. Two locations cast to <code>Error</code> via <code>as Error</code> and access <code>.message</code>. In JS, anything can be thrown (strings, numbers, objects, null). These should use <code>instanceof Error</code> narrowing instead.
+  </div>
+  <div class="finding-code">console.warn("safeRender: both failed:", (firstErr as Error)?.message);</div>
+  <div class="finding-tags"><span class="tag tag-type">unsafe cast</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">T3</span>
+    <span class="finding-title">Missing null check on optional relation order.user</span>
+  </div>
+  <div class="finding-location">expire-invites.worker.ts:56 · send-invites.worker.ts:104</div>
+  <div class="finding-desc">
+    The Prisma query includes <code>{ user: true }</code> (not <code>required: true</code>), so <code>order.user</code> is typed as <code>User | null</code>. The code accesses <code>order.user.tgUserId.toString()</code> without a null check. If the user was deleted, this throws.
+  </div>
+  <div class="finding-code">await botApi.sendMessage(order.user.tgUserId.toString(), ...);  // crash if user deleted</div>
+  <div class="finding-tags"><span class="tag tag-type">null safety</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">T4</span>
+    <span class="finding-title">Unsafe <code>as DeliveryStatus</code> cast — no runtime validation</span>
+  </div>
+  <div class="finding-location">courier-bot-interactive.ts:182</div>
+  <div class="finding-desc">
+    Raw callback data part is cast directly to <code>DeliveryStatus</code>. While the subsequent runtime check at line 184 partially mitigates this, the type system believes the value is definitely <code>DeliveryStatus</code>, which could hide bugs if the callback format changes.
+  </div>
+  <div class="finding-code">const status = parts[3] as DeliveryStatus;</div>
+  <div class="finding-tags"><span class="tag tag-type">unsafe cast</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">T5</span>
+    <span class="finding-title">Unsafe <code>as BotUpdate</code> on webhook payload — no shape validation</span>
+  </div>
+  <div class="finding-location">webhooks.ts:14, 22, 30</div>
+  <div class="finding-desc">
+    The HTTP request body (typed <code>unknown</code>) is cast directly to <code>BotUpdate</code> with no runtime validation. An unexpected payload shape (e.g., malformed JSON, health-check pings) could cause cryptic errors downstream.
+  </div>
+  <div class="finding-code">await clientBot.handleUpdate(update as BotUpdate);</div>
+  <div class="finding-tags"><span class="tag tag-type">unsafe cast</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">T6</span>
+    <span class="finding-title">Non-null assertion on Map lookup after upstream validation</span>
+  </div>
+  <div class="finding-location">order-service.ts:105</div>
+  <div class="finding-desc">
+    <code>productById.get(item.productId)!</code> asserts the product exists. While the preceding loop checks existence, TypeScript cannot verify this flow dependency. A refactor removing the validation loop would silently introduce null dereferences.
+  </div>
+  <div class="finding-tags"><span class="tag tag-type">non-null assertion</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">T7</span>
+    <span class="finding-title">Loose Record&lt;string, unknown&gt; session data — ubiquitous as-casts</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:38, 190, 302, 392, 440, 515, 590</div>
+  <div class="finding-desc">
+    The session <code>data</code> field is <code>Record&lt;string, unknown&gt;</code>, defeating all type checking. Every access requires <code>as number</code> / <code>as string</code> with zero compile-time safety. A missing key silently produces <code>NaN</code> or <code>undefined</code>.
+  </div>
+  <div class="finding-code">const productId = session.data?.productId as number;  // undefined → NaN</div>
+  <div class="finding-tags"><span class="tag tag-type">unsafe cast</span><span class="tag tag-quality">design</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">T8</span>
+    <span class="finding-title">Union type as-cast for status filter — bypasses enum validation</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:1081, 1097</div>
+  <div class="finding-desc">
+    A <code>string | null</code> value from callback data is cast to <code>OrderStatus</code>. Refactoring the enum or callback format could silently produce runtime failures.
+  </div>
+  <div class="finding-code">const where = statusFilter ? { status: statusFilter as OrderStatus } : {};</div>
+  <div class="finding-tags"><span class="tag tag-type">unsafe cast</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">T9</span>
+    <span class="finding-title">Template literal cast to SessionState — no compile-time validation</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:1320</div>
+  <div class="finding-desc">
+    A template literal produces an unchecked string that is forcibly cast to <code>SessionState</code>. Unexpected <code>field</code> values silently create an invalid session state.
+  </div>
+  <div class="finding-code">state: `product:edit:${field}` as SessionState,</div>
+  <div class="finding-tags"><span class="tag tag-type">unsafe cast</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">T10</span>
+    <span class="finding-title">BigInt to Number conversion — potential precision loss</span>
+  </div>
+  <div class="finding-location">channel-cleanup-service.ts:61-62</div>
+  <div class="finding-desc">
+    <code>userTgId</code> is <code>bigint</code>. Converting to <code>Number</code> loses precision for values &gt; 2^53-1. Telegram IDs can be up to 2^63-1. Most current IDs fit, but future IDs could cause silent corruption.
+  </div>
+  <div class="finding-code">await botApi.banChatMember(checkoutChannelId, Number(userTgId));</div>
+  <div class="finding-tags"><span class="tag tag-type">precision</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">T11</span>
+    <span class="finding-title">ctx.from! non-null assertions used extensively — unsafe if guard order changes</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:224, 234, 241, 269, 322, 364+ (13+ occurrences)</div>
+  <div class="finding-desc">
+    <code>ctx.from</code> is <code>User | undefined</code> in grammy. Using <code>!</code> asserts it exists without runtime guard. While many usages are preceded by <code>getOrCreateUser</code> which verifies <code>ctx.from</code>, TypeScript's flow analysis doesn't narrow across function boundaries. A refactoring that changes handler order could trigger crashes.
+  </div>
+  <div class="finding-code">userSessions.set(ctx.from!.id, { state: "checkout_location" });</div>
+  <div class="finding-tags"><span class="tag tag-type">non-null assertion</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">T12</span>
+    <span class="finding-title">Non-null assertion on session.data! in photo/document handlers</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:494, 569</div>
+  <div class="finding-desc">
+    <code>session.data!</code> asserts the data exists. If the session state machine has a bug or the session was corrupted, this will crash. Subsequent <code>as string</code> casts compound the unsafety.
+  </div>
+  <div class="finding-tags"><span class="tag tag-type">non-null assertion</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">T13</span>
+    <span class="finding-title">Implicit any in bot.catch callback parameters</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:253 · manager-bot-interactive.ts:85 · courier-bot-interactive.ts:86</div>
+  <div class="finding-desc">
+    The <code>err</code> parameter in <code>bot.catch((err) => {...})</code> is implicitly typed. Accessing <code>.message</code> assumes an Error-like object with no narrowing.
+  </div>
+  <div class="finding-tags"><span class="tag tag-type">implicit any</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">T14</span>
+    <span class="finding-title">Record&lt;string, unknown&gt; for Prisma update data — bypasses schema typing</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:207 · channel-cleanup-service.ts:73</div>
+  <div class="finding-desc">
+    Using <code>Record&lt;string, unknown&gt;</code> or <code>Record&lt;string, null&gt;</code> for Prisma update inputs loses all compile-time field validation. Invalid keys like <code>titel</code> would only fail at runtime.
+  </div>
+  <div class="finding-tags"><span class="tag tag-type">unsafe</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">T15</span>
+    <span class="finding-title">Optional chaining vs nullish coalescing inconsistency</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:1026-1028</div>
+  <div class="finding-desc">
+    Uses <code>||</code> instead of <code>??</code> for phone/address display. An empty string <code>""</code> (theoretically possible) would be treated as falsy and display <code>"-"</code> instead.
+  </div>
+  <div class="finding-code">detailText += `تلفن: ${esc(u.phone) || "-"}\n`;</div>
+  <div class="finding-tags"><span class="tag tag-type">operator</span></div>
+</div>
+
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: ERROR HANDLING -->
+<!-- ============================================================ -->
+<div class="section" id="errors">
+<div class="section-header">
+  <h2>⚠️ 3 &nbsp;Error Handling Gaps</h2>
+  <span class="section-count high">8 high</span>
+  <span class="section-count medium">9 medium</span>
+  <span class="section-count low">6 low</span>
+  <span class="section-arrow">▾</span>
+</div>
+<div class="section-body">
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E1</span>
+    <span class="finding-title">Message/text/photo handlers lack try-catch boundaries — sessions can permanently lock</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:300-534 · manager-bot-interactive.ts:115-614 · courier-bot-interactive.ts:345-384</div>
+  <div class="finding-desc">
+    Despite a global <code>bot.catch()</code> preventing crashes, if any <code>await</code> inside these handlers throws, the handler's remaining logic doesn't execute. In multi-step flows, this leaves the user's session in an inconsistent state — the session's <code>state</code> field points to the next expected step, but the previous step's changes were never committed. The user is permanently stuck.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">session lock</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E2</span>
+    <span class="finding-title">Notification loop aborts on non-ignorable error — remaining managers miss notifications</span>
+  </div>
+  <div class="finding-location">notification-service.ts:32-34, 47-49, 62-64, 158-160, 173-175</div>
+  <div class="finding-desc">
+    <code>safeSendMessage</code> re-throws non-ignorable errors. If manager #3 out of 20 has a transient Telegram API error, the entire loop aborts — managers #4-#20 never receive the notification. No retry or isolation exists.
+  </div>
+  <div class="finding-code">for (const mgr of managers) {
+  await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);  // error here aborts all remaining</div>
+  <div class="finding-tags"><span class="tag tag-error">cascade</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E3</span>
+    <span class="finding-title">Empty catch swallows settings update failure — no diagnostic trail</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:2269-2274</div>
+  <div class="finding-desc">
+    The empty <code>catch {}</code> (without even a variable) makes DB constraint violations, connection errors, and schema issues completely invisible. A settings update failure could lead to incorrect payment method routing with no log.
+  </div>
+  <div class="finding-code">try {
+  await settingsService.set(SettingKeys.PAYMENT_METHOD, newMethod);
+} catch {
+  await answerCallback({ text: "❌ خطا در ذخیره تنظیمات", show_alert: true });
+}</div>
+  <div class="finding-tags"><span class="tag tag-error">empty catch</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E4</span>
+    <span class="finding-title">Courier failure-reason handler — notification throws cause permanent session lock</span>
+  </div>
+  <div class="finding-location">courier-bot-interactive.ts:370-377</div>
+  <div class="finding-desc">
+    If <code>notifyClientDeliveryUpdate</code> or <code>notifyManagersDeliveryFailed</code> throws a non-ignorable error, the handler aborts before <code>courierSessions.delete(ctx.from.id)</code> executes. The courier's session is permanently stuck in <code>"delivery:fail:reason"</code> state.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">session lock</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E5</span>
+    <span class="finding-title">Referral analytics — no per-tree error isolation; single corrupt user crashes all</span>
+  </div>
+  <div class="finding-location">referral-analytics-service.ts:86-89</div>
+  <div class="finding-desc">
+    <code>getReferralTree()</code> makes Prisma queries inside a loop. If one user's tree query fails (e.g., <code>referredById</code> pointing to a deleted user, connection issue), the error propagates uncaught and the entire analytics display crashes.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">cascade</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E6</span>
+    <span class="finding-title">Command-based bots lack bot.catch() — Prisma failures cause unhandled rejections</span>
+  </div>
+  <div class="finding-location">client-bot-handlers.ts:71-296 · manager-bot-handlers.ts:54-194</div>
+  <div class="finding-desc">
+    Unlike the interactive bots (which all register <code>bot.catch()</code>), the command-based bots have NO global error handler. Any Prisma or Telegram API failure in a command handler produces an unhandled promise rejection that Node.js logs as <code>UnhandledPromiseRejection</code>.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">unhandled rejection</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E7</span>
+    <span class="finding-title">Discount code path skips userSessions.delete on user-not-found — permanent session lock</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:353-361</div>
+  <div class="finding-desc">
+    If <code>prisma.user.findUnique()</code> returns <code>null</code> in the <code>checkout_discount</code> handler, the function returns early without calling <code>userSessions.delete(ctx.from.id)</code>. The session remains in <code>"checkout_discount"</code> state. The user is permanently stuck — every text message they send re-enters this handler and fails again.
+  </div>
+  <div class="finding-code">if (!user) {
+  await ctx.reply(ClientTexts.unableToIdentify());
+  return;  // BUG: session not deleted — user permanently stuck
+}</div>
+  <div class="finding-tags"><span class="tag tag-error">session lock</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">E8</span>
+    <span class="finding-title">Client photo handler — reply failure in catch block has empty inner catch</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:612-619</div>
+  <div class="finding-desc">
+    The error-handling catch block contains a <code>try { await ctx.reply(...) } catch {}</code> with an empty inner catch. If the error reply fails (e.g., bot blocked), the failure is silently swallowed with no log, making it impossible to diagnose.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">empty catch</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E9</span>
+    <span class="finding-title">answerCallback empty catch swallows all errors — rate limits, auth failures invisible</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:631-638 · manager-bot-interactive.ts:624-632 · courier-bot-interactive.ts:34-41</div>
+  <div class="finding-desc">
+    Three different implementations all use empty <code>catch {}</code> blocks when calling <code>answerCallbackQuery()</code>. While some stale/expired callback errors are expected, all Telegram API errors (rate limits, auth failures) are silently swallowed with no logging.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">empty catch</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E10</span>
+    <span class="finding-title">bot-settings-service.ts — empty catch returns null for any DB error</span>
+  </div>
+  <div class="finding-location">bot-settings-service.ts:18-26, 36-42</div>
+  <div class="finding-desc">
+    The comment says "Table may not exist yet", but the empty catch swallows connection errors, constraint violations, and any other DB issue unboundedly. All DB failures silently return <code>null</code>.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">empty catch</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E11</span>
+    <span class="finding-title">Generic Error thrown for discount failures — caller only catches InsufficientStockError</span>
+  </div>
+  <div class="finding-location">order-service.ts:171, 178, 186</div>
+  <div class="finding-desc">
+    Discount validation failures inside the transaction throw <code>new Error(message)</code>. The caller (<code>processCheckout</code>) only catches <code>InsufficientStockError</code>. These generic errors propagate to the outer handler with no specific user feedback — the user just sees a generic "checkout error".
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">generic error</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E12</span>
+    <span class="finding-title">Notification failure skips entire order cleanup in expire-invites — retries forever</span>
+  </div>
+  <div class="finding-location">expire-invites.worker.ts:54-63</div>
+  <div class="finding-desc">
+    If <code>botApi.sendMessage()</code> fails (e.g., client blocked the bot), the <code>continue</code> statement skips the entire order cleanup (revoke invite, kick user, cancel order). The order will be retried every scheduler cycle forever with no backoff.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">retry loop</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E13</span>
+    <span class="finding-title">No retry limit for persistently failing orders in send-invites worker</span>
+  </div>
+  <div class="finding-location">send-invites.worker.ts:60-136</div>
+  <div class="finding-desc">
+    If an order consistently fails (e.g., bot is no longer admin of the channel, invite link creation fails), the scheduler retries every 60 seconds indefinitely with no backoff or retry budget. Generates log noise and wasted API calls.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">retry loop</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E14</span>
+    <span class="finding-title">No @throws JSDoc on any service method</span>
+  </div>
+  <div class="finding-location">All service files — order-service.ts, discount-service.ts, invite-service.ts, notification-service.ts, cross-bot-file.ts, referral-utils.ts, referral-analytics-service.ts</div>
+  <div class="finding-desc">
+    Every function that can throw does not document it. Callers must defensively wrap everything in try-catch or risk missing edge cases.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">documentation</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E15</span>
+    <span class="finding-title">Referral chain upward walk has no depth limit</span>
+  </div>
+  <div class="finding-location">referral-analytics-service.ts:28-49</div>
+  <div class="finding-desc">
+    The <code>while</code> loop walks up the referral chain with sequential Prisma queries. While cycles are prevented via <code>visited</code> set, there is no maximum depth limit. A chain of 10,000 users would make 10,000 sequential DB queries, taking minutes.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">performance</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">E16</span>
+    <span class="finding-title">Scheduler overlap guard has no alerting on skipped runs</span>
+  </div>
+  <div class="finding-location">interval-scheduler.ts:29-43</div>
+  <div class="finding-desc">
+    If a job consistently takes longer than its interval, skipped runs accumulate silently with no monitoring or alerting. The running-flag guard prevents overlap but provides no visibility into missed executions.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">monitoring</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">E17</span>
+    <span class="finding-title">Expired orders query has no pagination limit</span>
+  </div>
+  <div class="finding-location">expire-invites.worker.ts:28-41</div>
+  <div class="finding-desc">
+    The <code>findMany</code> for expired orders has no <code>take</code> limit. If thousands of orders expire simultaneously, all are loaded into memory and processed sequentially.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">performance</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">E18</span>
+    <span class="finding-title">15+ empty catch blocks with no logging</span>
+  </div>
+  <div class="finding-location">Various files — client-bot-interactive.ts, manager-bot-interactive.ts, courier-bot-interactive.ts, safe-reply.ts, bot-settings-service.ts</div>
+  <div class="finding-desc">
+    At least 15 empty <code>catch {}</code> or <code>catch { /* ignore */ }</code> blocks exist. While many handle expected errors (stale callbacks, already-deleted messages), unexpected errors like rate limits or auth failures are invisible.
+  </div>
+  <div class="finding-tags"><span class="tag tag-error">empty catch</span></div>
+</div>
+
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: EDGE CASES & VALIDATION -->
+<!-- ============================================================ -->
+<div class="section" id="edges">
+<div class="section-header">
+  <h2>🧪 4 &nbsp;Edge Cases &amp; Missing Validations</h2>
+  <span class="section-count high">3 high</span>
+  <span class="section-count medium">8 medium</span>
+  <span class="section-count low">10 low</span>
+  <span class="section-arrow">▾</span>
+</div>
+<div class="section-body">
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">V1</span>
+    <span class="finding-title">COURIER_BOT_TOKEN missing from .env — app fails to start</span>
+  </div>
+  <div class="finding-location">.env · app-config.ts:26</div>
+  <div class="finding-desc">
+    The <code>.env</code> file defines <code>CLIENT_BOT_TOKEN</code> and <code>MANAGER_BOT_TOKEN</code> but has NO <code>COURIER_BOT_TOKEN</code> entry. The Zod schema marks it as required. Starting the app throws a fatal error at bootstrap.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">env config</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">V2</span>
+    <span class="finding-title">Receipt rejection ignores current order status — can regress a PAID order back to AWAITING_RECEIPT</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:316-338</div>
+  <div class="finding-desc">
+    The rejection logic does NOT verify the order is currently in <code>AWAITING_RECEIPT</code> or <code>INVITE_SENT</code>. If another manager approved the receipt while the rejection manager was typing the reason, the code would regress the order back to <code>AWAITING_RECEIPT</code> — an invalid state transition.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">state machine</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">V3</span>
+    <span class="finding-title">Order approval has no optimistic lock — approves regardless of current status</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:697-704</div>
+  <div class="finding-desc">
+    The <code>order.status !== AWAITING_MANAGER_APPROVAL</code> check happens once before any mutation. The final <code>prisma.order.update</code> at line 734 has no <code>where: { status: AWAITING_MANAGER_APPROVAL }</code>. Two concurrent approvals both succeed.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">race condition</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">V4</span>
+    <span class="finding-title">Username contains search without sanitization — enumeration risk</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:246-258</div>
+  <div class="finding-desc">
+    Arbitrary user input is used in <code>username: { contains: query }</code>. While Prisma parameterizes (no SQLi), an attacker could probe for username existence. SQLite's <code>LIKE</code> is case-insensitive for ASCII, making enumeration easier.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">enumeration</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">V5</span>
+    <span class="finding-title">safeId allows negative page numbers — Prisma skip would crash</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:3-6 (safeId function) · all pagination sites</div>
+  <div class="finding-desc">
+    <code>safeId("-1")</code> returns <code>-1</code>. Prisma's <code>skip</code> does not accept negative values. A crafted callback could crash paginated list handlers via denial-of-service. No <code>Math.max(0, page)</code> clamp exists at any pagination call site.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">validation</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">V6</span>
+    <span class="finding-title">Cart state not validated before checkout — user sees generic error instead of specific message</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:155-165 · order-service.ts:75-77</div>
+  <div class="finding-desc">
+    While <code>order-service.ts</code> checks <code>cart.state !== CartState.ACTIVE</code> and throws <code>CartNotActiveError</code>, <code>processCheckout</code> does NOT catch <code>CartNotActiveError</code> — only <code>InsufficientStockError</code>. The user gets a generic "checkout error" with no indication the cart was already used.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">state machine</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">V7</span>
+    <span class="finding-title">Delivery status transitions not validated — invalid transitions silently accepted</span>
+  </div>
+  <div class="finding-location">courier-bot-interactive.ts:179-283</div>
+  <div class="finding-desc">
+    The handler validates that <code>status</code> is a valid <code>DeliveryStatus</code> enum value, but does NOT validate that the transition is valid from the current state (e.g., <code>DELIVERED</code> → <code>PICKED_UP</code> would succeed).
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">state machine</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">V8</span>
+    <span class="finding-title">Unvalidated statusFilter injection from callback data</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:1076-1081</div>
+  <div class="finding-desc">
+    A crafted callback could inject an arbitrary status string that is cast to <code>OrderStatus</code>. Prisma would throw a runtime error for invalid enum values, providing a denial-of-service vector.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">injection</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">V9</span>
+    <span class="finding-title">checkoutChannelId guard insufficient — silent silent payment acceptance</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:744-756 · interval-scheduler.ts:52-84</div>
+  <div class="finding-desc">
+    If <code>checkoutChannelId</code> is omitted or <code>0</code>, the approval handler sets order status to <code>AWAITING_RECEIPT</code> without posting a payment message or creating an invite. Payment is effectively accepted with no payment instruction sent.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">config</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">V10</span>
+    <span class="finding-title">Discount code enumeration — no rate limiting</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:378-380</div>
+  <div class="finding-desc">
+    Arbitrary user input is used in <code>prisma.discount.findUnique({ where: { code } })</code> with no validation of format or rate limiting. Enables discount code brute-force enumeration.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">enumeration</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">V11</span>
+    <span class="finding-title">Callback data segment assumptions — safeId(undefined) returns 0</span>
+  </div>
+  <div class="finding-location">All callback handlers</div>
+  <div class="finding-desc">
+    A crafted callback with fewer colon-separated segments than expected produces <code>safeId(undefined)</code> → <code>0</code>. While not dangerous (ID 0 likely maps to nothing), it could cause confusing behavior.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">validation</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">V12</span>
+    <span class="finding-title">Photo caption could be undefined — stored as null</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:576, 596</div>
+  <div class="finding-desc">
+    <code>ctx.message.caption</code> is optional per Telegram API. Passed directly to Prisma — functionally OK since the field is nullable, but no fallback is provided.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">optional field</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">V13</span>
+    <span class="finding-title">Phone number not validated for format</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:498</div>
+  <div class="finding-desc">
+    <code>contact.phone_number</code> is stored in DB without any format validation. Displayed to managers later for contact.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">validation</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">V14</span>
+    <span class="finding-title">BigInt from Number — potential precision loss for future large IDs</span>
+  </div>
+  <div class="finding-location">All three bot handlers (client-bot-interactive.ts:59, manager-bot-interactive.ts:67, courier-bot-interactive.ts:28)</div>
+  <div class="finding-desc">
+    <code>BigInt(ctx.from.id)</code> where <code>ctx.from.id</code> is a JS Number. If Telegram ever uses IDs &gt; 2^53-1, precision is lost before BigInt conversion.
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">future-proofing</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">V15</span>
+    <span class="finding-title">Price * qty unbounded — no overflow check</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:237-246 · order-service.ts:119-144</div>
+  <div class="finding-desc">
+    <code>qty * unitPriceSnapshot</code> is computed as JS Number. Iranian Rial values are typically safe, but no validation prevents exceeding <code>Number.MAX_SAFE_INTEGER</code>. <code>lineTotal</code> is stored as Prisma <code>Int</code> (32-bit).
+  </div>
+  <div class="finding-tags"><span class="tag tag-input">overflow</span></div>
+</div>
+
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 5: CODE QUALITY -->
+<!-- ============================================================ -->
+<div class="section" id="quality">
+<div class="section-header">
+  <h2>🔧 5 &nbsp;Code Quality &amp; Maintainability</h2>
+  <span class="section-count critical">4 critical</span>
+  <span class="section-count high">6 high</span>
+  <span class="section-count medium">11 medium</span>
+  <span class="section-count low">12 low</span>
+  <span class="section-arrow">▾</span>
+</div>
+<div class="section-body">
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">Q1</span>
+    <span class="finding-title">registerInteractiveManagerBot — 2234-line function violating SRP</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:79-2313</div>
+  <div class="finding-desc">
+    A single function registers ALL handlers. The callback handler alone spans lines 619-2311. Should be split into separate modules: <code>orders-handler.ts</code>, <code>products-handler.ts</code>, <code>users-handler.ts</code>, <code>support-handler.ts</code>, <code>settings-handler.ts</code>.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">architecture</span></div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">Q2</span>
+    <span class="finding-title">registerInteractiveClientBot — 1240-line function</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:248-1488</div>
+  <div class="finding-desc">
+    Same pattern as Q1. All handlers for the client bot in one monolithic function. Callback handler alone spans ~700 lines.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">architecture</span></div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">Q3</span>
+    <span class="finding-title">Approve-order handler — 247 lines, 5 levels of nesting</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:693-940</div>
+  <div class="finding-desc">
+    A single callback branch handles channel/direct payment methods, cross-bot image upload, invite link creation, notifications, auto-delete scheduling, and order-list refresh. Contains 5+ levels of nested try-catch and conditionals.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">complexity</span></div>
+</div>
+
+<div class="finding sev-critical">
+  <div class="finding-header">
+    <span class="finding-id critical">Q4</span>
+    <span class="finding-title">Cart add-item logic copy-pasted in three places</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:773-836, 839-913 · client-bot-handlers.ts:129-162</div>
+  <div class="finding-desc">
+    ~30 lines of near-identical cart-find-or-create + item-upsert logic repeated. Each copy has the same race condition (see R1).
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">duplication</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">Q5</span>
+    <span class="finding-title">escapeMarkdown duplicated in two files, imported from different paths</span>
+  </div>
+  <div class="finding-location">i18n/texts.ts:16-20 · utils/escape-markdown.ts:5-8</div>
+  <div class="finding-desc">
+    Exact duplicate function exists in two files. Manager bot imports from <code>utils/escape-markdown.js</code>. Client bot imports from <code>i18n/index.js</code>. Inconsistent dependency paths for the same utility.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">duplication</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">Q6</span>
+    <span class="finding-title">safeId function duplicated in two bot files</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:3-6 · client-bot-interactive.ts:38-41</div>
+  <div class="finding-desc">
+    Identical <code>safeId</code> function copy-pasted. Should be extracted to a shared utility.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">duplication</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">Q7</span>
+    <span class="finding-title">Photo+document product-creation logic duplicated</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:490-511, 568-587</div>
+  <div class="finding-desc">
+    Entire <code>prisma.product.create()</code> block plus session cleanup identical between photo and document handlers. Only the <code>fileId</code> source differs.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">duplication</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">Q8</span>
+    <span class="finding-title">ManagerBotDeps and ClientBotDeps defined twice each</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:33 · client-bot-handlers.ts:29 · manager-bot-interactive.ts:43 · manager-bot-handlers.ts:22</div>
+  <div class="finding-desc">
+    Each interface is defined in two files with different shapes. The interactive versions include <code>clientBot</code>, <code>courierBot</code>, etc.; the handlers versions only have <code>prisma</code>. Confusing and inconsistent.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">design</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">Q9</span>
+    <span class="finding-title">Magic number 5 and 10 as page size scattered across codebase</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:665, 1079, 1235, 1380, 1904, 2117 · client-bot-interactive.ts:671, 1100, 1439</div>
+  <div class="finding-desc">
+    Hardcoded <code>5</code> and <code>10</code> appear as pagination page sizes in multiple locations with no named constant. Some lists use 5, some use 10 — inconsistent.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">magic number</span></div>
+</div>
+
+<div class="finding sev-high">
+  <div class="finding-header">
+    <span class="finding-id high">Q10</span>
+    <span class="finding-title">Callback answering implemented three different ways</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:631-639 · manager-bot-interactive.ts:624-633 · courier-bot-interactive.ts:34-62</div>
+  <div class="finding-desc">
+    Three different implementations for the same cross-cutting concern. Manager/client use a local inner function with a guard flag; courier uses a standalone function with no guard flag. Courier also defines a custom <code>render()</code> instead of using the shared <code>safeRender()</code>.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">inconsistency</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">Q11</span>
+    <span class="finding-title">20+ dead/unused exports</span>
+  </div>
+  <div class="finding-location">safe-reply.ts · texts.ts · client-bot-handlers.ts · manager-bot-handlers.ts · order-service.ts · referral-utils.ts · invite-service.ts · session-store.ts · index.ts</div>
+  <div class="finding-desc">
+    Exported interfaces, types, and functions that are never imported by any production source file. Includes <code>safeEditMessageText</code>, <code>safeEditMessageReplyMarkup</code>, <code>safeDeleteMessage</code>, <code>safeAnswerCallbackQuery</code>, <code>escapeMarkdownV2</code>, <code>NotificationTexts</code>, <code>CartNotActiveError</code>, <code>ProductNotAvailableError</code>, <code>CartEmptyError</code>, <code>generateReferralCode</code>, and more.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">dead code</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">Q12</span>
+    <span class="finding-title">InviteService class defined but never instantiated in production</span>
+  </div>
+  <div class="finding-location">invite-service.ts</div>
+  <div class="finding-desc">
+    The entire <code>InviteService</code> class is never used by any production code. All invite creation logic is inlined in the manager-bot approve handler and <code>send-invites.worker.ts</code>. Only the test imports it.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">dead code</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">Q13</span>
+    <span class="finding-title">50+ console.log/error/warn statements — no structured logger</span>
+  </div>
+  <div class="finding-location">main.ts, interval-scheduler.ts, safe-reply.ts, all bot files, all worker files</div>
+  <div class="finding-desc">
+    ~50 scattered <code>console.log</code>, <code>console.error</code>, and <code>console.warn</code> statements throughout production code. Not searchable, not level-filterable, not structured. Fastify (and its Pino logger) is already a dependency.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">logging</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">Q14</span>
+    <span class="finding-title">Three createBot functions are identical one-liners</span>
+  </div>
+  <div class="finding-location">bots.ts:5-17</div>
+  <div class="finding-desc">
+    <code>createClientBot</code>, <code>createManagerBot</code>, and <code>createCourierBot</code> all do exactly <code>new Bot(token)</code>. A single generic factory would eliminate the duplication.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">duplication</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">Q15</span>
+    <span class="finding-title">Webhook route handlers nearly identical</span>
+  </div>
+  <div class="finding-location">server.ts:65-108</div>
+  <div class="finding-desc">
+    Three <code>app.post("/webhook/...", ...)</code> handlers each do secret-token verification, body-null check, and handler dispatch. Only the handler name varies.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">duplication</span></div>
+</div>
+
+<div class="finding sev-medium">
+  <div class="finding-header">
+    <span class="finding-id medium">Q16</span>
+    <span class="finding-title">Order-detail text builders duplicated in manager and client bots</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:1019-1060 · client-bot-interactive.ts:1145-1165</div>
+  <div class="finding-desc">
+    Both build multi-line order-detail strings with items, discounts, totals, and delivery info. Structure and data-fetching overlap heavily.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">duplication</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q17</span>
+    <span class="finding-title">Hardcoded "IRR" currency string in 4+ locations</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:177, 501, 576 · send-invites.worker.ts:79</div>
+  <div class="finding-tags"><span class="tag tag-quality">magic string</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q18</span>
+    <span class="finding-title">Hardcoded "/skip" command in 9+ locations</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts (10 locations) · client-bot-interactive.ts:366, 407, 408</div>
+  <div class="finding-tags"><span class="tag tag-quality">magic string</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q19</span>
+    <span class="finding-title">Hardcoded maxRetries = 3 and maxUses = 1</span>
+  </div>
+  <div class="finding-location">referral-utils.ts:32, 47 · invite-service.ts:114</div>
+  <div class="finding-tags"><span class="tag tag-quality">magic number</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q20</span>
+    <span class="finding-title">Hardcoded idleThresholdMs: 24 * 60 * 60 * 1000</span>
+  </div>
+  <div class="finding-location">interval-scheduler.ts:71</div>
+  <div class="finding-tags"><span class="tag tag-quality">magic number</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q21</span>
+    <span class="finding-title">Hardcoded member_limit: 1 in invite link creation</span>
+  </div>
+  <div class="finding-location">manager-bot-interactive.ts:782 · send-invites.worker.ts:69</div>
+  <div class="finding-tags"><span class="tag tag-quality">magic number</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q22</span>
+    <span class="finding-title">Hardcoded limit of 3 referral codes per user</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:1395 · keyboards.ts:98</div>
+  <div class="finding-tags"><span class="tag tag-quality">magic number</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q23</span>
+    <span class="finding-title">Brittle error message string matching in isIgnorableError</span>
+  </div>
+  <div class="finding-location">safe-reply.ts:12-25</div>
+  <div class="finding-desc">
+    Matches error message strings with <code>.includes()</code>. Telegram could localize or change error messages in future API versions. Grammy provides typed error classes that should be used instead.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">fragile</span></div>
+</div>
+
+<div class="finding sev-low">
+  <div class="finding-header">
+    <span class="finding-id low">Q24</span>
+    <span class="finding-title">No max retry limit on referral score input</span>
+  </div>
+  <div class="finding-location">client-bot-interactive.ts:405-411</div>
+  <div class="finding-desc">
+    The handler allows the user to retry indefinitely with no maximum. A user could spam invalid values, keeping the session active.
+  </div>
+  <div class="finding-tags"><span class="tag tag-quality">abuse vector</span></div>
+</div>
+
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- FOOTER -->
+<!-- ============================================================ -->
+<footer style="text-align:center;color:var(--text-secondary);font-size:.7rem;padding:2rem 0 1rem;border-top:1px solid var(--border);margin-top:2rem">
+  Generated from production-prep branch · 49 source files · 36,074 lines total ·
+  Findings: 17 critical · 28 high · 34 medium · 51 low
+</footer>
+
+</div>
+
+<script>
+document.querySelectorAll('.section-header').forEach(h => {
+  h.addEventListener('click', () => {
+    h.parentElement.classList.toggle('collapsed');
+  });
+});
+</script>
+</body>
+</html>
