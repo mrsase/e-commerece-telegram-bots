@@ -1,3 +1,5 @@
+import { formatPrice } from "../utils/format-price.js";
+
 /**
  * Centralized text management for Amoosh Telegram Bots
  * 
@@ -45,15 +47,15 @@ export const ClientTexts = {
   // Products
   noProductsAvailable: () => "فعلاً محصولی برای نمایش وجود ندارد.",
   productsHeader: () => "محصولات موجود:",
-  productLine: (title: string, price: number, currency: string) =>
-    `${title} - ${price} ${currency}`,
+  productLine: (title: string, price: number, _currency?: string) =>
+    `${title} - ${formatPrice(price)}`,
 
   // Cart
   cartEmpty: () => "سبد خرید شما خالی است.",
   cartHeader: () => "سبد خرید شما:",
-  cartItemLine: (title: string, qty: number, lineTotal: number, currency: string) =>
-    `${title} x ${qty} = ${lineTotal} ${currency}`,
-  cartSubtotal: (subtotal: number) => `جمع: ${subtotal}`,
+  cartItemLine: (title: string, qty: number, lineTotal: number, _currency?: string) =>
+    `${title} x ${qty} = ${formatPrice(lineTotal)}`,
+  cartSubtotal: (subtotal: number) => `جمع: ${formatPrice(subtotal)}`,
 
   // Add to Cart
   addUsage: () => "فرمت: /add <شناسه محصول> <تعداد>",
@@ -67,7 +69,9 @@ export const ClientTexts = {
 
   // Checkout
   orderSubmitted: (orderId: number, grandTotal: number) =>
-    `✅ سفارش شما ثبت شد! شماره: ${orderId}، مبلغ: ${grandTotal}.`,
+    `✅ سفارش شما ثبت شد! شماره: ${orderId}، مبلغ: ${formatPrice(grandTotal)}.`,
+  orderSubmittedWithDiscount: (orderId: number, grandTotal: number, subtotal: number, discount: number) =>
+    `✅ سفارش شما ثبت شد! شماره: ${orderId}\n\n💰 مبلغ بدون تخفیف: ${formatPrice(subtotal)}\n🎁 تخفیف ویژه: ${formatPrice(discount)}-\n💳 مبلغ نهایی: ${formatPrice(grandTotal)}\n\nاین تخفیف توسط مدیریت برای شما اعمال شده است.`,
   outOfStock: () => "متأسفانه برخی اقلام موجود نیستند. لطفاً سبد خرید را اصلاح کنید.",
   checkoutError: () => "ثبت سفارش با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید.",
 
@@ -81,8 +85,8 @@ export const ClientTexts = {
   referralStats: (count: number) => `📊 تعداد معرفی‌های شما: ${count} نفر`,
   
   // Product View
-  productDetails: (title: string, description: string | null, price: number, currency: string, stock: number | null) =>
-    `*${escapeMarkdown(title)}*\n\n${escapeMarkdown(description) || 'بدون توضیحات'}\n\n💰 قیمت: ${price} ${currency}${stock !== null ? `\n📦 موجودی: ${stock}` : ''}`,
+  productDetails: (title: string, description: string | null, price: number, _currency?: string, stock?: number | null) =>
+    `*${escapeMarkdown(title)}*\n\n${escapeMarkdown(description) || 'بدون توضیحات'}\n\n💰 قیمت: ${formatPrice(price)}${stock !== null ? `\n📦 موجودی: ${stock}` : ''}`,
   selectQuantity: () => "تعداد را انتخاب کنید:",
   addedToCartSuccess: (title: string, qty: number) => `✅ ${qty} عدد ${title} به سبد خرید اضافه شد!`,
   
@@ -90,19 +94,25 @@ export const ClientTexts = {
   myOrdersHeader: () => "📦 سفارش‌های شما:",
   noOrders: () => "شما هنوز سفارشی ثبت نکرده‌اید.",
   orderDetails: (id: number, status: string, total: number) =>
-    `سفارش #${id}\nوضعیت: ${status}\nمبلغ: ${total}`,
+    `سفارش #${id}\nوضعیت: ${status}\nمبلغ: ${formatPrice(total)}`,
   
   // Cart Cleared
   cartCleared: () => "🗑️ سبد خرید شما خالی شد.",
 
   // Pre-checkout Info Gathering
   checkoutInfoRequired: () => "📋 قبل از ثبت سفارش، لطفاً اطلاعات زیر را تکمیل کنید:",
-  askPhone: () => "📱 لطفاً شماره تماس خود را ارسال کنید:",
+  askPhone: () => "📱 لطفاً شماره تماس خود را ارسال کنید:\n\nمی‌توانید از دکمه «ارسال شماره تماس» برای اشتراک‌گذاری خودکار استفاده کنید، یا دکمه «تایپ دستی» را بزنید و شماره را به صورت متن وارد کنید:",
   askPhoneButton: () => "📱 ارسال شماره تماس",
+  askPhoneManualButton: () => "✏️ تایپ دستی شماره",
+  askPhoneManualPrompt: () => "📱 لطفاً شماره تلفن خود را به صورت کامل وارد کنید (مثلاً: 09123456789):",
   phoneReceived: () => "✅ شماره تماس ثبت شد.",
-  askLocation: () => "📍 لطفاً موقعیت مکانی خود را ارسال کنید:",
-  askLocationButton: () => "📍 ارسال موقعیت مکانی",
+  invalidPhone: () => "❌ شماره تلفن نامعتبر است. لطفاً یک شماره معتبر با فرمت 09123456789 وارد کنید:",
+  askLocation: () => "📍 لطفاً موقعیت مکانی خود را ارسال کنید:\n\nمی‌توانید از دکمه زیر برای ارسال موقعیت فعلی خود استفاده کنید، از طریق منوی پیوست (📎) هر نقطه دیگری را روی نقشه انتخاب کنید و ارسال نمایید، یا دکمه «تایپ دستی» را بزنید و موقعیت را به صورت متن وارد کنید:",
+  askLocationButton: () => "📍 ارسال موقعیت فعلی",
+  askLocationManualButton: () => "✏️ تایپ دستی موقعیت",
+  askLocationManualPrompt: () => "📍 لطفاً موقعیت خود را به صورت متن وارد کنید (مثلاً: تهران، میدان انقلاب):",
   locationReceived: () => "✅ موقعیت مکانی ثبت شد.",
+  invalidLocation: () => "❌ لطفاً موقعیت مکانی را از طریق دکمه زیر یا منوی پیوست (📎) ارسال کنید:",
   askAddress: () => "🏠 لطفاً آدرس کامل را به صورت متن ارسال کنید:",
   addressReceived: () => "✅ آدرس ثبت شد.",
   infoComplete: () => "✅ اطلاعات کامل شد. در حال ثبت سفارش...",
@@ -110,7 +120,6 @@ export const ClientTexts = {
   cancelCheckout: () => "❌ ثبت سفارش لغو شد.",
 
   // Order Status Updates
-  orderPendingApproval: () => "⏳ سفارش شما در حال بررسی توسط مدیر است. نتیجه به شما اطلاع داده می‌شود.",
   orderApproved: (orderId: number) => `✅ خبر خوب! سفارش #${orderId} تأیید شد.`,
   orderApprovedWithInvite: (orderId: number, inviteLink: string) => 
     `✅ سفارش #${orderId} تأیید شد.\n\n📢 برای اطلاعات پرداخت وارد کانال شوید:\n${inviteLink}\n\nپس از پرداخت، عکس رسید را همینجا ارسال کنید.`,
@@ -120,7 +129,8 @@ export const ClientTexts = {
   // Receipt Submission
   sendReceiptPrompt: () => "📸 لطفاً عکس رسید پرداخت را ارسال کنید:",
   receiptReceived: () => "✅ رسید دریافت شد. مدیر به‌زودی بررسی می‌کند.",
-  receiptApproved: (orderId: number) => `✅ رسید سفارش #${orderId} تأیید شد. سفارش شما تکمیل شد.`,
+  receiptApproved: (orderId: number, etaText?: string) =>
+    `✅ رسید سفارش #${orderId} تأیید شد.${etaText ? `\n\n${etaText}` : ''}`,
   receiptRejected: (orderId: number, reason?: string) => 
     `❌ رسید سفارش #${orderId} تأیید نشد.${reason ? `\n\nعلت: ${reason}` : ''}\n\nلطفاً یک عکس جدید از رسید ارسال کنید.`,
   noActiveOrderForReceipt: () => "❌ سفارشی که منتظر رسید باشد ندارید.",
@@ -144,7 +154,8 @@ export const ClientTexts = {
 1) از بخش «محصولات» کالاها را انتخاب کنید.
 2) در «سبد خرید» اقلام را بررسی کنید.
 3) «ثبت سفارش» را بزنید و اطلاعات تماس/آدرس را تکمیل کنید.
-4) پس از تأیید مدیر، راهنمای پرداخت و ارسال رسید به شما اعلام می‌شود.
+4) پس از ثبت سفارش، اطلاعات پرداخت برای شما ارسال می‌شود.
+5) عکس رسید را در ربات ارسال کنید تا مدیر سفارش را تأیید کند.
 
 برای ارتباط با پشتیبانی، از دکمه «پشتیبانی» استفاده کنید.
 `.trim(),
@@ -165,7 +176,7 @@ export const ManagerTexts = {
   noPendingOrders: () => "هیچ سفارشی برای بررسی وجود ندارد.",
   pendingOrdersHeader: () => "سفارش‌های در انتظار بررسی:",
   pendingOrderLine: (orderId: number, userId: number, grandTotal: number) =>
-    `#${orderId} – کاربر ${userId} – مبلغ ${grandTotal}`,
+    `#${orderId} – کاربر ${userId} – مبلغ ${formatPrice(grandTotal)}`,
 
   // Approve Order
   approveUsage: () => "فرمت: /approve_order <شماره سفارش>",
@@ -183,8 +194,8 @@ export const ManagerTexts = {
 برای کار با ربات مدیریتی، از دکمه‌های منو استفاده کنید.
 *مهم‌ترین بخش‌ها:*
 
-- «سفارش‌ها»: بررسی و تأیید/رد سفارش‌ها
-- «رسیدها»: بررسی رسیدهای پرداخت
+- «رسیدها»: بررسی و تأیید/رد رسیدهای پرداخت کاربران
+- «همه سفارش‌ها»: مشاهده وضعیت تمام سفارش‌ها
 - «محصولات»: افزودن/ویرایش/غیرفعال‌سازی محصول
 - «پشتیبانی»: صندوق پیام‌های کاربران و پاسخ‌دهی
 `.trim(),
@@ -210,8 +221,8 @@ export const ManagerTexts = {
   usersMenuTitle: () => "👥 *مدیریت کاربران*",
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
-  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\nتعداد سفارش: ${orderCount}`,
+  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountPercent?: number | null) =>
+    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\n🎯 تخفیف: ${discountPercent != null ? `${discountPercent}%` : 'ندارد'}\nتعداد سفارش: ${orderCount}`,
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,
   userUnblocked: (username: string | null) => `✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,
   userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی به ${username || 'کاربر'} داده شد.`,
@@ -225,6 +236,10 @@ export const ManagerTexts = {
   // Loyalty Score
   enterReferralScore: () => "⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربران این کد وارد کنید:",
   invalidScore: () => "❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد.",
+
+  // User Discount
+  enterUserDiscount: () => "🎯 درصد تخفیف جدید را وارد کنید (۰ تا ۱۰۰):",
+  invalidDiscountPercent: () => "❌ درصد تخفیف باید عددی بین ۰ تا ۱۰۰ باشد.",
 
   // Courier Management
   couriersMenuTitle: () => "🚚 *مدیریت پیک‌ها*",
@@ -250,8 +265,8 @@ export const ManagerTexts = {
 
   // Analytics
   analyticsMenuTitle: () => "📊 *داشبورد آمار*",
-  orderAnalytics: (total: number, pending: number, completed: number, revenue: number) =>
-    `📦 *آمار سفارش‌ها*\n\nکل سفارش‌ها: ${total}\nدر انتظار: ${pending}\nتکمیل‌شده: ${completed}\nجمع فروش: ${revenue}`,
+  orderAnalytics: (total: number, awaitingReceipt: number, completed: number, revenue: number) =>
+    `📦 *آمار سفارش‌ها*\n\nکل سفارش‌ها: ${total}\nدر انتظار رسید: ${awaitingReceipt}\nتکمیل‌شده: ${completed}\nجمع فروش: ${formatPrice(revenue)}`,
   userAnalytics: (total: number, active: number, newToday: number) =>
     `👥 *آمار کاربران*\n\nکل کاربران: ${total}\nکاربران فعال: ${active}\nکاربران امروز: ${newToday}`,
   productAnalytics: (total: number, active: number, lowStock: number) =>
@@ -271,6 +286,7 @@ export const ManagerTexts = {
   receiptApproved: (orderId: number) => `✅ رسید سفارش #${orderId} تأیید شد.`,
   receiptRejected: (orderId: number) => `❌ رسید سفارش #${orderId} رد شد.`,
   enterRejectReason: () => "علت رد را وارد کنید:",
+  enterEtaMessage: () => "⏰ پیام زمان تقریبی تحویل را وارد کنید:\n\nاین پیام پس از تأیید برای کاربر ارسال می‌شود.\n(برای رد کردن، /skip را ارسال کنید)",
 
   // Order Approval with Invite
   orderApprovedInviteSent: (orderId: number, userTgId: bigint) => 
@@ -293,12 +309,12 @@ export const ManagerTexts = {
   invalidDeliveryOrStatus: () => "مقدار نامعتبر است.",
   
   // User Info Display
-  userContactInfo: (phone: string | null, address: string | null, lat: number | null, lng: number | null) =>
-    `📋 *اطلاعات مشتری:*\nتلفن: ${escapeMarkdown(phone) || '—'}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : ''}`,
+  userContactInfo: (phone: string | null, address: string | null, lat: number | null, lng: number | null, locationText?: string | null) =>
+    `📋 *اطلاعات مشتری:*\nتلفن: ${escapeMarkdown(phone) || '—'}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : locationText ? `\n📍 موقعیت: ${escapeMarkdown(locationText)}` : ''}`,
 
   // Settings
-  settingsMenuTitle: (imageStatus: string, expiryMinutes: number, paymentMethod: "channel" | "direct" = "direct") =>
-    `⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: ${paymentMethod === "channel" ? "📢 کانال" : "💳 مستقیم"}\n🖼️ تصویر پرداخت: ${imageStatus}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
+  settingsMenuTitle: (imageStatus: string, expiryMinutes: number, paymentMethod: "channel" | "direct" = "direct", cardStatus?: string, deliveryMsgStatus?: string) =>
+    `⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: ${paymentMethod === "channel" ? "📢 کانال" : "💳 مستقیم"}\n🖼️ تصویر پرداخت: ${imageStatus}\n🏦 شماره کارت: ${cardStatus || '❌ تنظیم نشده'}\n🚚 پیام ارسال: ${deliveryMsgStatus || '❌ تنظیم نشده'}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
   settingsImageUpdated: () => "✅ تصویر پرداخت با موفقیت به‌روزرسانی شد.",
   settingsImageDeleted: () => "✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود.",
   settingsImageAsk: () => "🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):",
@@ -309,6 +325,17 @@ export const ManagerTexts = {
     method === "channel"
       ? "✅ روش پرداخت به \"\u06a9\u0627\u0646\u0627\u0644\" تغییر یافت. اطلاعات پرداخت در کانال پست می‌شود."
       : "✅ روش پرداخت به \"\u0645\u0633\u062a\u0642\u06cc\u0645\" تغییر یافت. اطلاعات پرداخت مستقیماً به کاربر ارسال می‌شود.",
+
+  // Card Number Settings
+  settingsCardAsk: () => "💳 شماره کارت ۱۶ رقمی را وارد کنید (بدون فاصله یا خط تیره):\n\nبرای پاک کردن شماره کارت، /delete را ارسال کنید.",
+  settingsCardUpdated: (cardNumber: string) => `✅ شماره کارت به \`${cardNumber}\` تغییر یافت.`,
+  settingsCardDeleted: () => "✅ شماره کارت حذف شد. پیام پرداخت بدون شماره کارت ارسال می‌شود.",
+
+  // Courier Message Settings
+  settingsDeliveryMsgAsk: () => "📝 پیام ارسالی به کاربر هنگام «در مسیر ارسال» شدن را وارد کنید:\n\nاین پیام به کاربر اعلام می‌کند که پیک در مسیر است.\n(برای پاک کردن، /delete را ارسال کنید)",
+  settingsDeliveryMsgUpdated: (msg: string) => `✅ پیام ارسال به‌روزرسانی شد:\n\n${msg}`,
+  settingsDeliveryMsgDeleted: () => "✅ پیام سفارشی حذف شد. فقط وضعیت استاندارد ارسال می‌شود.",
+  settingsCardInvalid: () => "❌ شماره کارت باید ۱۶ رقمی و فقط شامل اعداد باشد. دوباره تلاش کنید:",
 };
 
 export const CourierTexts = {
@@ -324,6 +351,7 @@ export const CourierTexts = {
     address: string;
     locationLat?: number | null;
     locationLng?: number | null;
+    locationText?: string | null;
   }) => {
     const lines = [
       `🚚 ارسال سفارش #${params.orderId}`,
@@ -336,6 +364,8 @@ export const CourierTexts = {
     ];
     if (params.locationLat != null && params.locationLng != null) {
       lines.push(`📍 موقعیت: ثبت شده`);
+    } else if (params.locationText) {
+      lines.push(`📍 موقعیت: ${params.locationText}`);
     } else {
       lines.push(`📍 موقعیت: ثبت نشده`);
     }
@@ -370,10 +400,11 @@ export const NotificationTexts = {
 // ===========================================
 
 export const ChannelTexts = {
-  paymentMessage: (orderId: number, grandTotal: number, currency: string) =>
+  paymentMessage: (orderId: number, grandTotal: number, cardNumber?: string, _currency?: string) =>
     `💳 *پرداخت سفارش #${orderId}*\n\n` +
-    `مبلغ قابل پرداخت: *${grandTotal.toLocaleString("fa-IR")} ${currency}*\n\n` +
-    `لطفاً مبلغ فوق را به شماره کارت/حساب ذکر شده واریز کنید ` +
+    `مبلغ قابل پرداخت: *${formatPrice(grandTotal)}*\n\n` +
+    (cardNumber ? `🏦 شماره کارت: \`${cardNumber}\`\n\n` : '') +
+    `لطفاً مبلغ فوق را به شماره کارت ذکر شده واریز کنید ` +
     `و سپس عکس رسید را در ربات فروشگاه ارسال نمایید.\n\n` +
     `⏳ این پیام پس از ثبت رسید یا اتمام مهلت پرداخت حذف خواهد شد.`,
 };

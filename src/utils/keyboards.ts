@@ -1,4 +1,5 @@
 import { InlineKeyboard } from "grammy";
+import { formatPrice } from "./format-price.js";
 
 /**
  * Keyboard utilities for Telegram bot UI
@@ -40,7 +41,7 @@ export const ClientKeyboards = {
     const kb = new InlineKeyboard();
     
     products.forEach((p) => {
-      kb.text(`${p.title} - ${p.price}`, `client:product:${p.id}`).row();
+      kb.text(`${p.title} - ${formatPrice(p.price)}`, `client:product:${p.id}`).row();
     });
 
     // Pagination
@@ -58,9 +59,9 @@ export const ClientKeyboards = {
   /** Single product view with quantity controls */
   productView: (productId: number, currentQty: number = 1) => {
     return new InlineKeyboard()
-      .text("➖", `client:qty:dec:${productId}`)
+      .text("−", `client:qty:dec:${productId}`)
       .text(`${currentQty}`, "noop")
-      .text("➕", `client:qty:inc:${productId}`)
+      .text("+", `client:qty:inc:${productId}`)
       .row()
       .text("🛒 افزودن و ادامه خرید", `client:addtocart:${productId}:${currentQty}`)
       .row()
@@ -82,7 +83,7 @@ export const ClientKeyboards = {
     });
 
     if (items.length > 0) {
-      kb.text("🗑️ خالی کردن سبد", "client:clearcart")
+      kb.text("« بازگشت به محصولات", "client:products")
         .text("✅ ثبت سفارش", "client:checkout")
         .row();
     }
@@ -127,10 +128,9 @@ export const ManagerKeyboards = {
   /** Main menu for managers */
   mainMenu: () => {
     return new InlineKeyboard()
-      .text("📋 سفارش‌های جدید", "mgr:orders")
+      .text("🧾 رسیدهای در انتظار", "mgr:receipts")
       .text("📊 همه سفارش‌ها", "mgr:allorders")
       .row()
-      .text("🧾 رسیدها", "mgr:receipts")
       .text("📦 محصولات", "mgr:products")
       .row()
       .text("👥 کاربران", "mgr:users")
@@ -155,7 +155,7 @@ export const ManagerKeyboards = {
     const kb = new InlineKeyboard();
 
     orders.forEach((o) => {
-      kb.text(`#${o.id} - ${o.grandTotal}`, `mgr:order:${o.id}`)
+      kb.text(`#${o.id} - ${formatPrice(o.grandTotal)}`, `mgr:order:${o.id}`)
         .text("✅", `mgr:approve:${o.id}`)
         .text("❌", `mgr:reject:${o.id}`)
         .row();
@@ -266,7 +266,7 @@ export const ManagerKeyboards = {
   },
 
   /** User detail actions */
-  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean) => {
+  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountPercent?: number | null) => {
     return new InlineKeyboard()
       .text("📦 سفارش‌ها", `mgr:user:orders:${userId}`)
       .text("📋 اطلاعات تماس", `mgr:user:contact:${userId}`)
@@ -283,6 +283,7 @@ export const ManagerKeyboards = {
         `mgr:user:toggle:${userId}`
       )
       .row()
+      .text(discountPercent ? `🎯 تخفیف ${discountPercent}%` : "🎯 تنظیم تخفیف", `mgr:user:setdiscount:${userId}`)
       .text("🗑️ حذف کاربر", `mgr:user:delete:${userId}`)
       .row()
       .text("💬 ارسال پیام", `mgr:user:message:${userId}`)
@@ -321,6 +322,10 @@ export const ManagerKeyboards = {
     const methodLabel = paymentMethod === "channel" ? "📢 کانال" : "📩 مستقیم";
     const kb = new InlineKeyboard()
       .text(`💳 روش پرداخت: ${methodLabel}`, "mgr:settings:paymethod")
+      .row()
+      .text("🏦 شماره کارت", "mgr:settings:card")
+      .row()
+      .text("🚚 پیام ارسال", "mgr:settings:deliverymsg")
       .row()
       .text("🖼️ تغییر تصویر پرداخت", "mgr:settings:image")
       .row()
@@ -429,6 +434,27 @@ export const ManagerKeyboards = {
       .text("✅ بستن", `mgr:support:close:${conversationId}`)
       .row()
       .text("« بازگشت به صندوق", "mgr:support");
+  },
+
+  /** Inline actions for receipt notification — approve/reject directly */
+  receiptNotificationActions: (receiptId: number, orderId: number) => {
+    return new InlineKeyboard()
+      .text("✅ تأیید رسید", `mgr:receipt:approve:${receiptId}`)
+      .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`)
+      .row()
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+  },
+
+  /** Inline action for support message notification — view conversation */
+  supportNotificationActions: (conversationId: number) => {
+    return new InlineKeyboard()
+      .text("💬 مشاهده گفتگو", `mgr:support:conv:${conversationId}`);
+  },
+
+  /** Inline action for delivery failure notification — view order */
+  deliveryFailedNotificationActions: (orderId: number) => {
+    return new InlineKeyboard()
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
   },
 };
 

@@ -1,10 +1,10 @@
 import { Bot, Context, Keyboard } from "grammy";
 import type { PrismaClient, User } from "@prisma/client";
 import { CartState, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
-import { ClientTexts } from "../../i18n/index.js";
+import { ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ClientKeyboards } from "../../utils/keyboards.js";
+import { formatPrice } from "../../utils/format-price.js";
 import { OrderService, InsufficientStockError } from "../../services/order-service.js";
-import { DiscountService } from "../../services/discount-service.js";
 
 import { SessionStore } from "../../utils/session-store.js";
 
@@ -15,7 +15,6 @@ type SessionState =
   | "checkout_phone"
   | "checkout_location"
   | "checkout_address"
-  | "checkout_discount"
   | "awaiting_receipt"
   | "referral_score"
   | "support_message";
@@ -26,6 +25,7 @@ interface ClientSession {
   selectedQty?: number;
   orderId?: number;
   supportConversationId?: number;
+  fromProfile?: boolean;
 }
 
 const userSessions = new SessionStore<ClientSession>();
@@ -33,6 +33,9 @@ const userSessions = new SessionStore<ClientSession>();
 interface ClientBotDeps {
   prisma: PrismaClient;
   managerBot?: Bot;
+  checkoutChannelId?: string;
+  checkoutImageFileId?: string;
+  inviteExpiryMinutes?: number;
 }
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
@@ -41,6 +44,7 @@ import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
 import { safeRender } from "../../utils/safe-reply.js";
 import { crossBotFile } from "../../utils/cross-bot-file.js";
+import { BotSettingsService } from "../../services/bot-settings-service.js";
 
 /**
  * Get or create user, checking referral status
@@ -133,6 +137,162 @@ async function validateAndUseReferralCode(
 }
 
 /**
+ * Send payment details to user immediately after order creation (bypasses manager approval)
+ */
+async function sendPaymentDetailsForOrder(
+  orderId: number,
+  prisma: PrismaClient,
+  clientBot: Bot,
+  managerBot: Bot | undefined,
+  checkoutChannelId: string | undefined,
+  checkoutImageFileId: string | undefined,
+  inviteExpiryMinutes: number,
+): Promise<void> {
+  const settingsService = new BotSettingsService(prisma);
+
+  const payMethod = await settingsService.getPaymentMethod();
+  const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
+  const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+  const cardNumber = await settingsService.getPaymentCardNumber();
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { user: true, items: { include: { product: true } } },
+  });
+
+  if (!order || !order.user) {
+    console.error(`[sendPaymentDetails] Order #${orderId} not found or has no user`);
+    return;
+  }
+
+  let checkoutImageInput: import("grammy").InputFile | null = null;
+  if (effectiveImageFileId && managerBot) {
+    try {
+      checkoutImageInput = await crossBotFile(managerBot.api, managerBot.token, effectiveImageFileId);
+    } catch (err) {
+      console.error("[sendPaymentDetails] Failed to download checkout image:", err);
+    }
+  }
+
+  const paymentCaption = ChannelTexts.paymentMessage(
+    orderId,
+    order.grandTotal,
+    cardNumber ?? undefined,
+    order.items[0]?.product?.currency ?? "IRR",
+  );
+
+  if (payMethod === "channel") {
+    if (!checkoutChannelId) {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.AWAITING_RECEIPT },
+      });
+      return;
+    }
+
+    let channelMessageId: number | null = null;
+    try {
+      if (checkoutImageInput) {
+        const msg = await clientBot.api.sendPhoto(checkoutChannelId, checkoutImageInput, {
+          caption: paymentCaption, parse_mode: "Markdown",
+        });
+        channelMessageId = msg.message_id;
+      } else {
+        const msg = await clientBot.api.sendMessage(checkoutChannelId, paymentCaption, {
+          parse_mode: "Markdown",
+        });
+        channelMessageId = msg.message_id;
+      }
+    } catch (err) {
+      console.error("[sendPaymentDetails] Failed to post channel message:", err);
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + effectiveExpiryMin * 60 * 1000);
+    const expireUnix = Math.floor(expiresAt.getTime() / 1000);
+    let inviteLink: string | null = null;
+    try {
+      const result = await clientBot.api.createChatInviteLink(checkoutChannelId, {
+        member_limit: 1, name: `Order #${orderId}`, expire_date: expireUnix,
+      });
+      inviteLink = result.invite_link;
+    } catch (err) {
+      console.error("[sendPaymentDetails] Failed to create invite link:", err);
+    }
+
+    if (inviteLink) {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          status: OrderStatus.INVITE_SENT,
+          inviteLink, inviteSentAt: now, inviteExpiresAt: expiresAt, channelMessageId,
+        },
+      });
+
+      try {
+        await clientBot.api.sendMessage(
+          order.user.tgUserId.toString(),
+          ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
+          { parse_mode: "Markdown" },
+        );
+      } catch (err) {
+        console.error("[sendPaymentDetails] Failed to send invite to client:", err);
+      }
+    } else {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { channelMessageId, status: OrderStatus.AWAITING_RECEIPT },
+      });
+    }
+  } else {
+    const userTgId = order.user.tgUserId.toString();
+    let directMessageId: number | null = null;
+
+    try {
+      if (checkoutImageInput) {
+        const msg = await clientBot.api.sendPhoto(userTgId, checkoutImageInput, {
+          caption: paymentCaption, parse_mode: "Markdown",
+        });
+        directMessageId = msg.message_id;
+      } else {
+        const msg = await clientBot.api.sendMessage(userTgId, paymentCaption, {
+          parse_mode: "Markdown",
+        });
+        directMessageId = msg.message_id;
+      }
+    } catch (err) {
+      console.error("[sendPaymentDetails] Failed to send direct payment details:", err);
+      try {
+        const msg = await clientBot.api.sendMessage(userTgId, paymentCaption.replace(/[*_`\[]/g, ""));
+        directMessageId = msg.message_id;
+      } catch (err2) {
+        console.error("[sendPaymentDetails] Retry also failed:", err2);
+      }
+    }
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: OrderStatus.AWAITING_RECEIPT,
+        channelMessageId: directMessageId,
+        inviteSentAt: new Date(),
+      },
+    });
+
+    if (directMessageId) {
+      const deleteDelayMs = effectiveExpiryMin * 60 * 1000;
+      setTimeout(async () => {
+        try {
+          await clientBot.api.deleteMessage(userTgId, directMessageId);
+        } catch (err) {
+          console.error(`[AUTO-DELETE] Failed to delete message ${directMessageId}:`, err);
+        }
+      }, deleteDelayMs);
+    }
+  }
+}
+
+/**
  * Process checkout after info is collected
  */
 async function processCheckout(
@@ -141,10 +301,14 @@ async function processCheckout(
   cartId: number,
   prisma: PrismaClient,
   notificationService?: NotificationService,
-  discountCode?: string | null,
+  clientBot?: Bot,
+  managerBot?: Bot,
+  checkoutChannelId?: string,
+  checkoutImageFileId?: string,
+  inviteExpiryMinutes?: number,
 ): Promise<void> {
   const orderService = new OrderService(prisma);
-  const discountService = new DiscountService(prisma);
+  const discountService = new (await import("../../services/discount-service.js")).DiscountService(prisma);
 
   try {
     const cart = await prisma.cart.findUnique({
@@ -159,17 +323,14 @@ async function processCheckout(
       return;
     }
 
-    const discountResult = await discountService.calculateDiscounts(
-      {
-        userId: user.id,
-        items: cart.items.map(item => ({
-          productId: item.productId,
-          qty: item.qty,
-          unitPrice: item.unitPriceSnapshot,
-        })),
-      },
-      discountCode,
-    );
+    const discountResult = await discountService.calculateDiscounts({
+      userId: user.id,
+      items: cart.items.map(item => ({
+        productId: item.productId,
+        qty: item.qty,
+        unitPrice: item.unitPriceSnapshot,
+      })),
+    });
 
     const result = await orderService.createOrderFromCart({
       userId: user.id,
@@ -177,15 +338,31 @@ async function processCheckout(
       appliedDiscounts: discountResult.appliedDiscounts,
     });
 
+    const orderMsg = discountResult.totalDiscount > 0
+      ? ClientTexts.orderSubmittedWithDiscount(result.orderId, result.grandTotal, result.subtotal, discountResult.totalDiscount)
+      : ClientTexts.orderSubmitted(result.orderId, result.grandTotal);
+
     await safeRender(
       ctx,
-      ClientTexts.orderSubmitted(result.orderId, result.grandTotal) + "\n\n" + ClientTexts.orderPendingApproval(),
+      orderMsg,
       { reply_markup: ClientKeyboards.mainMenu() }
     );
 
-    // Notify managers about the new order
-    const userLabel = user.username || user.firstName || `#${user.id}`;
-    await notificationService?.notifyManagersNewOrder(result.orderId, userLabel, result.grandTotal);
+    // Send payment details immediately (bypass manager approval)
+    if (clientBot) {
+      await sendPaymentDetailsForOrder(
+        result.orderId,
+        prisma,
+        clientBot,
+        managerBot,
+        checkoutChannelId,
+        checkoutImageFileId,
+        inviteExpiryMinutes ?? 60,
+      );
+    }
+
+    // Set session to await receipt directly so user can upload photo right away
+    userSessions.set(ctx.from!.id, { state: "awaiting_receipt", orderId: result.orderId });
   } catch (error) {
     if (error instanceof InsufficientStockError) {
       await safeRender(ctx, ClientTexts.outOfStock(), {
@@ -206,19 +383,26 @@ async function continueCheckoutFlow(
   ctx: Context,
   user: User,
   prisma: PrismaClient,
+  notificationService?: NotificationService,
+  clientBot?: Bot,
+  managerBot?: Bot,
+  checkoutChannelId?: string,
+  checkoutImageFileId?: string,
+  inviteExpiryMinutes?: number,
 ): Promise<void> {
   // Refresh user data
   const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
   if (!updatedUser) return;
 
   // P2-1 Fix: Use nullish check instead of truthiness (0 is a valid coordinate)
-  const needsLocation = updatedUser.locationLat == null || updatedUser.locationLng == null;
+  const needsLocation = (updatedUser.locationLat == null || updatedUser.locationLng == null) && !updatedUser.locationText;
   const needsAddress = !updatedUser.address;
 
   if (needsLocation) {
     userSessions.set(ctx.from!.id, { state: "checkout_location" });
     const keyboard = new Keyboard()
       .requestLocation(ClientTexts.askLocationButton())
+      .text(ClientTexts.askLocationManualButton())
       .resized()
       .oneTime();
     await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
@@ -231,17 +415,56 @@ async function continueCheckoutFlow(
     return;
   }
 
-  // All info collected - ask for discount code before checkout
-  await ctx.reply(ClientTexts.infoComplete());
-  userSessions.set(ctx.from!.id, { state: "checkout_discount" });
-  await ctx.reply("🎟️ اگر کد تخفیف دارید وارد کنید. در غیر این صورت /skip بزنید:");
+  // All info collected — proceed directly to checkout or return to menu
+  const activeCart = await prisma.cart.findFirst({
+    where: { userId: updatedUser.id, state: CartState.ACTIVE },
+  });
+
+  if (activeCart) {
+    userSessions.delete(ctx.from!.id);
+    await processCheckout(ctx, updatedUser, activeCart.id, prisma, notificationService, clientBot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+  } else {
+    userSessions.delete(ctx.from!.id);
+    await ctx.reply(ClientTexts.infoComplete(), {
+      reply_markup: ClientKeyboards.mainMenu(),
+    });
+  }
+}
+
+/**
+ * Show the user profile with edit options
+ */
+async function showProfile(
+  ctx: Context,
+  user: User,
+): Promise<void> {
+  let profileText = "👤 *پروفایل من*\n\n";
+  profileText += `نام: ${user.firstName ?? "-"} ${user.lastName ?? ""}\n`;
+  profileText += `نام کاربری: ${user.username ? "@" + user.username : "-"}\n`;
+  profileText += `تلفن: ${user.phone ?? "ثبت نشده"}\n`;
+  profileText += `آدرس: ${user.address ?? "ثبت نشده"}\n`;
+  profileText += `موقعیت: ${user.locationLat != null ? "✅ ثبت شده" : user.locationText ?? "ثبت نشده"}\n`;
+  const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
+  profileText += `⭐ امتیاز وفاداری: ${effectiveScore}/10\n`;
+
+  const { InlineKeyboard: PK } = await import("grammy");
+  const profileKb = new PK();
+  profileKb.text("📱 ویرایش تلفن", "client:profile:edit:phone").row();
+  profileKb.text("📍 ویرایش آدرس", "client:profile:edit:address").row();
+  profileKb.text("🗺️ ویرایش موقعیت", "client:profile:edit:location").row();
+  profileKb.text("« بازگشت به منو", "client:menu");
+
+  await safeRender(ctx, profileText, {
+    parse_mode: "Markdown",
+    reply_markup: profileKb,
+  });
 }
 
 /**
  * Register all interactive handlers for client bot
  */
 export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): void {
-  const { prisma, managerBot } = deps;
+  const { prisma, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes } = deps;
   const notificationService = new NotificationService({ prisma, managerBot });
 
   // Global error handler to prevent crashes
@@ -271,7 +494,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     const pendingOrders = await prisma.order.count({
       where: {
         userId: user.id,
-        status: { in: [OrderStatus.AWAITING_MANAGER_APPROVAL, OrderStatus.APPROVED, OrderStatus.INVITE_SENT, OrderStatus.AWAITING_RECEIPT] },
+        status: { in: [OrderStatus.APPROVED, OrderStatus.INVITE_SENT, OrderStatus.AWAITING_RECEIPT] },
       },
     });
     const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
@@ -320,6 +543,99 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
+    // Handle manual phone number input during checkout
+    if (session?.state === "checkout_phone") {
+      const text = ctx.message.text.trim();
+
+      // User clicked the "typing" button text — guide them
+      if (text === ClientTexts.askPhoneManualButton()) {
+        await ctx.reply(ClientTexts.askPhoneManualPrompt(), { reply_markup: { remove_keyboard: true } });
+        return;
+      }
+
+      // Validate as phone number (Iranian format: 09xxxxxxxxx or +989xxxxxxxxx)
+      const digitsOnly = text.replace(/\D/g, "");
+      const isValid = /^(\+98|0)?9\d{9}$/.test(text) || digitsOnly.length >= 10;
+
+      if (!isValid) {
+        await ctx.reply(ClientTexts.invalidPhone());
+        return;
+      }
+
+      // Normalize the phone number
+      let phone = text;
+      if (phone.startsWith("0") && !phone.startsWith("+98")) {
+        phone = "+98" + phone.slice(1);
+      } else if (!phone.startsWith("+98") && !phone.startsWith("0")) {
+        phone = "0" + phone;
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { tgUserId: BigInt(ctx.from.id) },
+      });
+
+      if (!user) {
+        await ctx.reply(ClientTexts.unableToIdentify());
+        return;
+      }
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { phone },
+      });
+
+      await ctx.reply(ClientTexts.phoneReceived(), { reply_markup: { remove_keyboard: true } });
+
+      if (session.fromProfile) {
+        const updated = await prisma.user.findUnique({ where: { id: user.id } });
+        if (updated) await showProfile(ctx, updated);
+      } else {
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+      }
+      return;
+    }
+
+    // Handle manual location text input
+    if (session?.state === "checkout_location") {
+      const text = ctx.message.text.trim();
+
+      // If they clicked the manual entry button, prompt for text
+      if (text === ClientTexts.askLocationManualButton()) {
+        await ctx.reply(ClientTexts.askLocationManualPrompt(), { reply_markup: { remove_keyboard: true } });
+        return;
+      }
+
+      // Save as text-based location
+      const user = await prisma.user.findUnique({
+        where: { tgUserId: BigInt(ctx.from.id) },
+      });
+
+      if (!user) {
+        await ctx.reply(ClientTexts.unableToIdentify());
+        return;
+      }
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          locationLat: null,
+          locationLng: null,
+          locationText: text,
+        },
+      });
+
+      userSessions.delete(ctx.from.id);
+      await ctx.reply(ClientTexts.locationReceived(), { reply_markup: { remove_keyboard: true } });
+
+      if (session.fromProfile) {
+        const updated = await prisma.user.findUnique({ where: { id: user.id } });
+        if (updated) await showProfile(ctx, updated);
+      } else {
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+      }
+      return;
+    }
+
     // Handle address input during checkout
     if (session?.state === "checkout_address") {
       const address = ctx.message.text.trim();
@@ -338,59 +654,14 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         data: { address },
       });
 
-      await ctx.reply(ClientTexts.addressReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma);
-      return;
-    }
-
-    // Handle discount code entry during checkout
-    if (session?.state === "checkout_discount") {
-      const code = ctx.message.text.trim();
-      
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
-      if (!user) {
-        await ctx.reply(ClientTexts.unableToIdentify());
-        return;
-      }
-
       userSessions.delete(ctx.from.id);
+      await ctx.reply(ClientTexts.addressReceived(), { reply_markup: { remove_keyboard: true } });
 
-      if (code === "/skip") {
-        // Continue without discount code
-        const cart = await prisma.cart.findFirst({
-          where: { userId: user.id, state: CartState.ACTIVE },
-        });
-        if (cart) {
-          await processCheckout(ctx, user, cart.id, prisma, notificationService);
-        }
-        return;
-      }
-
-      // Validate the discount code exists and is active
-      const discount = await prisma.discount.findUnique({
-        where: { code },
-      });
-
-      if (!discount || !discount.isActive) {
-        await ctx.reply("❌ کد تخفیف نامعتبر است. سفارش بدون تخفیف ثبت می‌شود.");
-        const cart = await prisma.cart.findFirst({
-          where: { userId: user.id, state: CartState.ACTIVE },
-        });
-        if (cart) {
-          await processCheckout(ctx, user, cart.id, prisma, notificationService);
-        }
-        return;
-      }
-
-      // Process checkout with discount code
-      const cart = await prisma.cart.findFirst({
-        where: { userId: user.id, state: CartState.ACTIVE },
-      });
-      if (cart) {
-        await ctx.reply(`✅ کد تخفیف "${code}" اعمال شد.`);
-        await processCheckout(ctx, user, cart.id, prisma, notificationService, code);
+      if (session.fromProfile) {
+        const updated = await prisma.user.findUnique({ where: { id: user.id } });
+        if (updated) await showProfile(ctx, updated);
+      } else {
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
       }
       return;
     }
@@ -484,8 +755,15 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         data: { phone: contact.phone_number },
       });
 
+      userSessions.delete(ctx.from.id);
       await ctx.reply(ClientTexts.phoneReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma);
+
+      if (session.fromProfile) {
+        const updated = await prisma.user.findUnique({ where: { id: user.id } });
+        if (updated) await showProfile(ctx, updated);
+      } else {
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+      }
     }
   });
 
@@ -512,11 +790,19 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         data: { 
           locationLat: location.latitude,
           locationLng: location.longitude,
+          locationText: null,
         },
       });
 
+      userSessions.delete(ctx.from.id);
       await ctx.reply(ClientTexts.locationReceived(), { reply_markup: { remove_keyboard: true } });
-      await continueCheckoutFlow(ctx, user, prisma);
+
+      if (session.fromProfile) {
+        const updated = await prisma.user.findUnique({ where: { id: user.id } });
+        if (updated) await showProfile(ctx, updated);
+      } else {
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+      }
     }
   });
 
@@ -562,7 +848,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
 
-      await prisma.$transaction([
+      const [_, receipt] = await prisma.$transaction([
         // Mark existing pending receipts as superseded
         prisma.receipt.updateMany({
           where: {
@@ -595,7 +881,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       await ctx.reply(ClientTexts.receiptReceived());
       const userLabel = user.username || user.firstName || `#${user.id}`;
-      await notificationService.notifyManagersNewReceipt(order.id, userLabel);
+      await notificationService.notifyManagersNewReceipt(order.id, userLabel, receipt.id);
     } catch (error) {
       console.error("[CLIENT PHOTO HANDLER] Error processing receipt:", error);
       userSessions.delete(ctx.from.id);
@@ -1011,7 +1297,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       // Check if we need to gather info
       const needsPhone = !user.phone;
       // P2-1 Fix: Use nullish check instead of truthiness (0 is a valid coordinate)
-      const needsLocation = user.locationLat == null || user.locationLng == null;
+      const needsLocation = (user.locationLat == null || user.locationLng == null) && !user.locationText;
       const needsAddress = !user.address;
 
       if (needsPhone || needsLocation || needsAddress) {
@@ -1022,6 +1308,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           userSessions.set(ctx.from.id, { state: "checkout_phone" });
           const keyboard = new Keyboard()
             .requestContact(ClientTexts.askPhoneButton())
+            .text(ClientTexts.askPhoneManualButton())
             .resized()
             .oneTime();
           await ctx.reply(ClientTexts.askPhone(), { reply_markup: keyboard });
@@ -1032,6 +1319,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           userSessions.set(ctx.from.id, { state: "checkout_location" });
           const keyboard = new Keyboard()
             .requestLocation(ClientTexts.askLocationButton())
+            .text(ClientTexts.askLocationManualButton())
             .resized()
             .oneTime();
           await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
@@ -1045,31 +1333,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         }
       }
 
-      // All info available - ask for discount code
-      const { InlineKeyboard: CK } = await import("grammy");
-      const discountKb = new CK();
-      discountKb.text("🎟️ وارد کردن کد تخفیف", "client:checkout:discount").row();
-      discountKb.text("⏭️ ادامه بدون کد تخفیف", `client:checkout:finalize:${cart.id}`).row();
-      discountKb.text("❌ انصراف", "client:checkout:cancel");
-
-      await safeRender(ctx, "آیا کد تخفیف دارید؟", {
-        reply_markup: discountKb,
-      });
-      return;
-    }
-
-    // DISCOUNT CODE PROMPT
-    if (data === "client:checkout:discount") {
-      userSessions.set(ctx.from.id, { state: "checkout_discount" });
-      await safeRender(ctx, "🎟️ لطفاً کد تخفیف خود را وارد کنید:\n\nبرای انصراف /skip را ارسال کنید.");
-      return;
-    }
-
-    // FINALIZE CHECKOUT (with or without discount code)
-    if (data.startsWith("client:checkout:finalize:")) {
-      const cartId = parseInt(parts[3]);
-      const discountCode = parts[4] || null; // optional discount code passed via callback
-      await processCheckout(ctx, user, cartId, prisma, notificationService, discountCode);
+      // All info available — proceed directly to checkout
+      await processCheckout(ctx, user, cart.id, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
       return;
     }
 
@@ -1099,7 +1364,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       let text = ClientTexts.myOrdersHeader() + "\n\n";
       orders.forEach((o) => {
-        text += `سفارش #${o.id} · ${orderStatusLabel(o.status)} · ${o.grandTotal} تومان\n`;
+        text += `سفارش #${o.id} · ${orderStatusLabel(o.status)} · ${formatPrice(o.grandTotal)}\n`;
       });
 
       const { InlineKeyboard } = await import("grammy");
@@ -1138,13 +1403,13 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       detailText += `تاریخ: ${order.createdAt.toISOString().split("T")[0]}\n\n`;
       detailText += `*اقلام:*\n`;
       order.items.forEach((item) => {
-        detailText += `  ${item.product.title} x${item.qty} = ${item.lineTotal} تومان\n`;
+        detailText += `  ${item.product.title} x${item.qty} = ${formatPrice(item.lineTotal)}\n`;
       });
-      detailText += `\nجمع: ${order.subtotal} تومان\n`;
+      detailText += `\nجمع: ${formatPrice(order.subtotal)}\n`;
       if (order.discountTotal > 0) {
-        detailText += `تخفیف: ${order.discountTotal} تومان\n`;
+        detailText += `تخفیف: ${formatPrice(order.discountTotal)}\n`;
       }
-      detailText += `*مبلغ نهایی: ${order.grandTotal} تومان*\n`;
+      detailText += `*مبلغ نهایی: ${formatPrice(order.grandTotal)}*\n`;
 
       if (order.delivery) {
         const dlabel = order.delivery.status === "DELIVERED" ? "تحویل داده شده ✅"
@@ -1248,35 +1513,17 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // USER PROFILE
     if (data === "client:profile") {
-      let profileText = "👤 *پروفایل من*\n\n";
-      profileText += `نام: ${user.firstName ?? "-"} ${user.lastName ?? ""}\n`;
-      profileText += `نام کاربری: ${user.username ? "@" + user.username : "-"}\n`;
-      profileText += `تلفن: ${user.phone ?? "ثبت نشده"}\n`;
-      profileText += `آدرس: ${user.address ?? "ثبت نشده"}\n`;
-      profileText += `موقعیت: ${user.locationLat != null ? "✅ ثبت شده" : "ثبت نشده"}\n`;
-      const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
-      profileText += `⭐ امتیاز وفاداری: ${effectiveScore}/10\n`;
-
-      const { InlineKeyboard: PK } = await import("grammy");
-      const profileKb = new PK();
-      profileKb.text("📱 ویرایش تلفن", "client:profile:edit:phone").row();
-      profileKb.text("📍 ویرایش آدرس", "client:profile:edit:address").row();
-      profileKb.text("🗺️ ویرایش موقعیت", "client:profile:edit:location").row();
-      profileKb.text("« بازگشت به منو", "client:menu");
-
-      await safeRender(ctx, profileText, {
-        parse_mode: "Markdown",
-        reply_markup: profileKb,
-      });
+      await showProfile(ctx, user);
       return;
     }
 
     // EDIT PHONE
     if (data === "client:profile:edit:phone") {
-      userSessions.set(ctx.from.id, { state: "checkout_phone" });
+      userSessions.set(ctx.from.id, { state: "checkout_phone", fromProfile: true });
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
       const keyboard = new Keyboard()
         .requestContact(ClientTexts.askPhoneButton())
+        .text(ClientTexts.askPhoneManualButton())
         .resized()
         .oneTime();
       await ctx.reply(ClientTexts.askPhone(), { reply_markup: keyboard });
@@ -1285,17 +1532,18 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // EDIT ADDRESS
     if (data === "client:profile:edit:address") {
-      userSessions.set(ctx.from.id, { state: "checkout_address" });
+      userSessions.set(ctx.from.id, { state: "checkout_address", fromProfile: true });
       await safeRender(ctx, "📍 آدرس جدید خود را ارسال کنید:");
       return;
     }
 
     // EDIT LOCATION
     if (data === "client:profile:edit:location") {
-      userSessions.set(ctx.from.id, { state: "checkout_location" });
+      userSessions.set(ctx.from.id, { state: "checkout_location", fromProfile: true });
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
       const keyboard = new Keyboard()
         .requestLocation(ClientTexts.askLocationButton())
+        .text(ClientTexts.askLocationManualButton())
         .resized()
         .oneTime();
       await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });

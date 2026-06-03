@@ -14,7 +14,7 @@ describe("buildCartDisplay", () => {
     expect(result.subtotal).toBe(2500);
     expect(result.text).toContain("Item A");
     expect(result.text).toContain("Item B");
-    expect(result.text).toContain("2000");
+    expect(result.text).toContain("2,000");
   });
 
   it("handles empty cart", () => {

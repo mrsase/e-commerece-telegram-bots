@@ -1,7 +1,9 @@
 import type { Bot } from "grammy";
+import { InlineKeyboard } from "grammy";
 import type { PrismaClient } from "@prisma/client";
 import { safeSendMessage } from "../utils/safe-reply.js";
 import { ClientTexts, ManagerTexts } from "../i18n/index.js";
+import { formatPrice } from "../utils/format-price.js";
 
 export interface NotificationServiceDeps {
   prisma: PrismaClient;
@@ -39,7 +41,7 @@ export class NotificationService {
   }
 
   /** Notify all active managers about a new receipt submission */
-  async notifyManagersNewReceipt(orderId: number, userLabel: string): Promise<void> {
+  async notifyManagersNewReceipt(orderId: number, userLabel: string, receiptId: number): Promise<void> {
     const bot = this.deps.managerBot;
     if (!bot) return;
 
@@ -48,9 +50,15 @@ export class NotificationService {
     });
 
     const text = NotificationServiceTexts.newReceiptForManager(orderId, userLabel);
+    const keyboard = new InlineKeyboard()
+      .text("✅ تأیید رسید", `mgr:receipt:approve:${receiptId}`)
+      .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`)
+      .row()
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+
     for (const mgr of managers) {
       try {
-        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text, { reply_markup: keyboard });
       } catch (err) {
         console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about new receipt:`, err);
       }
@@ -67,9 +75,12 @@ export class NotificationService {
     });
 
     const text = ManagerTexts.supportNewMessageNotification(conversationId, userLabel);
+    const keyboard = new InlineKeyboard()
+      .text("✍️ پاسخ به پیام", `mgr:support:reply:${conversationId}`);
+
     for (const mgr of managers) {
       try {
-        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text, { reply_markup: keyboard });
       } catch (err) {
         console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about new support message:`, err);
       }
@@ -97,11 +108,11 @@ export class NotificationService {
   }
 
   /** Notify client that their receipt was approved */
-  async notifyClientReceiptApproved(userTgId: bigint, orderId: number): Promise<void> {
+  async notifyClientReceiptApproved(userTgId: bigint, orderId: number, etaText?: string): Promise<void> {
     const bot = this.deps.clientBot;
     if (!bot) return;
 
-    const text = ClientTexts.receiptApproved(orderId);
+    const text = ClientTexts.receiptApproved(orderId, etaText);
     await safeSendMessage(bot.api, userTgId.toString(), text);
   }
 
@@ -115,11 +126,11 @@ export class NotificationService {
   }
 
   /** Notify client about delivery status update */
-  async notifyClientDeliveryUpdate(userTgId: bigint, orderId: number, statusLabel: string): Promise<void> {
+  async notifyClientDeliveryUpdate(userTgId: bigint, orderId: number, statusLabel: string, extraText?: string): Promise<void> {
     const bot = this.deps.clientBot;
     if (!bot) return;
 
-    const text = NotificationServiceTexts.deliveryStatusForClient(orderId, statusLabel);
+    const text = NotificationServiceTexts.deliveryStatusForClient(orderId, statusLabel, extraText);
     await safeSendMessage(bot.api, userTgId.toString(), text);
   }
 
@@ -167,9 +178,12 @@ export class NotificationService {
     });
 
     const text = NotificationServiceTexts.deliveryFailedForManager(orderId, reason);
+    const keyboard = new InlineKeyboard()
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+
     for (const mgr of managers) {
       try {
-        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text, { reply_markup: keyboard });
       } catch (err) {
         console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about delivery failure:`, err);
       }
@@ -200,13 +214,13 @@ export class NotificationService {
 
 export const NotificationServiceTexts = {
   newOrderForManager: (orderId: number, userLabel: string, grandTotal: number) =>
-    `🔔 سفارش جدید!\n\nسفارش #${orderId}\nکاربر: ${userLabel}\nمبلغ: ${grandTotal}\n\nبرای بررسی به ربات مدیریت مراجعه کنید.`,
+    `🔔 سفارش جدید!\n\nسفارش #${orderId}\nکاربر: ${userLabel}\nمبلغ: ${formatPrice(grandTotal)}`,
 
   newReceiptForManager: (orderId: number, userLabel: string) =>
-    `🧾 رسید جدید!\n\nسفارش #${orderId}\nکاربر: ${userLabel}\n\nبرای بررسی رسید به ربات مدیریت مراجعه کنید.`,
+    `🧾 رسید جدید!\n\nسفارش #${orderId}\nکاربر: ${userLabel}`,
 
-  deliveryStatusForClient: (orderId: number, statusLabel: string) =>
-    `📦 بروزرسانی ارسال سفارش #${orderId}\n\nوضعیت: ${statusLabel}`,
+  deliveryStatusForClient: (orderId: number, statusLabel: string, extraText?: string) =>
+    `📦 بروزرسانی ارسال سفارش #${orderId}\n\nوضعیت: ${statusLabel}${extraText ? `\n\n${extraText}` : ''}`,
 
   newDeliveryForCourier: (orderId: number, customerName: string, phone: string, address: string) =>
     `🚚 ارسال جدید!\n\nسفارش #${orderId}\nمشتری: ${customerName}\nتلفن: ${phone}\nآدرس: ${address}\n\nبرای بروزرسانی وضعیت از منوی ربات استفاده کنید.`,

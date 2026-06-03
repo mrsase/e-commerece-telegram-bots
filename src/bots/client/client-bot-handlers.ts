@@ -6,6 +6,7 @@ import {
 } from "../../services/order-service.js";
 import { ClientTexts } from "../../i18n/index.js";
 import { addItemToCart, PerUserMutex } from "../../utils/cart-utils.js";
+import { formatPrice } from "../../utils/format-price.js";
 
 const cartMutex = new PerUserMutex();
 
@@ -221,7 +222,7 @@ export function registerClientBotHandlers(
     }
 
     const lines = cart.items.map(
-      (item) => `• ${item.product.title} — ${item.qty} × ${item.unitPriceSnapshot} = ${item.qty * item.unitPriceSnapshot}`,
+      (item) => `• ${item.product.title} — ${item.qty} × ${item.unitPriceSnapshot} = ${formatPrice(item.qty * item.unitPriceSnapshot)}`,
     );
 
     await ctx.reply([ClientTexts.cartHeader(), ...lines].join("\n"));
@@ -254,9 +255,7 @@ export function registerClientBotHandlers(
       });
 
       await ctx.reply(
-        ClientTexts.orderSubmitted(result.orderId, result.grandTotal) +
-          "\n\n" +
-          ClientTexts.orderPendingApproval(),
+        ClientTexts.orderSubmitted(result.orderId, result.grandTotal),
       );
     } catch (error) {
       if (error instanceof InsufficientStockError) {

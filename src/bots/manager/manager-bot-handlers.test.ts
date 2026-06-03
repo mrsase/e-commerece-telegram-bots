@@ -239,7 +239,7 @@ describe("manager bot basic handlers", () => {
     const message = replies[0];
     expect(message).toContain("سفارش‌های در انتظار بررسی");
     expect(message).toContain(`#${order.id}`);
-    expect(message).toContain("2000");
+    expect(message).toContain("2,000");
   });
 
   it("approves a pending order on /approve_order", async () => {

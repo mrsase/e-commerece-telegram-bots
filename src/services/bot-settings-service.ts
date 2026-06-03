@@ -8,6 +8,8 @@ export const SettingKeys = {
   CHECKOUT_IMAGE_FILE_ID: "checkout_image_file_id",
   INVITE_EXPIRY_MINUTES: "invite_expiry_minutes",
   PAYMENT_METHOD: "payment_method",
+  PAYMENT_CARD_NUMBER: "payment_card_number",
+  OUT_FOR_DELIVERY_MESSAGE: "out_for_delivery_message",
 } as const;
 
 export type PaymentMethod = "channel" | "direct";
@@ -72,5 +74,21 @@ export class BotSettingsService {
   async getPaymentMethod(): Promise<PaymentMethod> {
     const val = await this.get(SettingKeys.PAYMENT_METHOD);
     return val === "channel" ? "channel" : "direct";
+  }
+
+  /**
+   * Get the 16-digit payment card/account number from settings.
+   * Returns null if not configured.
+   */
+  async getPaymentCardNumber(): Promise<string | null> {
+    return this.get(SettingKeys.PAYMENT_CARD_NUMBER);
+  }
+
+  /**
+   * Get the custom message sent to the user when the courier is out for delivery.
+   * Returns null if not configured (falls back to default text).
+   */
+  async getOutForDeliveryMessage(): Promise<string | null> {
+    return this.get(SettingKeys.OUT_FOR_DELIVERY_MESSAGE);
   }
 }

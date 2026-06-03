@@ -135,7 +135,7 @@ export class OrderService {
           subtotal,
           discountTotal,
           grandTotal,
-          status: OrderStatus.AWAITING_MANAGER_APPROVAL,
+          status: OrderStatus.APPROVED,
           items: {
             create: cart.items.map((item) => ({
               productId: item.productId,
@@ -161,33 +161,7 @@ export class OrderService {
         },
       });
 
-      if (appliedDiscounts.length > 0) {
-        // Re-validate discount limits inside the transaction to prevent races
-        for (const ad of appliedDiscounts) {
-          const discount = await tx.discount.findUnique({
-            where: { id: ad.discountId },
-          });
-          if (!discount || !discount.isActive) {
-            throw new Error(`Discount ${ad.discountId} is no longer active`);
-          }
-          if (discount.maxUses != null) {
-            const usageCount = await tx.discountUsage.count({
-              where: { discountId: discount.id },
-            });
-            if (usageCount >= discount.maxUses) {
-              throw new Error(`Discount ${ad.discountId} has reached max uses`);
-            }
-          }
-          if (discount.perUserLimit != null) {
-            const perUserCount = await tx.discountUsage.count({
-              where: { discountId: discount.id, userId },
-            });
-            if (perUserCount >= discount.perUserLimit) {
-              throw new Error(`Discount ${ad.discountId} per-user limit reached`);
-            }
-          }
-        }
-
+      if (appliedDiscounts.length > 0 && appliedDiscounts[0].discountId > 0) {
         await tx.discountUsage.createMany({
           data: appliedDiscounts.map((d) => ({
             userId,

@@ -203,7 +203,7 @@ describe("client bot basic handlers", () => {
     expect(message).toContain("سبد خرید شما:");
     expect(message).toContain(TEST_PRODUCT_TITLE);
     expect(message).toContain("2");
-    expect(message).toContain("2000");
+    expect(message).toContain("2,000");
   });
 
   it("adds an item to cart on /add", async () => {

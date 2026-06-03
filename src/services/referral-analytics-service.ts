@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { formatPrice } from "../utils/format-price.js";
 
 export interface ReferralChainNode {
   userId: number;
@@ -146,7 +147,7 @@ export class ReferralAnalyticsService {
  */
 export function formatReferralTree(node: ReferralChainNode, indent = ""): string {
   const label = node.username || node.firstName || `#${node.userId}`;
-  let text = `${indent}${indent ? "└ " : ""}${label} ⭐${node.loyaltyScore} (${node.orderCount} سفارش · ${node.orderTotal} تومان)\n`;
+  let text = `${indent}${indent ? "└ " : ""}${label} ⭐${node.loyaltyScore} (${node.orderCount} سفارش · ${formatPrice(node.orderTotal)})\n`;
   node.children.forEach((child, i) => {
     const isLast = i === node.children.length - 1;
     text += formatReferralTree(child, indent + (isLast ? "  " : "│ "));

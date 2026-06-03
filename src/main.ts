@@ -19,7 +19,13 @@ async function main(): Promise<void> {
   const managerBot = createManagerBot(config.managerBotToken);
   const courierBot = createCourierBot(config.courierBotToken);
 
-  registerInteractiveClientBot(clientBot, { prisma, managerBot });
+  registerInteractiveClientBot(clientBot, { 
+    prisma, 
+    managerBot,
+    checkoutChannelId: config.checkoutChannelId,
+    checkoutImageFileId: config.checkoutImageFileId,
+    inviteExpiryMinutes: config.inviteExpiryMinutes,
+  });
   registerInteractiveCourierBot(courierBot, { prisma, clientBot, managerBot });
   registerInteractiveManagerBot(managerBot, { 
     prisma, 

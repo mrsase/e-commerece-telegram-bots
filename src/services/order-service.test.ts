@@ -108,7 +108,7 @@ describe("OrderService", () => {
       include: { items: true },
     });
 
-    expect(order.status).toBe(OrderStatus.AWAITING_MANAGER_APPROVAL);
+    expect(order.status).toBe(OrderStatus.APPROVED);
     expect(order.items).toHaveLength(1);
     expect(order.items[0]?.qty).toBe(2);
 

@@ -1,4 +1,5 @@
 import { ClientTexts } from "../i18n/index.js";
+import { formatPrice } from "./format-price.js";
 
 interface CartDisplayItem {
   productId: number;
@@ -32,7 +33,7 @@ export function buildCartDisplay(cartItems: CartDisplayItem[]): CartDisplayResul
   let text = ClientTexts.cartHeader() + "\n\n";
   cartItems.forEach((item) => {
     const lineTotal = item.qty * item.unitPrice;
-    text += `${item.title} x${item.qty} = ${lineTotal} ${item.currency}\n`;
+    text += `${item.title} x${item.qty} = ${formatPrice(lineTotal)}\n`;
   });
   text += `\n${ClientTexts.cartSubtotal(subtotal)}`;
 

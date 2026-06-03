@@ -6,6 +6,7 @@ import { CourierKeyboards } from "../../utils/keyboards.js";
 
 import { SessionStore } from "../../utils/session-store.js";
 import { NotificationService } from "../../services/notification-service.js";
+import { BotSettingsService } from "../../services/bot-settings-service.js";
 
 type SessionState = "delivery:fail:reason";
 
@@ -229,7 +230,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
 
         if (status === DeliveryStatus.DELIVERED) {
           const orderUpdated = await tx.order.updateMany({
-            where: { id: delivery.orderId, status: { in: [OrderStatus.INVITE_SENT, OrderStatus.AWAITING_RECEIPT] } },
+            where: { id: delivery.orderId, status: { in: [OrderStatus.INVITE_SENT, OrderStatus.AWAITING_RECEIPT, OrderStatus.PAID] } },
             data: {
               status: OrderStatus.COMPLETED,
             },
@@ -267,10 +268,14 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       // Notify client about delivery status change
       if (updatedDelivery?.order?.user) {
         try {
+          const extraText = status === DeliveryStatus.OUT_FOR_DELIVERY
+            ? await new BotSettingsService(prisma).getOutForDeliveryMessage()
+            : undefined;
           await notificationService.notifyClientDeliveryUpdate(
             updatedDelivery.order.user.tgUserId,
             updatedDelivery.orderId,
             statusLabel(status),
+            extraText ?? undefined,
           );
         } catch (err) {
           console.error("[COURIER] Failed to notify client:", err);
@@ -300,6 +305,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
         address: user.address ?? "-",
         locationLat: user.locationLat,
         locationLng: user.locationLng,
+        locationText: user.locationText,
       });
       await render(ctx, details, CourierKeyboards.deliveryActions(deliveryId, status));
       return;
@@ -322,6 +328,9 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       if (user.locationLat != null && user.locationLng != null) {
         await answerCallback(ctx);
         await ctx.replyWithLocation(user.locationLat, user.locationLng);
+      } else if (user.locationText) {
+        await answerCallback(ctx);
+        await ctx.reply(`📍 موقعیت مشتری: ${user.locationText}`);
       } else {
         await answerCallback(ctx, "موقعیت مشتری ثبت نشده است.");
       }
@@ -355,6 +364,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
         address: user.address ?? "-",
         locationLat: user.locationLat,
         locationLng: user.locationLng,
+        locationText: user.locationText,
       });
 
       await answerCallback(ctx);

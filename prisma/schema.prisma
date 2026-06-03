@@ -16,6 +16,7 @@ model User {
   phone           String?
   locationLat     Float?
   locationLng     Float?
+  locationText    String?
   address         String?
   referralCode    String           @unique
   referredById    Int?
@@ -26,6 +27,7 @@ model User {
   canCreateReferral Boolean        @default(false)  // Manager must grant this permission
   loyaltyScore    Int              @default(0)       // Score assigned by parent or manager (0-10)
   loyaltyScoreOverride Int?                           // Manager override of loyalty score
+  discountPercent  Int?
   createdAt       DateTime         @default(now())
   lastSeenAt      DateTime?
 
