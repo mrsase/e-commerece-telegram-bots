@@ -86,6 +86,8 @@ export class NotificationService {
 
     const text = NotificationServiceTexts.newReceiptForManager(orderId, userLabel);
     const keyboard = new InlineKeyboard()
+      .text("🖼 مشاهده رسید", `mgr:receipt:show:${receiptId}`)
+      .row()
       .text("✅ تأیید رسید", `mgr:receipt:approve:${receiptId}`)
       .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`)
       .row()

@@ -2188,6 +2188,38 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+    // SHOW RECEIPT (from notification)
+    if (data.startsWith("mgr:receipt:show:")) {
+      const receiptId = safeId(parts[3]);
+      const receipt = await prisma.receipt.findUnique({
+        where: { id: receiptId },
+        include: { order: true },
+      });
+
+      if (!receipt) {
+        await answerCallback({ text: "رسید یافت نشد" });
+        return;
+      }
+
+      if (!clientBot) {
+        await answerCallback({ text: "ربات فروشنده در دسترس نیست" });
+        return;
+      }
+
+      try {
+        const receiptInput = await crossBotFile(clientBot.api, clientBot.token, receipt.fileId);
+        await ctx.replyWithPhoto(receiptInput, {
+          caption: `🧾 *رسید سفارش #${receipt.orderId}*`,
+          parse_mode: "Markdown",
+        });
+        await answerCallback();
+      } catch (err) {
+        console.error("[RECEIPT SHOW] Failed to show receipt:", err);
+        await answerCallback({ text: "خطا در نمایش رسید" });
+      }
+      return;
+    }
+
     // APPROVE RECEIPT — Ask for ETA text first
     if (data.startsWith("mgr:receipt:approve:")) {
       const receiptId = safeId(parts[3]);
