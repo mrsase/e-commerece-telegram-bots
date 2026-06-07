@@ -121,8 +121,6 @@ export const ClientTexts = {
 
   // Order Status Updates
   orderApproved: (orderId: number) => `✅ خبر خوب! سفارش #${orderId} تأیید شد.`,
-  orderApprovedWithInvite: (orderId: number, inviteLink: string) => 
-    `✅ سفارش #${orderId} تأیید شد.\n\n📢 برای اطلاعات پرداخت وارد کانال شوید:\n${inviteLink}\n\nپس از پرداخت، عکس رسید را همینجا ارسال کنید.`,
   orderRejected: (orderId: number, reason?: string) => 
     `❌ سفارش #${orderId} تأیید نشد.${reason ? `\n\nعلت: ${reason}` : ''}`,
 
@@ -288,11 +286,6 @@ export const ManagerTexts = {
   enterRejectReason: () => "علت رد را وارد کنید:",
   enterEtaMessage: () => "⏰ پیام زمان تقریبی تحویل را وارد کنید:\n\nاین پیام پس از تأیید برای کاربر ارسال می‌شود.\n(برای رد کردن، /skip را ارسال کنید)",
 
-  // Order Approval with Invite
-  orderApprovedInviteSent: (orderId: number, userTgId: bigint) => 
-    `✅ سفارش #${orderId} تأیید شد. لینک کانال برای کاربر ${userTgId} ارسال شد.`,
-  inviteSendFailed: (orderId: number) => `⚠️ سفارش #${orderId} تأیید شد اما ارسال لینک کانال به کاربر ناموفق بود.`,
-
   // Support / Chat
   supportInboxTitle: () => "💬 *صندوق پشتیبانی*",
   noSupportConversations: () => "هیچ گفتگوی بازِ پشتیبانی وجود ندارد.",
@@ -302,7 +295,6 @@ export const ManagerTexts = {
   supportConversationClosed: () => "✅ گفتگو بسته شد.",
   supportNewMessageNotification: (conversationId: number, fromLabel: string) =>
     `📩 پیام جدید پشتیبانی\nگفتگو #${conversationId}\nاز: ${fromLabel}`,
-  envMissingCheckoutChannel: () => "امکان تأیید سفارش نیست: CHECKOUT_CHANNEL_ID تنظیم نشده است.",
   productNotFound: () => "محصول پیدا نشد.",
   productDeactivated: () => "محصول غیرفعال شد.",
   productActivated: () => "محصول فعال شد.",
@@ -313,19 +305,14 @@ export const ManagerTexts = {
     `📋 *اطلاعات مشتری:*\nتلفن: ${escapeMarkdown(phone) || '—'}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : locationText ? `\n📍 موقعیت: ${escapeMarkdown(locationText)}` : ''}`,
 
   // Settings
-  settingsMenuTitle: (imageStatus: string, expiryMinutes: number, paymentMethod: "channel" | "direct" = "direct", cardStatus?: string, deliveryMsgStatus?: string) =>
-    `⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: ${paymentMethod === "channel" ? "📢 کانال" : "💳 مستقیم"}\n🖼️ تصویر پرداخت: ${imageStatus}\n🏦 شماره کارت: ${cardStatus || '❌ تنظیم نشده'}\n🚚 پیام ارسال: ${deliveryMsgStatus || '❌ تنظیم نشده'}\n⏳ مهلت پرداخت: ${expiryMinutes} دقیقه`,
+  settingsMenuTitle: (imageStatus: string, cardStatus?: string, deliveryMsgStatus?: string) =>
+    `⚙️ *تنظیمات ربات*\n\n🖼️ تصویر پرداخت: ${imageStatus}\n🏦 شماره کارت: ${cardStatus || '❌ تنظیم نشده'}\n🚚 پیام ارسال: ${deliveryMsgStatus || '❌ تنظیم نشده'}`,
   settingsImageUpdated: () => "✅ تصویر پرداخت با موفقیت به‌روزرسانی شد.",
   settingsImageDeleted: () => "✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود.",
   settingsImageAsk: () => "🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):",
   settingsExpiryAsk: () => "⏳ مهلت پرداخت را به دقیقه وارد کنید (مثلاً 60):",
   settingsExpiryUpdated: (minutes: number) => `✅ مهلت پرداخت به ${minutes} دقیقه تغییر یافت.`,
   settingsExpiryInvalid: () => "❌ لطفاً یک عدد معتبر (بزرگتر از صفر) وارد کنید.",
-  settingsPayMethodToggled: (method: "channel" | "direct") =>
-    method === "channel"
-      ? "✅ روش پرداخت به \"\u06a9\u0627\u0646\u0627\u0644\" تغییر یافت. اطلاعات پرداخت در کانال پست می‌شود."
-      : "✅ روش پرداخت به \"\u0645\u0633\u062a\u0642\u06cc\u0645\" تغییر یافت. اطلاعات پرداخت مستقیماً به کاربر ارسال می‌شود.",
-
   // Card Number Settings
   settingsCardAsk: () => "💳 شماره کارت ۱۶ رقمی را وارد کنید (بدون فاصله یا خط تیره):\n\nبرای پاک کردن شماره کارت، /delete را ارسال کنید.",
   settingsCardUpdated: (cardNumber: string) => `✅ شماره کارت به \`${cardNumber}\` تغییر یافت.`,
@@ -383,16 +370,6 @@ export const CourierTexts = {
   statusOutForDelivery: () => "در مسیر ارسال",
   statusDelivered: () => "تحویل شد",
   statusFailed: () => "ناموفق",
-};
-
-// ===========================================
-// NOTIFICATION TEXTS (for workers)
-// ===========================================
-
-export const NotificationTexts = {
-  // Invite Worker
-  orderApprovedWithInvite: (orderId: number, inviteLink: string) =>
-    `سفارش #${orderId} تأیید شد. برای پرداخت وارد کانال شوید: ${inviteLink}`,
 };
 
 // ===========================================

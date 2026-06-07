@@ -33,9 +33,7 @@ const userSessions = new SessionStore<ClientSession>();
 interface ClientBotDeps {
   prisma: PrismaClient;
   managerBot?: Bot;
-  checkoutChannelId?: string;
   checkoutImageFileId?: string;
-  inviteExpiryMinutes?: number;
 }
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
@@ -144,15 +142,12 @@ async function sendPaymentDetailsForOrder(
   prisma: PrismaClient,
   clientBot: Bot,
   managerBot: Bot | undefined,
-  checkoutChannelId: string | undefined,
   checkoutImageFileId: string | undefined,
-  inviteExpiryMinutes: number,
 ): Promise<void> {
   const settingsService = new BotSettingsService(prisma);
 
-  const payMethod = await settingsService.getPaymentMethod();
   const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
-  const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(inviteExpiryMinutes);
+  const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(60);
   const cardNumber = await settingsService.getPaymentCardNumber();
 
   const order = await prisma.order.findUnique({
@@ -181,114 +176,49 @@ async function sendPaymentDetailsForOrder(
     order.items[0]?.product?.currency ?? "IRR",
   );
 
-  if (payMethod === "channel") {
-    if (!checkoutChannelId) {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { status: OrderStatus.AWAITING_RECEIPT },
+  const userTgId = order.user.tgUserId.toString();
+  let directMessageId: number | null = null;
+
+  try {
+    if (checkoutImageInput) {
+      const msg = await clientBot.api.sendPhoto(userTgId, checkoutImageInput, {
+        caption: paymentCaption, parse_mode: "Markdown",
       });
-      return;
-    }
-
-    let channelMessageId: number | null = null;
-    try {
-      if (checkoutImageInput) {
-        const msg = await clientBot.api.sendPhoto(checkoutChannelId, checkoutImageInput, {
-          caption: paymentCaption, parse_mode: "Markdown",
-        });
-        channelMessageId = msg.message_id;
-      } else {
-        const msg = await clientBot.api.sendMessage(checkoutChannelId, paymentCaption, {
-          parse_mode: "Markdown",
-        });
-        channelMessageId = msg.message_id;
-      }
-    } catch (err) {
-      console.error("[sendPaymentDetails] Failed to post channel message:", err);
-    }
-
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + effectiveExpiryMin * 60 * 1000);
-    const expireUnix = Math.floor(expiresAt.getTime() / 1000);
-    let inviteLink: string | null = null;
-    try {
-      const result = await clientBot.api.createChatInviteLink(checkoutChannelId, {
-        member_limit: 1, name: `Order #${orderId}`, expire_date: expireUnix,
-      });
-      inviteLink = result.invite_link;
-    } catch (err) {
-      console.error("[sendPaymentDetails] Failed to create invite link:", err);
-    }
-
-    if (inviteLink) {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: OrderStatus.INVITE_SENT,
-          inviteLink, inviteSentAt: now, inviteExpiresAt: expiresAt, channelMessageId,
-        },
-      });
-
-      try {
-        await clientBot.api.sendMessage(
-          order.user.tgUserId.toString(),
-          ClientTexts.orderApprovedWithInvite(orderId, inviteLink),
-          { parse_mode: "Markdown" },
-        );
-      } catch (err) {
-        console.error("[sendPaymentDetails] Failed to send invite to client:", err);
-      }
+      directMessageId = msg.message_id;
     } else {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { channelMessageId, status: OrderStatus.AWAITING_RECEIPT },
+      const msg = await clientBot.api.sendMessage(userTgId, paymentCaption, {
+        parse_mode: "Markdown",
       });
+      directMessageId = msg.message_id;
     }
-  } else {
-    const userTgId = order.user.tgUserId.toString();
-    let directMessageId: number | null = null;
-
+  } catch (err) {
+    console.error("[sendPaymentDetails] Failed to send direct payment details:", err);
     try {
-      if (checkoutImageInput) {
-        const msg = await clientBot.api.sendPhoto(userTgId, checkoutImageInput, {
-          caption: paymentCaption, parse_mode: "Markdown",
-        });
-        directMessageId = msg.message_id;
-      } else {
-        const msg = await clientBot.api.sendMessage(userTgId, paymentCaption, {
-          parse_mode: "Markdown",
-        });
-        directMessageId = msg.message_id;
-      }
-    } catch (err) {
-      console.error("[sendPaymentDetails] Failed to send direct payment details:", err);
+      const msg = await clientBot.api.sendMessage(userTgId, paymentCaption.replace(/[*_`\[]/g, ""));
+      directMessageId = msg.message_id;
+    } catch (err2) {
+      console.error("[sendPaymentDetails] Retry also failed:", err2);
+    }
+  }
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: OrderStatus.AWAITING_RECEIPT,
+      channelMessageId: directMessageId,
+      inviteSentAt: new Date(),
+    },
+  });
+
+  if (directMessageId) {
+    const deleteDelayMs = effectiveExpiryMin * 60 * 1000;
+    setTimeout(async () => {
       try {
-        const msg = await clientBot.api.sendMessage(userTgId, paymentCaption.replace(/[*_`\[]/g, ""));
-        directMessageId = msg.message_id;
-      } catch (err2) {
-        console.error("[sendPaymentDetails] Retry also failed:", err2);
+        await clientBot.api.deleteMessage(userTgId, directMessageId);
+      } catch (err) {
+        console.error(`[AUTO-DELETE] Failed to delete message ${directMessageId}:`, err);
       }
-    }
-
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        status: OrderStatus.AWAITING_RECEIPT,
-        channelMessageId: directMessageId,
-        inviteSentAt: new Date(),
-      },
-    });
-
-    if (directMessageId) {
-      const deleteDelayMs = effectiveExpiryMin * 60 * 1000;
-      setTimeout(async () => {
-        try {
-          await clientBot.api.deleteMessage(userTgId, directMessageId);
-        } catch (err) {
-          console.error(`[AUTO-DELETE] Failed to delete message ${directMessageId}:`, err);
-        }
-      }, deleteDelayMs);
-    }
+    }, deleteDelayMs);
   }
 }
 
@@ -303,9 +233,7 @@ async function processCheckout(
   notificationService?: NotificationService,
   clientBot?: Bot,
   managerBot?: Bot,
-  checkoutChannelId?: string,
   checkoutImageFileId?: string,
-  inviteExpiryMinutes?: number,
 ): Promise<void> {
   const orderService = new OrderService(prisma);
   const discountService = new (await import("../../services/discount-service.js")).DiscountService(prisma);
@@ -355,9 +283,7 @@ async function processCheckout(
         prisma,
         clientBot,
         managerBot,
-        checkoutChannelId,
         checkoutImageFileId,
-        inviteExpiryMinutes ?? 60,
       );
     }
 
@@ -386,9 +312,7 @@ async function continueCheckoutFlow(
   notificationService?: NotificationService,
   clientBot?: Bot,
   managerBot?: Bot,
-  checkoutChannelId?: string,
   checkoutImageFileId?: string,
-  inviteExpiryMinutes?: number,
 ): Promise<void> {
   // Refresh user data
   const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
@@ -422,7 +346,7 @@ async function continueCheckoutFlow(
 
   if (activeCart) {
     userSessions.delete(ctx.from!.id);
-    await processCheckout(ctx, updatedUser, activeCart.id, prisma, notificationService, clientBot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+    await processCheckout(ctx, updatedUser, activeCart.id, prisma, notificationService, clientBot, managerBot, checkoutImageFileId);
   } else {
     userSessions.delete(ctx.from!.id);
     await ctx.reply(ClientTexts.infoComplete(), {
@@ -464,7 +388,7 @@ async function showProfile(
  * Register all interactive handlers for client bot
  */
 export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): void {
-  const { prisma, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes } = deps;
+  const { prisma, managerBot, checkoutImageFileId } = deps;
   const notificationService = new NotificationService({ prisma, managerBot });
 
   // Global error handler to prevent crashes
@@ -575,7 +499,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         const updated = await prisma.user.findUnique({ where: { id: user.id } });
         if (updated) await showProfile(ctx, updated);
       } else {
-        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
       }
       return;
     }
@@ -616,7 +540,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         const updated = await prisma.user.findUnique({ where: { id: user.id } });
         if (updated) await showProfile(ctx, updated);
       } else {
-        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
       }
       return;
     }
@@ -646,7 +570,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         const updated = await prisma.user.findUnique({ where: { id: user.id } });
         if (updated) await showProfile(ctx, updated);
       } else {
-        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
       }
       return;
     }
@@ -747,7 +671,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         const updated = await prisma.user.findUnique({ where: { id: user.id } });
         if (updated) await showProfile(ctx, updated);
       } else {
-        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
       }
     }
   });
@@ -786,7 +710,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         const updated = await prisma.user.findUnique({ where: { id: user.id } });
         if (updated) await showProfile(ctx, updated);
       } else {
-        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
       }
     }
   });
@@ -1319,7 +1243,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       }
 
       // All info available — proceed directly to checkout
-      await processCheckout(ctx, user, cart.id, prisma, notificationService, bot, managerBot, checkoutChannelId, checkoutImageFileId, inviteExpiryMinutes);
+      await processCheckout(ctx, user, cart.id, prisma, notificationService, bot, managerBot, checkoutImageFileId);
       return;
     }
 

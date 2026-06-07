@@ -1,15 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
-import type { AnyBot } from "../telegram/bots.js";
-import { processSendInvitesBatch } from "../../jobs/send-invites.worker.js";
 import { expireIdleCarts } from "../../jobs/cleanup-carts.worker.js";
-import { processExpiredInvites } from "../../jobs/expire-invites.worker.js";
 
 export interface SchedulerDeps {
   prisma: PrismaClient;
-  clientBot: AnyBot;
-  checkoutChannelId?: string;
-  checkoutImageFileId?: string;
-  inviteExpiryMinutes: number;
 }
 
 export interface Scheduler {
@@ -47,23 +40,6 @@ function createGuardedJob(
 export function startScheduler(deps: SchedulerDeps): Scheduler {
   const timers: ReturnType<typeof setInterval>[] = [];
 
-  // ── Send invites: every 60 seconds ──
-  // Picks up APPROVED orders missing invite links (fallback for inline failures)
-  if (deps.checkoutChannelId) {
-    createGuardedJob("send-invites", async () => {
-      await processSendInvitesBatch(
-        {
-          prisma: deps.prisma,
-          botApi: deps.clientBot.api,
-          checkoutChannelId: deps.checkoutChannelId!,
-          checkoutImageFileId: deps.checkoutImageFileId,
-          inviteExpiryMinutes: deps.inviteExpiryMinutes,
-        },
-        {},
-      );
-    }, 60_000, timers);
-  }
-
   // ── Cleanup idle carts: every hour ──
   createGuardedJob("cleanup-carts", async () => {
     await expireIdleCarts(
@@ -71,17 +47,6 @@ export function startScheduler(deps: SchedulerDeps): Scheduler {
       { idleThresholdMs: 24 * 60 * 60 * 1000 },
     );
   }, 60 * 60 * 1000, timers);
-
-  // ── Expire invites: every 2 minutes ──
-  if (deps.checkoutChannelId) {
-    createGuardedJob("expire-invites", async () => {
-      await processExpiredInvites({
-        prisma: deps.prisma,
-        botApi: deps.clientBot.api,
-        checkoutChannelId: deps.checkoutChannelId!,
-      });
-    }, 2 * 60_000, timers);
-  }
 
   console.log("✓ Background scheduler started (setInterval-based)");
 

@@ -318,11 +318,8 @@ export const ManagerKeyboards = {
   },
 
   /** Settings menu */
-  settingsMenu: (hasImage: boolean, paymentMethod: "channel" | "direct" = "direct") => {
-    const methodLabel = paymentMethod === "channel" ? "📢 کانال" : "📩 مستقیم";
+  settingsMenu: (hasImage: boolean) => {
     const kb = new InlineKeyboard()
-      .text(`💳 روش پرداخت: ${methodLabel}`, "mgr:settings:paymethod")
-      .row()
       .text("🏦 شماره کارت", "mgr:settings:card")
       .row()
       .text("🚚 پیام ارسال", "mgr:settings:deliverymsg")

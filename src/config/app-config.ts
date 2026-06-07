@@ -9,9 +9,7 @@ export interface AppConfig {
   managerBotToken: string;
   courierBotToken: string;
   updatesMode: "webhook" | "polling";
-  checkoutChannelId?: string;
   checkoutImageFileId?: string;
-  inviteExpiryMinutes: number;
   webhookSecretToken?: string;
 }
 
@@ -25,9 +23,7 @@ const EnvSchema = z.object({
   MANAGER_BOT_TOKEN: z.string().min(1, "MANAGER_BOT_TOKEN is required"),
   COURIER_BOT_TOKEN: z.string().min(1, "COURIER_BOT_TOKEN is required"),
   UPDATES_MODE: z.enum(["auto", "webhook", "polling"]).optional().default("auto"),
-  CHECKOUT_CHANNEL_ID: z.string().optional(),
   CHECKOUT_IMAGE_FILE_ID: z.string().optional(),
-  INVITE_EXPIRY_MINUTES: z.string().optional().default("60"),
   WEBHOOK_SECRET_TOKEN: z.string().optional(),
 });
 
@@ -68,12 +64,7 @@ export function loadAppConfigFromEnv(): AppConfig {
     managerBotToken: env.MANAGER_BOT_TOKEN,
     courierBotToken: env.COURIER_BOT_TOKEN,
     updatesMode,
-    checkoutChannelId: env.CHECKOUT_CHANNEL_ID,
     checkoutImageFileId: env.CHECKOUT_IMAGE_FILE_ID,
-    inviteExpiryMinutes: (() => {
-      const parsed = Number(env.INVITE_EXPIRY_MINUTES);
-      return Math.max(1, Number.isFinite(parsed) && parsed > 0 ? parsed : 60);
-    })(),
     webhookSecretToken: env.WEBHOOK_SECRET_TOKEN,
   };
 }

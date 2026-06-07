@@ -22,18 +22,14 @@ async function main(): Promise<void> {
   registerInteractiveClientBot(clientBot, { 
     prisma, 
     managerBot,
-    checkoutChannelId: config.checkoutChannelId,
     checkoutImageFileId: config.checkoutImageFileId,
-    inviteExpiryMinutes: config.inviteExpiryMinutes,
   });
   registerInteractiveCourierBot(courierBot, { prisma, clientBot, managerBot });
   registerInteractiveManagerBot(managerBot, { 
     prisma, 
     clientBot,
     courierBot,
-    checkoutChannelId: config.checkoutChannelId,
     checkoutImageFileId: config.checkoutImageFileId,
-    inviteExpiryMinutes: config.inviteExpiryMinutes,
   });
 
   // Register bot command menus with Telegram
@@ -70,10 +66,6 @@ async function main(): Promise<void> {
 
   const scheduler: Scheduler = startScheduler({
     prisma,
-    clientBot,
-    checkoutChannelId: config.checkoutChannelId,
-    checkoutImageFileId: config.checkoutImageFileId,
-    inviteExpiryMinutes: config.inviteExpiryMinutes,
   });
 
   const app = buildServer(webhookHandlers, {

@@ -98,15 +98,6 @@ export class NotificationService {
     await safeSendMessage(bot.api, userTgId.toString(), text);
   }
 
-  /** Notify client that their order was approved (with invite link) */
-  async notifyClientOrderApproved(userTgId: bigint, orderId: number, inviteLink: string): Promise<void> {
-    const bot = this.deps.clientBot;
-    if (!bot) return;
-
-    const text = ClientTexts.orderApprovedWithInvite(orderId, inviteLink);
-    await safeSendMessage(bot.api, userTgId.toString(), text, { parse_mode: "Markdown" });
-  }
-
   /** Notify client that their receipt was approved */
   async notifyClientReceiptApproved(userTgId: bigint, orderId: number, etaText?: string): Promise<void> {
     const bot = this.deps.clientBot;
