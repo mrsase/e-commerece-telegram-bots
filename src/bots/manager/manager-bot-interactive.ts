@@ -2233,12 +2233,33 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
+      await ctx.deleteMessage();
+
+      // Show the receipt image so the manager can verify before approving
+      let etaMsg = ManagerTexts.enterEtaMessage();
+      if (clientBot && receipt.fileId) {
+        try {
+          const receiptInput = await crossBotFile(clientBot.api, clientBot.token, receipt.fileId);
+          await ctx.replyWithPhoto(receiptInput, {
+            caption: `🧾 *رسید سفارش #${receipt.orderId}*\n\n${etaMsg}`,
+            parse_mode: "Markdown",
+          });
+          managerSessions.set(ctx.from.id, {
+            state: "receipt:approve:eta",
+            data: { receiptId },
+          });
+          return;
+        } catch (err) {
+          console.error("[RECEIPT APPROVE] Failed to send receipt image:", err);
+        }
+      }
+
+      // Fallback: text-only ETA prompt
+      await ctx.reply(etaMsg);
       managerSessions.set(ctx.from.id, {
         state: "receipt:approve:eta",
         data: { receiptId },
       });
-      await ctx.deleteMessage();
-      await ctx.reply(ManagerTexts.enterEtaMessage());
       return;
     }
 
