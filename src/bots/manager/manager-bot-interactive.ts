@@ -1262,7 +1262,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ===========================================
     // ORDER DETAIL
     // ===========================================
-    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders")) {
+    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders") && !data.startsWith("mgr:order:location:")) {
       const orderId = safeId(parts[2]);
       const order = await prisma.order.findUnique({
         where: { id: orderId },
@@ -1332,12 +1332,39 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           .text("❌ رد رسید", `mgr:receipt:reject:${pendingReceipt.id}`)
           .row();
       }
+      if (u.locationLat != null && u.locationLng != null) {
+        detailKb.text("📍 مشاهده موقعیت", `mgr:order:location:${order.id}`).row();
+      }
       detailKb.text("« منو", "mgr:menu");
 
       await safeRender(ctx, detailText, {
         parse_mode: "Markdown",
         reply_markup: detailKb,
       });
+      return;
+    }
+
+    // ── SEND LOCATION — sends location pin to manager ──
+    if (data.startsWith("mgr:order:location:")) {
+      const orderId = safeId(parts[3]);
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { user: { select: { locationLat: true, locationLng: true, locationText: true } } },
+      });
+      if (!order) {
+        await answerCallback({ text: ManagerTexts.orderNotFound() });
+        return;
+      }
+      const u = order.user;
+      if (u.locationLat != null && u.locationLng != null) {
+        await answerCallback();
+        await ctx.replyWithLocation(u.locationLat, u.locationLng);
+      } else if (u.locationText) {
+        await answerCallback();
+        await ctx.reply(`📍 موقعیت مشتری: ${u.locationText}`);
+      } else {
+        await answerCallback({ text: "موقعیت مشتری ثبت نشده است." });
+      }
       return;
     }
 
