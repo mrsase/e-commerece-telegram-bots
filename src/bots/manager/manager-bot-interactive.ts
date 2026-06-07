@@ -476,7 +476,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       managerSessions.delete(ctx.from.id);
 
       await ctx.reply(ManagerTexts.receiptApproved(receipt.orderId), {
-        reply_markup: ManagerKeyboards.backToMenu(),
+        reply_markup: new InlineKeyboard()
+          .text("📋 مشاهده سفارش", `mgr:order:${receipt.orderId}`)
+          .text("« بازگشت به منو", "mgr:menu"),
       });
       return;
     }
