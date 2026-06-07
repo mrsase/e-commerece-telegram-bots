@@ -2,8 +2,9 @@ import type { Bot } from "grammy";
 import { InlineKeyboard } from "grammy";
 import type { PrismaClient } from "@prisma/client";
 import { safeSendMessage } from "../utils/safe-reply.js";
-import { ClientTexts, ManagerTexts } from "../i18n/index.js";
+import { ClientTexts } from "../i18n/index.js";
 import { formatPrice } from "../utils/format-price.js";
+import { escapeMarkdown } from "../utils/escape-markdown.js";
 
 export interface NotificationServiceDeps {
   prisma: PrismaClient;
@@ -16,13 +17,28 @@ export interface NotificationServiceDeps {
  * Centralized cross-bot notification service.
  * All inter-bot messaging goes through here.
  */
+export interface OrderItemInfo {
+  title: string;
+  qty: number;
+  lineTotal: number;
+}
+
 export class NotificationService {
   constructor(private readonly deps: NotificationServiceDeps) {}
 
   // ─── Notify managers ────────────────────────────────────
 
-  /** Notify all active managers about a new order */
-  async notifyManagersNewOrder(orderId: number, userLabel: string, grandTotal: number): Promise<void> {
+  /** Notify all active managers about a new order with full details */
+  async notifyManagersNewOrder(
+    orderId: number,
+    userName: string,
+    phone: string | null,
+    address: string | null,
+    subtotal: number,
+    discountTotal: number,
+    grandTotal: number,
+    items: OrderItemInfo[],
+  ): Promise<void> {
     const bot = this.deps.managerBot;
     if (!bot) return;
 
@@ -30,10 +46,29 @@ export class NotificationService {
       where: { isActive: true },
     });
 
-    const text = NotificationServiceTexts.newOrderForManager(orderId, userLabel, grandTotal);
+    const esc = escapeMarkdown;
+    let text = `🔔 *سفارش جدید #${orderId}*\n`;
+    text += `━━━━━━━━━━━━━━━\n`;
+    text += `👤 مشتری: ${esc(userName)}\n`;
+    text += `📱 تلفن: ${phone ? esc(phone) : '—'}\n`;
+    text += `🏠 آدرس: ${address ? esc(address) : '—'}\n\n`;
+    text += `*اقلام:*\n`;
+    for (const item of items) {
+      text += `  ${esc(item.title)} x${item.qty} = ${formatPrice(item.lineTotal)}\n`;
+    }
+    text += `\nجمع: ${formatPrice(subtotal)}\n`;
+    if (discountTotal > 0) text += `تخفیف: ${formatPrice(discountTotal)}\n`;
+    text += `*نهایی: ${formatPrice(grandTotal)}*\n`;
+
+    const keyboard = new InlineKeyboard()
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+
     for (const mgr of managers) {
       try {
-        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text);
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text, {
+          parse_mode: "Markdown",
+          reply_markup: keyboard,
+        });
       } catch (err) {
         console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about new order:`, err);
       }
@@ -66,7 +101,7 @@ export class NotificationService {
   }
 
   /** Notify all active managers about a new support message */
-  async notifyManagersNewSupportMessage(conversationId: number, userLabel: string): Promise<void> {
+  async notifyManagersNewSupportMessage(conversationId: number, userLabel: string, messageText: string): Promise<void> {
     const bot = this.deps.managerBot;
     if (!bot) return;
 
@@ -74,13 +109,20 @@ export class NotificationService {
       where: { isActive: true },
     });
 
-    const text = ManagerTexts.supportNewMessageNotification(conversationId, userLabel);
+    const text = `💬 *پیام جدید پشتیبانی*\n` +
+      `گفتگو #${conversationId}\n` +
+      `از: ${escapeMarkdown(userLabel)}\n\n` +
+      `${escapeMarkdown(messageText)}`;
+
     const keyboard = new InlineKeyboard()
-      .text("✍️ پاسخ به پیام", `mgr:support:reply:${conversationId}`);
+      .text("✍️ پاسخ", `mgr:support:reply:${conversationId}`);
 
     for (const mgr of managers) {
       try {
-        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text, { reply_markup: keyboard });
+        await safeSendMessage(bot.api, mgr.tgUserId.toString(), text, {
+          parse_mode: "Markdown",
+          reply_markup: keyboard,
+        });
       } catch (err) {
         console.error(`[Notification] Failed to notify manager ${mgr.tgUserId} about new support message:`, err);
       }

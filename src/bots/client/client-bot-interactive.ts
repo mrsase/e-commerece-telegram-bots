@@ -287,6 +287,25 @@ async function processCheckout(
       );
     }
 
+    // Notify managers about the new order
+    if (notificationService) {
+      const userLabel = user.firstName || user.username || `#${user.id}`;
+      await notificationService.notifyManagersNewOrder(
+        result.orderId,
+        userLabel,
+        user.phone,
+        user.address,
+        result.subtotal,
+        result.discountTotal,
+        result.grandTotal,
+        cart.items.map(item => ({
+          title: item.product.title,
+          qty: item.qty,
+          lineTotal: item.qty * item.unitPriceSnapshot,
+        })),
+      );
+    }
+
     // Set session to await receipt directly so user can upload photo right away
     userSessions.set(ctx.from!.id, { state: "awaiting_receipt", orderId: result.orderId });
   } catch (error) {
@@ -634,7 +653,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       // Notify managers
       const userLabel = user.username || user.firstName || `#${user.id}`;
-      await notificationService.notifyManagersNewSupportMessage(session.supportConversationId, userLabel);
+      await notificationService.notifyManagersNewSupportMessage(session.supportConversationId, userLabel, messageText);
       return;
     }
 
