@@ -1454,7 +1454,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const page = isValidStatus ? safeId(parts[3]) : safeId(parts[2]);
       const pageSize = 5;
 
-      const where = statusFilter ? { status: statusFilter } : {};
+      const where: Record<string, unknown> = statusFilter ? { status: statusFilter } : {};
+      if (!statusFilter) {
+        where.NOT = { events: { some: { eventType: "order_deleted" } } };
+      } else if (statusFilter === OrderStatus.CANCELLED) {
+        where.NOT = { events: { some: { eventType: "order_deleted" } } };
+      }
 
       const [orders, total] = await Promise.all([
         prisma.order.findMany({
@@ -1493,6 +1498,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         .text("💰 پرداخت شده", "mgr:allorders:PAID:0")
         .text("✅ تکمیل شده", "mgr:allorders:COMPLETED:0")
         .text("❌ لغو شده", "mgr:allorders:CANCELLED:0")
+        .text("🗑️ حذف شده‌ها", "mgr:deletedorders:0")
         .row();
 
       // Per-order detail buttons (3 per row)
@@ -1515,6 +1521,61 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
         reply_markup: allKb,
+      });
+      return;
+    }
+
+    // ===========================================
+    // DELETED ORDERS
+    // ===========================================
+    if (data.startsWith("mgr:deletedorders")) {
+      const page = safeId(parts[2]) || 0;
+      const pageSize = 5;
+
+      const where = {
+        status: OrderStatus.CANCELLED,
+        events: { some: { eventType: "order_deleted" } },
+      };
+
+      const [orders, total] = await Promise.all([
+        prisma.order.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          include: { user: { select: { username: true, firstName: true } } },
+          skip: page * pageSize,
+          take: pageSize,
+        }),
+        prisma.order.count({ where }),
+      ]);
+
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      let text = `🗑️ *سفارش‌های حذف شده*\n${total} سفارش.\n\n`;
+      if (orders.length === 0) {
+        text += "هیچ سفارش حذف شده‌ای یافت نشد.\n";
+      } else {
+        orders.forEach((o) => {
+          const userLabel = escapeMarkdown(o.user.username || o.user.firstName) || `کاربر #${o.userId}`;
+          text += `#${o.id} · ${userLabel} · ${formatPrice(o.grandTotal)}\n`;
+        });
+      }
+
+      const delKb = new InlineKeyboard();
+      orders.forEach((o, i) => {
+        delKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`);
+        if ((i + 1) % 3 === 0 && i < orders.length - 1) delKb.row();
+      });
+      if (orders.length > 0) delKb.row();
+
+      if (page > 0) delKb.text("« قبلی", `mgr:deletedorders:${page - 1}`);
+      delKb.text(`${page + 1}/${totalPages}`, "noop");
+      if (page < totalPages - 1) delKb.text("بعدی »", `mgr:deletedorders:${page + 1}`);
+      delKb.row();
+
+      delKb.text("📊 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
+
+      await safeRender(ctx, text, {
+        parse_mode: "Markdown",
+        reply_markup: delKb,
       });
       return;
     }
