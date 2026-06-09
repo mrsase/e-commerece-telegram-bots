@@ -1601,7 +1601,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       userOrders.forEach((o) => {
         userKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`).row();
       });
-      userKb.text("« کاربران", "mgr:users").text("« منو", "mgr:menu");
+      userKb.text("« کاربر", `mgr:user:${userId}`).text("« منو", "mgr:menu");
 
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
@@ -1844,7 +1844,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:users:search") {
       managerSessions.set(ctx.from.id, { state: "user:search" });
-      await safeRender(ctx, ManagerTexts.enterSearchQuery());
+      await safeRender(ctx, ManagerTexts.enterSearchQuery(), {
+        reply_markup: new InlineKeyboard()
+          .text("« کاربران", "mgr:users")
+          .text("« منو", "mgr:menu"),
+      });
       return;
     }
 
@@ -1976,7 +1980,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const userId = safeId(parts[3]);
       managerSessions.set(ctx.from.id, { state: "user:setscore", data: { userId } });
       await safeRender(ctx, ManagerTexts.enterUserScore(), {
-        reply_markup: ManagerKeyboards.backToMenu(),
+        reply_markup: new InlineKeyboard()
+          .text("« کاربر", `mgr:user:${userId}`)
+          .text("« منو", "mgr:menu"),
       });
       return;
     }
@@ -1992,7 +1998,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           ? `🎯 تخفیف فعلی این کاربر: ${current}%\n\nدرصد تخفیف جدید را وارد کنید (۰ = حذف تخفیف):`
           : ManagerTexts.enterUserDiscount(),
         {
-          reply_markup: ManagerKeyboards.backToMenu(),
+          reply_markup: new InlineKeyboard()
+            .text("« کاربر", `mgr:user:${userId}`)
+            .text("« منو", "mgr:menu"),
         }
       );
       return;
@@ -2384,7 +2392,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ManagerTexts.orderAnalytics(total, breakdown, revenue, todayOrders, todayRev, weekOrders, weekRev),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.backToMenu(),
+          reply_markup: new InlineKeyboard()
+            .text("« بازگشت به آمار", "mgr:analytics")
+            .text("« منو", "mgr:menu"),
         }
       );
       return;
@@ -2409,7 +2419,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ManagerTexts.userAnalytics(total, verified, active, blocked, newToday, newThisWeek),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.backToMenu(),
+          reply_markup: new InlineKeyboard()
+            .text("« بازگشت به آمار", "mgr:analytics")
+            .text("« منو", "mgr:menu"),
         }
       );
       return;
@@ -2445,7 +2457,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const refKb = new InlineKeyboard();
       refKb.text("🌳 مشاهده درخت معرفی‌ها", "mgr:analytics:referraltree").row();
-      refKb.text("« بازگشت به منو", "mgr:menu");
+      refKb.text("« بازگشت به آمار", "mgr:analytics").text("« منو", "mgr:menu");
 
       await safeRender(ctx, 
         ManagerTexts.referralAnalytics(

@@ -253,7 +253,7 @@ export const ManagerKeyboards = {
       kb.text(`${status} ${name}`, `mgr:user:${u.id}`).row();
     });
 
-    // Pagination
+    // Navigation
     if (totalPages > 1) {
       if (page > 0) kb.text("« قبلی", `mgr:users:list:${page - 1}`);
       kb.text(`${page + 1}/${totalPages}`, "noop");
@@ -261,7 +261,7 @@ export const ManagerKeyboards = {
       kb.row();
     }
 
-    kb.text("« بازگشت به منو", "mgr:menu");
+    kb.text("« کاربران", "mgr:users").text("« منو", "mgr:menu");
     return kb;
   },
 
@@ -288,7 +288,8 @@ export const ManagerKeyboards = {
       .row()
       .text("💬 ارسال پیام", `mgr:user:message:${userId}`)
       .row()
-      .text("« بازگشت به کاربران", "mgr:users:list");
+      .text("« کاربران", "mgr:users:list")
+      .text("« منو", "mgr:menu");
   },
 
   /** Referral management menu */
