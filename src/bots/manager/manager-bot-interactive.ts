@@ -2228,6 +2228,88 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+  /**
+   * Show product sales analytics page with stock summary + per-product breakdown.
+   */
+  async function showProductSalesPage(ctx: Context, prisma: PrismaClient, page: number): Promise<void> {
+    const pageSize = 5;
+
+    // Stock summary
+    const [total, active, outOfStock, lowStock] = await Promise.all([
+      prisma.product.count(),
+      prisma.product.count({ where: { isActive: true } }),
+      prisma.product.count({ where: { isActive: true, stock: 0 } }),
+      prisma.product.count({ where: { isActive: true, stock: { gt: 0, lt: 5, not: null } } }),
+    ]);
+    const inactive = total - active;
+
+    // Sales stats: aggregate OrderItem for PAID/COMPLETED orders by product
+    const paidStatuses = [OrderStatus.PAID, OrderStatus.COMPLETED];
+    const productStats = await prisma.orderItem.groupBy({
+      by: ['productId'],
+      where: { order: { status: { in: paidStatuses } } },
+      _sum: { qty: true, lineTotal: true },
+    });
+
+    // Fetch product titles
+    const productIds = productStats.map(s => s.productId);
+    const products = productIds.length > 0
+      ? await prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, title: true } })
+      : [];
+    const productMap = new Map(products.map(p => [p.id, p.title]));
+
+    // Build sorted list
+    const salesList: { title: string; qty: number; revenue: number }[] = productStats
+      .map(s => ({
+        title: productMap.get(s.productId) || `محصول #${s.productId}`,
+        qty: s._sum.qty || 0,
+        revenue: s._sum.lineTotal || 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const totalQty = salesList.reduce((sum, p) => sum + p.qty, 0);
+    const totalRevenue = salesList.reduce((sum, p) => sum + p.revenue, 0);
+
+    const totalPages = Math.max(1, Math.ceil(salesList.length / pageSize));
+    const paged = salesList.slice(page * pageSize, (page + 1) * pageSize);
+
+    // Build text: stock summary + sales breakdown
+    let text = `📦 *آمار محصولات*\n\n`;
+    text += `📊 *موجودی*\n`;
+    text += `   📦 کل: ${total}\n`;
+    text += `   ✅ فعال: ${active}\n`;
+    text += `   ❌ غیرفعال: ${inactive}\n`;
+    text += `   ⛔ ناموجود: ${outOfStock}\n`;
+    text += `   ⚠️ کم‌موجودی (<۵): ${lowStock}\n`;
+    text += `─────────────────\n\n`;
+    text += `📊 *فروش محصولات*\n`;
+    text += `   مجموع تعداد: ${totalQty}\n`;
+    text += `   مجموع درآمد: ${formatPrice(totalRevenue)}\n\n`;
+
+    if (paged.length === 0) {
+      text += "هنوز فروشی ثبت نشده.\n";
+    } else {
+      paged.forEach((p, i) => {
+        const rank = page * pageSize + i + 1;
+        text += `${rank}. ${escapeMarkdown(p.title)}\n`;
+        text += `   ❯ ${p.qty} عدد · ${formatPrice(p.revenue)}\n`;
+      });
+    }
+
+    // Build keyboard: pagination + back
+    const kb = new InlineKeyboard();
+    if (page > 0) kb.text("« قبلی", `mgr:analytics:products:page:${page - 1}`);
+    kb.text(`${page + 1}/${totalPages}`, "noop");
+    if (page < totalPages - 1) kb.text("بعدی »", `mgr:analytics:products:page:${page + 1}`);
+    kb.row();
+    kb.text("« بازگشت به منو", "mgr:menu");
+
+    await safeRender(ctx, text, {
+      parse_mode: "Markdown",
+      reply_markup: kb,
+    });
+  }
+
     // ===========================================
     // ANALYTICS
     // ===========================================
@@ -2334,23 +2416,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:analytics:products") {
-      const [total, active, outOfStock, lowStock] = await Promise.all([
-        prisma.product.count(),
-        prisma.product.count({ where: { isActive: true } }),
-        prisma.product.count({ where: { isActive: true, stock: 0 } }),
-        prisma.product.count({
-          where: { isActive: true, stock: { gt: 0, lt: 5, not: null } },
-        }),
-      ]);
-      const inactive = total - active;
-
-      await safeRender(ctx, 
-        ManagerTexts.productAnalytics(total, active, inactive, outOfStock, lowStock),
-        {
-          parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.backToMenu(),
-        }
-      );
+      const page = 0;
+      await showProductSalesPage(ctx, prisma, page);
+      return;
+    }
+    if (data.startsWith("mgr:analytics:products:page:")) {
+      const page = safeId(parts[3]);
+      await showProductSalesPage(ctx, prisma, page);
       return;
     }
 

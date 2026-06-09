@@ -295,6 +295,22 @@ export const ManagerTexts = {
     `❌ غیرفعال: ${inactive}\n` +
     `⛔ ناموجود: ${outOfStock}\n` +
     `⚠️ کم‌موجودی (<۵): ${lowStock}`,
+  productSalesAnalytics: (totalQty: number, totalRevenue: number, products: { title: string; qty: number; revenue: number }[]) => {
+    let text = `📦 *آمار فروش محصولات*\n\n`;
+    text += `📊 *جمع کل*\n`;
+    text += `   تعداد فروش: ${totalQty}\n`;
+    text += `   درآمد: ${formatPrice(totalRevenue)}\n`;
+    text += `─────────────────\n\n`;
+    if (products.length === 0) {
+      text += "هنوز فروشی ثبت نشده.\n";
+    } else {
+      products.forEach((p, i) => {
+        text += `${i + 1}. ${escapeMarkdown(p.title)}\n`;
+        text += `   ❯ ${p.qty} عدد · ${formatPrice(p.revenue)}\n`;
+      });
+    }
+    return text;
+  },
   referralAnalytics: (totalCodes: number, activeCodes: number, totalUses: number, referredUsers: number, avgUses: string, topReferrer: string | null) =>
     `🔗 *آمار معرفی*\n\n` +
     `📋 کل کدها: ${totalCodes}\n` +
