@@ -1646,6 +1646,30 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
+    // REPLY TO SUPPORT FROM NOTIFICATION
+    if (data.startsWith("client:support:reply:")) {
+      const convId = parseInt(parts[3]);
+      const conversation = await prisma.supportConversation.findUnique({
+        where: { id: convId },
+      });
+
+      if (!conversation || conversation.status === SupportConversationStatus.CLOSED) {
+        await ctx.answerCallbackQuery({ text: "این گفتگو بسته شده است.", show_alert: true });
+        return;
+      }
+
+      userSessions.set(ctx.from.id, {
+        state: "support_message",
+        supportConversationId: conversation.id,
+      });
+
+      await answerCallback();
+      await safeRender(ctx, ClientTexts.supportAskMessage(), {
+        reply_markup: ClientKeyboards.supportActions(conversation.id),
+      });
+      return;
+    }
+
     // NO-OP (for display-only buttons)
     if (data === "noop") {
       return;

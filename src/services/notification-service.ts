@@ -170,12 +170,14 @@ export class NotificationService {
   }
 
   /** Notify client about support reply from manager */
-  async notifyClientSupportReply(userTgId: bigint, replyText: string): Promise<void> {
+  async notifyClientSupportReply(userTgId: bigint, replyText: string, conversationId: number): Promise<void> {
     const bot = this.deps.clientBot;
     if (!bot) return;
 
     const text = ClientTexts.supportReplyFromManager(replyText);
-    await safeSendMessage(bot.api, userTgId.toString(), text);
+    const keyboard = new InlineKeyboard()
+      .text("✍️ پاسخ به پشتیبان", `client:support:reply:${conversationId}`);
+    await safeSendMessage(bot.api, userTgId.toString(), text, { reply_markup: keyboard });
   }
 
   /** Notify client that support conversation was closed */

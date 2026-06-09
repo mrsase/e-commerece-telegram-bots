@@ -754,7 +754,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         }),
       ]);
 
-      await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText);
+      await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText, conversation.id);
 
       managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.supportReplySent(), {
