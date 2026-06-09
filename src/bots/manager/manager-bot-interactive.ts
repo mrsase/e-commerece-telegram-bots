@@ -302,7 +302,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // RECEIPT REJECTION REASON
     if (session.state === "receipt:reject:reason") {
       const receiptId = session.data?.receiptId as number;
-      const reason = ctx.message.text === "/skip" ? null : ctx.message.text.trim();
+      const input = ctx.message.text.trim();
+
+      if (input === "/cancel") {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply(ManagerTexts.actionCancelled(), { reply_markup: ManagerKeyboards.backToMenu() });
+        return;
+      }
+
+      const reason = input === "/skip" ? null : input;
 
       // Atomically claim the receipt for rejection
       const claimed = await prisma.receipt.updateMany({
@@ -376,7 +384,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // RECEIPT APPROVAL — ETA text handler
     if (session.state === "receipt:approve:eta") {
       const receiptId = session.data?.receiptId as number;
-      const etaText = ctx.message.text.trim() === "/skip" ? undefined : ctx.message.text.trim();
+      const input = ctx.message.text.trim();
+
+      if (input === "/cancel") {
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply(ManagerTexts.actionCancelled(), { reply_markup: ManagerKeyboards.backToMenu() });
+        return;
+      }
+
+      const etaText = input === "/skip" ? undefined : input;
 
       const receipt = await prisma.receipt.findUnique({
         where: { id: receiptId },
@@ -2204,8 +2220,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         prisma.receipt.findMany({
           where: { reviewStatus: ReceiptReviewStatus.PENDING },
           include: { 
-            order: true, 
-            user: { select: { id: true, username: true, tgUserId: true } } 
+            order: { select: { grandTotal: true } },
+            user: { select: { id: true, username: true, firstName: true, tgUserId: true } },
           },
           orderBy: { submittedAt: "asc" },
           skip: page * pageSize,
@@ -2222,7 +2238,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
 
       const totalPages = Math.ceil(total / pageSize);
-      await safeRender(ctx, ManagerTexts.pendingReceiptsTitle(), {
+      let text = `🧾 *رسیدهای در انتظار بررسی* (${total} عدد)\n\n`;
+      receipts.forEach((r) => {
+        const name = escapeMarkdown(r.user.firstName || r.user.username) || `کاربر #${r.user.id}`;
+        const date = r.submittedAt.toISOString().split("T")[0];
+        text += `🆔 سفارش #${r.orderId} · ${name} · ${formatPrice(r.order.grandTotal)} · ${date}\n`;
+      });
+
+      await safeRender(ctx, text, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.receiptList(receipts, page, totalPages),
       });
@@ -2235,8 +2258,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const receipt = await prisma.receipt.findUnique({
         where: { id: receiptId },
         include: { 
-          order: true, 
-          user: { select: { id: true, username: true, phone: true, address: true, locationLat: true, locationLng: true, locationText: true } } 
+          order: { select: { id: true, grandTotal: true } },
+          user: { select: { id: true, username: true, firstName: true, phone: true, address: true, locationLat: true, locationLng: true, locationText: true } },
         },
       });
 
@@ -2245,12 +2268,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      const text = ManagerTexts.receiptDetails(
-        receipt.orderId,
-        receipt.user.id,
-        receipt.user.username,
-        receipt.submittedAt.toISOString().split('T')[0]
-      ) + "\n\n" + ManagerTexts.userContactInfo(
+      const esc = escapeMarkdown;
+      const name = esc(receipt.user.firstName || receipt.user.username) || `کاربر #${receipt.user.id}`;
+      let text = `🧾 *رسید سفارش #${receipt.orderId}*\n`;
+      text += `👤 ${name}\n`;
+      text += `💳 مبلغ سفارش: ${formatPrice(receipt.order.grandTotal)}\n`;
+      text += `📅 ارسال: ${receipt.submittedAt.toISOString().split('T')[0]}\n\n`;
+      text += ManagerTexts.userContactInfo(
         receipt.user.phone,
         receipt.user.address,
         receipt.user.locationLat,
@@ -2258,8 +2282,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         receipt.user.locationText
       );
 
-      // Send receipt image — file_id belongs to the client bot, so convert to URL
-      try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      // Send receipt image — file_id belongs to the client bot, so convert
       let receiptSent = false;
       if (clientBot) {
         try {
@@ -2267,18 +2290,17 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           await ctx.replyWithPhoto(receiptInput, {
             caption: text,
             parse_mode: "Markdown",
-            reply_markup: ManagerKeyboards.receiptActions(receiptId),
+            reply_markup: ManagerKeyboards.receiptActions(receiptId, receipt.order.id),
           });
           receiptSent = true;
         } catch (err) {
-          console.error("[RECEIPT VIEW] Failed to get receipt image URL from client bot:", err);
+          console.error("[RECEIPT VIEW] Failed to get receipt image from client bot:", err);
         }
       }
       if (!receiptSent) {
-        // Fallback: show text only
         await safeRender(ctx, text + "\n\n⚠️ تصویر رسید قابل نمایش نیست.", {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.receiptActions(receiptId),
+          reply_markup: ManagerKeyboards.receiptActions(receiptId, receipt.order.id),
         });
       }
       return;
@@ -2309,7 +2331,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           parse_mode: "Markdown",
           reply_markup: new InlineKeyboard()
             .text("✅ تأیید رسید", `mgr:receipt:approve:${receiptId}`)
-            .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`),
+            .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`)
+            .row()
+            .text("« لیست رسیدها", "mgr:receipts"),
         });
         await answerCallback();
       } catch (err) {
@@ -2332,13 +2356,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await ctx.deleteMessage();
-
       managerSessions.set(ctx.from.id, {
         state: "receipt:approve:eta",
         data: { receiptId },
       });
-      await ctx.reply(ManagerTexts.enterEtaMessage());
+
+      await answerCallback();
+      await ctx.reply(ManagerTexts.enterEtaMessage(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
       return;
     }
 
@@ -2349,8 +2375,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         state: "receipt:reject:reason", 
         data: { receiptId } 
       });
-      await ctx.deleteMessage();
-      await ctx.reply(ManagerTexts.enterRejectReason());
+      await answerCallback();
+      await ctx.reply(ManagerTexts.enterRejectReason(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
       return;
     }
 

@@ -377,14 +377,16 @@ export const ManagerKeyboards = {
       .text("❌ لغو", "mgr:menu");
   },
 
-  /** Receipt list for management */
-  receiptList: (receipts: { id: number; orderId: number; user: { username: string | null } }[], page: number = 0, totalPages: number = 1) => {
+  /** Receipt list for management — 2 receipts per row */
+  receiptList: (receipts: { id: number; orderId: number; user: { id: number; username: string | null } }[], page: number = 0, totalPages: number = 1) => {
     const kb = new InlineKeyboard();
 
-    receipts.forEach((r) => {
-      const name = r.user.username || `کاربر`;
-      kb.text(`🧾 سفارش #${r.orderId} - ${name}`, `mgr:receipt:view:${r.id}`).row();
+    receipts.forEach((r, i) => {
+      const name = r.user.username || `کاربر ${r.user.id}`;
+      kb.text(`👤 ${name}`, `mgr:receipt:view:${r.id}`);
+      if (i % 2 === 1) kb.row();
     });
+    if (receipts.length % 2 !== 0) kb.row();
 
     // Pagination
     if (totalPages > 1) {
@@ -398,11 +400,13 @@ export const ManagerKeyboards = {
     return kb;
   },
 
-  /** Receipt actions (approve/reject) */
-  receiptActions: (receiptId: number) => {
+  /** Receipt actions (approve/reject/view order) */
+  receiptActions: (receiptId: number, orderId: number) => {
     return new InlineKeyboard()
-      .text("✅ تأیید", `mgr:receipt:approve:${receiptId}`)
-      .text("❌ رد", `mgr:receipt:reject:${receiptId}`)
+      .text("✅ تأیید رسید", `mgr:receipt:approve:${receiptId}`)
+      .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`)
+      .row()
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
       .row()
       .text("« بازگشت به رسیدها", "mgr:receipts");
   },
