@@ -1127,9 +1127,86 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     // ===========================================
+    // CANCEL ORDER — Show confirmation
+    // ===========================================
+    if (data.startsWith("mgr:order:cancel:") && !data.startsWith("mgr:order:cancel:confirm:")) {
+      const orderId = safeId(parts[3]);
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      if (!order || order.status === OrderStatus.CANCELLED) {
+        await answerCallback({ text: "این سفارش قبلاً لغو شده است.", show_alert: true });
+        return;
+      }
+
+      const confirmKb = new InlineKeyboard()
+        .text("✅ بله، لغو شود", `mgr:order:cancel:confirm:${orderId}`)
+        .row()
+        .text("❌ خیر", `mgr:order:${orderId}`);
+
+      await safeRender(ctx, `⚠️ *آیا از لغو سفارش #${orderId} مطمئن هستید؟*\n\nوضعیت فعلی: ${orderStatusLabel(order.status)}\n\nاین اقدام قابل بازگشت نیست.`, {
+        parse_mode: "Markdown",
+        reply_markup: confirmKb,
+      });
+      return;
+    }
+
+    // ===========================================
+    // CANCEL ORDER — Execute
+    // ===========================================
+    if (data.startsWith("mgr:order:cancel:confirm:")) {
+      const orderId = safeId(parts[4]);
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { user: true },
+      });
+
+      if (!order) {
+        await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
+        return;
+      }
+
+      if (order.status === OrderStatus.CANCELLED) {
+        await answerCallback({ text: "این سفارش قبلاً لغو شده است.", show_alert: true });
+        return;
+      }
+
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          status: OrderStatus.CANCELLED,
+          events: {
+            create: {
+              actorType: "manager",
+              actorId: manager.id,
+              eventType: "order_cancelled",
+            },
+          },
+        },
+      });
+
+      // Notify client
+      try {
+        await clientBot?.api.sendMessage(
+          order.user.tgUserId.toString(),
+          `❌ سفارش #${orderId} توسط مدیریت لغو شد.`
+        );
+      } catch (err) {
+        console.error(`[CANCEL ORDER] Failed to notify client for order #${orderId}:`, err);
+      }
+
+      await answerCallback({ text: `✅ سفارش #${orderId} لغو شد.`, show_alert: true });
+
+      await safeRender(ctx, `✅ سفارش #${orderId} با موفقیت لغو شد.`, {
+        reply_markup: new InlineKeyboard()
+          .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
+          .text("« منو", "mgr:menu"),
+      });
+      return;
+    }
+
+    // ===========================================
     // ORDER DETAIL
     // ===========================================
-    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders") && !data.startsWith("mgr:order:location:")) {
+    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders") && !data.startsWith("mgr:order:location:") && !data.startsWith("mgr:order:cancel:")) {
       const orderId = safeId(parts[2]);
       const order = await prisma.order.findUnique({
         where: { id: orderId },
@@ -1201,6 +1278,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
       if (u.locationLat != null && u.locationLng != null) {
         detailKb.text("📍 مشاهده موقعیت", `mgr:order:location:${order.id}`).row();
+      }
+      if (order.status !== OrderStatus.CANCELLED) {
+        detailKb.text("❌ لغو سفارش", `mgr:order:cancel:${order.id}`).row();
       }
       detailKb.text("« منو", "mgr:menu");
 
