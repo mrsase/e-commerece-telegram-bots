@@ -2241,6 +2241,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
    */
   async function showProductSalesPage(ctx: Context, prisma: PrismaClient, page: number): Promise<void> {
     const pageSize = 5;
+    const now = new Date();
 
     // Stock summary
     const [total, active, outOfStock, lowStock] = await Promise.all([
@@ -2258,6 +2259,16 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       where: { order: { status: { in: paidStatuses } } },
       _sum: { qty: true, lineTotal: true },
     });
+
+    // Monthly sales stats
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthProductStats = await prisma.orderItem.groupBy({
+      by: ['productId'],
+      where: { order: { status: { in: paidStatuses }, createdAt: { gte: monthStart } } },
+      _sum: { qty: true, lineTotal: true },
+    });
+    const monthTotalQty = monthProductStats.reduce((s, p) => s + (p._sum.qty || 0), 0);
+    const monthTotalRevenue = monthProductStats.reduce((s, p) => s + (p._sum.lineTotal || 0), 0);
 
     // Fetch product titles
     const productIds = productStats.map(s => s.productId);
@@ -2290,7 +2301,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     text += `   ⛔ ناموجود: ${outOfStock}\n`;
     text += `   ⚠️ کم‌موجودی (<۵): ${lowStock}\n`;
     text += `─────────────────\n\n`;
-    text += `📊 *فروش محصولات*\n`;
+    text += `📅 *این ماه*\n`;
+    text += `   تعداد فروش: ${monthTotalQty}\n`;
+    text += `   درآمد: ${formatPrice(monthTotalRevenue)}\n\n`;
+    text += `📊 *فروش محصولات (کل)*\n`;
     text += `   مجموع تعداد: ${totalQty}\n`;
     text += `   مجموع درآمد: ${formatPrice(totalRevenue)}\n\n`;
 
@@ -2333,7 +2347,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const weekStart = new Date(todayStart);
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
       const paidStatuses = [OrderStatus.PAID, OrderStatus.COMPLETED];
 
@@ -2351,6 +2366,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         todayRevenueResult,
         weekOrders,
         weekRevenueResult,
+        monthOrders,
+        monthRevenueResult,
       ] = await Promise.all([
         prisma.order.count(),
         prisma.order.count({ where: { status: OrderStatus.AWAITING_MANAGER_APPROVAL } }),
@@ -2374,11 +2391,17 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           where: { status: { in: paidStatuses }, createdAt: { gte: weekStart } },
           _sum: { grandTotal: true },
         }),
+        prisma.order.count({ where: { createdAt: { gte: monthStart } } }),
+        prisma.order.aggregate({
+          where: { status: { in: paidStatuses }, createdAt: { gte: monthStart } },
+          _sum: { grandTotal: true },
+        }),
       ]);
 
       const revenue = revenueResult._sum.grandTotal || 0;
       const todayRev = todayRevenueResult._sum.grandTotal || 0;
       const weekRev = weekRevenueResult._sum.grandTotal || 0;
+      const monthRev = monthRevenueResult._sum.grandTotal || 0;
 
       const breakdown: Record<string, number> = {};
       breakdown[orderStatusLabel(OrderStatus.AWAITING_MANAGER_APPROVAL)] = awaitingManagerApproval;
@@ -2389,7 +2412,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       breakdown[orderStatusLabel(OrderStatus.CANCELLED)] = cancelled;
 
       await safeRender(ctx, 
-        ManagerTexts.orderAnalytics(total, breakdown, revenue, todayOrders, todayRev, weekOrders, weekRev),
+        ManagerTexts.orderAnalytics(total, breakdown, revenue, todayOrders, todayRev, weekOrders, weekRev, monthOrders, monthRev),
         {
           parse_mode: "Markdown",
           reply_markup: new InlineKeyboard()
@@ -2405,18 +2428,20 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const weekStart = new Date(todayStart);
       weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      const [total, verified, active, newToday, newThisWeek] = await Promise.all([
+      const [total, verified, active, newToday, newThisWeek, newThisMonth] = await Promise.all([
         prisma.user.count(),
         prisma.user.count({ where: { isVerified: true } }),
         prisma.user.count({ where: { isActive: true, isVerified: true } }),
         prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
         prisma.user.count({ where: { createdAt: { gte: weekStart } } }),
+        prisma.user.count({ where: { createdAt: { gte: monthStart } } }),
       ]);
       const blocked = total - active;
 
       await safeRender(ctx, 
-        ManagerTexts.userAnalytics(total, verified, active, blocked, newToday, newThisWeek),
+        ManagerTexts.userAnalytics(total, verified, active, blocked, newToday, newThisWeek, newThisMonth),
         {
           parse_mode: "Markdown",
           reply_markup: new InlineKeyboard()

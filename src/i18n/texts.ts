@@ -263,31 +263,39 @@ export const ManagerTexts = {
 
   // Analytics
   analyticsMenuTitle: () => "📊 *داشبورد آمار*\n\nهر کدام از بخش‌ها را انتخاب کنید:",
-  orderAnalytics: (total: number, statusBreakdown: Record<string, number>, revenue: number, todayOrders: number, todayRevenue: number, weekOrders: number, weekRevenue: number) => {
+  orderAnalytics: (total: number, statusBreakdown: Record<string, number>, revenue: number, todayOrders: number, todayRevenue: number, weekOrders: number, weekRevenue: number, monthOrders: number, monthRevenue: number) => {
     let text = `📦 *آمار سفارش‌ها*\n\n`;
-    text += `📊 *کل:* ${total}\n`;
+    text += `📊 *وضعیت‌ها*\n`;
     text += `─────────────────\n`;
     for (const [label, count] of Object.entries(statusBreakdown)) {
       if (count > 0) text += `${label}: ${count}\n`;
     }
-    text += `\n💰 *فروش:* ${formatPrice(revenue)}\n\n`;
+    text += `\n💰 *فروش کلی:* ${formatPrice(revenue)}\n\n`;
     text += `─────────────────\n`;
     text += `📅 *امروز*\n`;
     text += `   سفارش‌ها: ${todayOrders}\n`;
     text += `   فروش: ${formatPrice(todayRevenue)}\n\n`;
     text += `📅 *این هفته*\n`;
     text += `   سفارش‌ها: ${weekOrders}\n`;
-    text += `   فروش: ${formatPrice(weekRevenue)}`;
+    text += `   فروش: ${formatPrice(weekRevenue)}\n\n`;
+    text += `📅 *این ماه*\n`;
+    text += `   سفارش‌ها: ${monthOrders}\n`;
+    text += `   فروش: ${formatPrice(monthRevenue)}\n\n`;
+    text += `📅 *کل*\n`;
+    text += `   سفارش‌ها: ${total}\n`;
+    text += `   فروش: ${formatPrice(revenue)}`;
     return text;
   },
-  userAnalytics: (total: number, verified: number, active: number, blocked: number, newToday: number, newThisWeek: number) =>
+  userAnalytics: (total: number, verified: number, active: number, blocked: number, newToday: number, newThisWeek: number, newThisMonth: number) =>
     `👥 *آمار کاربران*\n\n` +
     `👤 کل کاربران: ${total}\n` +
     `✅ تأییدشده: ${verified}\n` +
     `🟢 فعال: ${active}\n` +
     `🚫 مسدود: ${blocked}\n` +
-    `\n📅 *امروز:* ${newToday} کاربر جدید\n` +
-    `📅 *این هفته:* ${newThisWeek} کاربر جدید`,
+    `─────────────────\n` +
+    `📅 *امروز:* ${newToday} کاربر جدید\n` +
+    `📅 *این هفته:* ${newThisWeek} کاربر جدید\n` +
+    `📅 *این ماه:* ${newThisMonth} کاربر جدید`,
   productAnalytics: (total: number, active: number, inactive: number, outOfStock: number, lowStock: number) =>
     `📦 *آمار محصولات*\n\n` +
     `📦 کل محصولات: ${total}\n` +
