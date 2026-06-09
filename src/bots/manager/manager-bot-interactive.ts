@@ -1235,17 +1235,23 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // ALL ORDERS WITH STATUS FILTER
+    // ===========================================
+    // ALL ORDERS WITH STATUS FILTER & PAGINATION
+    // ===========================================
+    // Callback data formats:
+    //   mgr:allorders                       -> no filter, page 0
+    //   mgr:allorders:1                     -> no filter, page 1
+    //   mgr:allorders:AWAITING_RECEIPT      -> filter, page 0
+    //   mgr:allorders:AWAITING_RECEIPT:2    -> filter, page 2
     if (data === "mgr:allorders" || data.startsWith("mgr:allorders:")) {
-      const rawStatus = parts[1] === "allorders" && parts[2] ? parts[2] : null;
-      // Validate status filter against the OrderStatus enum
-      const statusFilter = rawStatus && Object.values(OrderStatus).includes(rawStatus as OrderStatus)
-        ? rawStatus
-        : null;
-      const page = safeId(parts[3]);
+      // Parse: distinguish status enum values from page numbers
+      const rawParam = parts[2];
+      const isValidStatus = rawParam && Object.values(OrderStatus).includes(rawParam as OrderStatus);
+      const statusFilter = isValidStatus ? (rawParam as OrderStatus) : null;
+      const page = isValidStatus ? safeId(parts[3]) : safeId(parts[2]);
       const pageSize = 5;
 
-      const where = statusFilter ? { status: statusFilter as OrderStatus } : {};
+      const where = statusFilter ? { status: statusFilter } : {};
 
       const [orders, total] = await Promise.all([
         prisma.order.findMany({
@@ -1258,47 +1264,48 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         prisma.order.count({ where }),
       ]);
 
-      const totalPages = Math.ceil(total / pageSize);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-      let text = `📊 *همه سفارش‌ها* (${total} سفارش)\n`;
-      if (statusFilter) text += `فیلتر: ${orderStatusLabel(statusFilter as OrderStatus)}\n`;
-      text += "\n";
+      let text = `📊 *همه سفارش‌ها*`;
+      if (statusFilter) text += ` (فیلتر: ${orderStatusLabel(statusFilter)})`;
+      text += `\n${total} سفارش یافت شد.\n\n`;
 
       if (orders.length === 0) {
-        text += "سفارشی یافت نشد.\n";
+        text += "هیچ سفارشی با این فیلتر یافت نشد.\n";
       } else {
         orders.forEach((o) => {
-          const label = escapeMarkdown(o.user.username || o.user.firstName) || `#${o.userId}`;
-          text += `#${o.id} · ${label} · ${escapeMarkdown(orderStatusLabel(o.status))} · ${formatPrice(o.grandTotal)}\n`;
+          const userLabel = escapeMarkdown(o.user.username || o.user.firstName) || `کاربر #${o.userId}`;
+          text += `#${o.id} · ${userLabel} · ${escapeMarkdown(orderStatusLabel(o.status))} · ${formatPrice(o.grandTotal)}\n`;
         });
       }
 
       const allKb = new InlineKeyboard();
-      // Status filter buttons
+
+      // Status filter buttons (2 rows of 3)
       allKb
+        .text("⏳ در انتظار تأیید", "mgr:allorders:AWAITING_MANAGER_APPROVAL:0")
         .text("🧾 در انتظار رسید", "mgr:allorders:AWAITING_RECEIPT:0")
-        .text("✅ تأیید", "mgr:allorders:APPROVED:0")
+        .text("✅ تأیید شده", "mgr:allorders:APPROVED:0")
         .row()
-        .text("💰 پرداخت", "mgr:allorders:PAID:0")
-        .text("✅ تکمیل", "mgr:allorders:COMPLETED:0")
-        .row()
-        .text("❌ لغو", "mgr:allorders:CANCELLED:0")
-        .text("📋 همه", "mgr:allorders")
+        .text("💰 پرداخت شده", "mgr:allorders:PAID:0")
+        .text("✅ تکمیل شده", "mgr:allorders:COMPLETED:0")
+        .text("❌ لغو شده", "mgr:allorders:CANCELLED:0")
         .row();
 
-      // Pagination
-      if (totalPages > 1) {
-        const filterPart = statusFilter ? `:${statusFilter}` : "";
-        if (page > 0) allKb.text("« قبلی", `mgr:allorders${filterPart}:${page - 1}`);
-        allKb.text(`${page + 1}/${totalPages}`, "noop");
-        if (page < totalPages - 1) allKb.text("بعدی »", `mgr:allorders${filterPart}:${page + 1}`);
-        allKb.row();
-      }
-
-      // Per-order detail buttons
-      orders.forEach((o) => {
-        allKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`).row();
+      // Per-order detail buttons (3 per row)
+      orders.forEach((o, i) => {
+        allKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`);
+        if ((i + 1) % 3 === 0 && i < orders.length - 1) allKb.row();
       });
+      if (orders.length > 0) allKb.row();
+
+      // Pagination row with "All" button
+      const filterPart = statusFilter ? `:${statusFilter}` : "";
+      if (page > 0) allKb.text("« قبلی", `mgr:allorders${filterPart}:${page - 1}`);
+      allKb.text(`${page + 1}/${totalPages}`, "noop");
+      if (page < totalPages - 1) allKb.text("بعدی »", `mgr:allorders${filterPart}:${page + 1}`);
+      allKb.text("📋 همه", "mgr:allorders");
+      allKb.row();
 
       allKb.text("« منو", "mgr:menu");
 
