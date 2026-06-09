@@ -2088,20 +2088,66 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:analytics:orders") {
-      const [total, awaitingReceipt, completed] = await Promise.all([
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
+
+      const paidStatuses = [OrderStatus.PAID, OrderStatus.COMPLETED];
+
+      const [
+        total,
+        awaitingManagerApproval,
+        approved,
+        inviteSent,
+        awaitingReceipt,
+        paid,
+        completed,
+        cancelled,
+        revenueResult,
+        todayOrders,
+        todayRevenueResult,
+        weekOrders,
+        weekRevenueResult,
+      ] = await Promise.all([
         prisma.order.count(),
+        prisma.order.count({ where: { status: OrderStatus.AWAITING_MANAGER_APPROVAL } }),
+        prisma.order.count({ where: { status: OrderStatus.APPROVED } }),
+        prisma.order.count({ where: { status: OrderStatus.INVITE_SENT } }),
         prisma.order.count({ where: { status: OrderStatus.AWAITING_RECEIPT } }),
+        prisma.order.count({ where: { status: OrderStatus.PAID } }),
         prisma.order.count({ where: { status: OrderStatus.COMPLETED } }),
+        prisma.order.count({ where: { status: OrderStatus.CANCELLED } }),
+        prisma.order.aggregate({
+          where: { status: { in: paidStatuses } },
+          _sum: { grandTotal: true },
+        }),
+        prisma.order.count({ where: { createdAt: { gte: todayStart } } }),
+        prisma.order.aggregate({
+          where: { status: { in: paidStatuses }, createdAt: { gte: todayStart } },
+          _sum: { grandTotal: true },
+        }),
+        prisma.order.count({ where: { createdAt: { gte: weekStart } } }),
+        prisma.order.aggregate({
+          where: { status: { in: paidStatuses }, createdAt: { gte: weekStart } },
+          _sum: { grandTotal: true },
+        }),
       ]);
 
-      const revenueResult = await prisma.order.aggregate({
-        where: { status: { in: [OrderStatus.APPROVED, OrderStatus.INVITE_SENT, OrderStatus.COMPLETED] } },
-        _sum: { grandTotal: true },
-      });
       const revenue = revenueResult._sum.grandTotal || 0;
+      const todayRev = todayRevenueResult._sum.grandTotal || 0;
+      const weekRev = weekRevenueResult._sum.grandTotal || 0;
+
+      const breakdown: Record<string, number> = {};
+      breakdown[orderStatusLabel(OrderStatus.AWAITING_MANAGER_APPROVAL)] = awaitingManagerApproval;
+      breakdown[orderStatusLabel(OrderStatus.APPROVED)] = approved;
+      breakdown[orderStatusLabel(OrderStatus.AWAITING_RECEIPT)] = awaitingReceipt + inviteSent;
+      breakdown[orderStatusLabel(OrderStatus.PAID)] = paid;
+      breakdown[orderStatusLabel(OrderStatus.COMPLETED)] = completed;
+      breakdown[orderStatusLabel(OrderStatus.CANCELLED)] = cancelled;
 
       await safeRender(ctx, 
-        ManagerTexts.orderAnalytics(total, awaitingReceipt, completed, revenue),
+        ManagerTexts.orderAnalytics(total, breakdown, revenue, todayOrders, todayRev, weekOrders, weekRev),
         {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.backToMenu(),
@@ -2111,17 +2157,22 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:analytics:users") {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
 
-      const [total, active, newToday] = await Promise.all([
+      const [total, verified, active, newToday, newThisWeek] = await Promise.all([
         prisma.user.count(),
+        prisma.user.count({ where: { isVerified: true } }),
         prisma.user.count({ where: { isActive: true, isVerified: true } }),
-        prisma.user.count({ where: { createdAt: { gte: today } } }),
+        prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
+        prisma.user.count({ where: { createdAt: { gte: weekStart } } }),
       ]);
+      const blocked = total - active;
 
       await safeRender(ctx, 
-        ManagerTexts.userAnalytics(total, active, newToday),
+        ManagerTexts.userAnalytics(total, verified, active, blocked, newToday, newThisWeek),
         {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.backToMenu(),
@@ -2131,17 +2182,18 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:analytics:products") {
-      const [total, active] = await Promise.all([
+      const [total, active, outOfStock, lowStock] = await Promise.all([
         prisma.product.count(),
         prisma.product.count({ where: { isActive: true } }),
+        prisma.product.count({ where: { isActive: true, stock: 0 } }),
+        prisma.product.count({
+          where: { isActive: true, stock: { gt: 0, lt: 5, not: null } },
+        }),
       ]);
-
-      const lowStock = await prisma.product.count({
-        where: { isActive: true, stock: { lt: 10, not: null } },
-      });
+      const inactive = total - active;
 
       await safeRender(ctx, 
-        ManagerTexts.productAnalytics(total, active, lowStock),
+        ManagerTexts.productAnalytics(total, active, inactive, outOfStock, lowStock),
         {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.backToMenu(),
@@ -2151,11 +2203,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:analytics:referrals" || data === "mgr:referrals:stats") {
-      const [totalCodes, totalUsesResult] = await Promise.all([
+      const [totalCodes, activeCodes, totalUsesResult, referredUsers] = await Promise.all([
         prisma.referralCode.count(),
+        prisma.referralCode.count({ where: { isActive: true } }),
         prisma.referralCode.aggregate({ _sum: { usedCount: true } }),
+        prisma.user.count({ where: { referredById: { not: null } } }),
       ]);
       const totalUses = totalUsesResult._sum.usedCount || 0;
+      const avgUses = totalCodes > 0 ? (totalUses / totalCodes).toFixed(1) : "0";
 
       // Find top referrer
       const topReferrer = await prisma.referralCode.findFirst({
@@ -2171,7 +2226,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await safeRender(ctx, 
         ManagerTexts.referralAnalytics(
           totalCodes,
+          activeCodes,
           totalUses,
+          referredUsers,
+          avgUses,
           topReferrer?.createdByUser?.username || null
         ),
         {

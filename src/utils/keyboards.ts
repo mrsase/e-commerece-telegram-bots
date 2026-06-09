@@ -307,11 +307,9 @@ export const ManagerKeyboards = {
   analyticsMenu: () => {
     return new InlineKeyboard()
       .text("📦 آمار سفارش‌ها", "mgr:analytics:orders")
-      .row()
       .text("👥 آمار کاربران", "mgr:analytics:users")
       .row()
       .text("📦 آمار محصولات", "mgr:analytics:products")
-      .row()
       .text("🔗 آمار معرفی", "mgr:analytics:referrals")
       .row()
       .text("« بازگشت به منو", "mgr:menu");

@@ -262,15 +262,46 @@ export const ManagerTexts = {
   enterReferralMaxUses: () => "حداکثر تعداد استفاده را وارد کنید:",
 
   // Analytics
-  analyticsMenuTitle: () => "📊 *داشبورد آمار*",
-  orderAnalytics: (total: number, awaitingReceipt: number, completed: number, revenue: number) =>
-    `📦 *آمار سفارش‌ها*\n\nکل سفارش‌ها: ${total}\nدر انتظار رسید: ${awaitingReceipt}\nتکمیل‌شده: ${completed}\nجمع فروش: ${formatPrice(revenue)}`,
-  userAnalytics: (total: number, active: number, newToday: number) =>
-    `👥 *آمار کاربران*\n\nکل کاربران: ${total}\nکاربران فعال: ${active}\nکاربران امروز: ${newToday}`,
-  productAnalytics: (total: number, active: number, lowStock: number) =>
-    `📦 *آمار محصولات*\n\nکل محصولات: ${total}\nفعال: ${active}\nکم‌موجودی: ${lowStock}`,
-  referralAnalytics: (totalCodes: number, totalUses: number, topReferrer: string | null) =>
-    `🔗 *آمار معرفی*\n\nکل کدها: ${totalCodes}\nکل استفاده: ${totalUses}\nبهترین معرف: ${topReferrer || '—'}`,
+  analyticsMenuTitle: () => "📊 *داشبورد آمار*\n\nهر کدام از بخش‌ها را انتخاب کنید:",
+  orderAnalytics: (total: number, statusBreakdown: Record<string, number>, revenue: number, todayOrders: number, todayRevenue: number, weekOrders: number, weekRevenue: number) => {
+    let text = `📦 *آمار سفارش‌ها*\n\n`;
+    text += `📊 کل سفارش‌ها: ${total}\n`;
+    text += `─────────────────\n`;
+    for (const [label, count] of Object.entries(statusBreakdown)) {
+      text += `${label}: ${count}\n`;
+    }
+    text += `\n💰 *جمع فروش (پرداخت‌شده):* ${formatPrice(revenue)}\n`;
+    text += `\n📅 *امروز*\n`;
+    text += `   سفارش‌ها: ${todayOrders}\n`;
+    text += `   فروش: ${formatPrice(todayRevenue)}\n`;
+    text += `\n📅 *این هفته*\n`;
+    text += `   سفارش‌ها: ${weekOrders}\n`;
+    text += `   فروش: ${formatPrice(weekRevenue)}`;
+    return text;
+  },
+  userAnalytics: (total: number, verified: number, active: number, blocked: number, newToday: number, newThisWeek: number) =>
+    `👥 *آمار کاربران*\n\n` +
+    `👤 کل کاربران: ${total}\n` +
+    `✅ تأییدشده: ${verified}\n` +
+    `🟢 فعال: ${active}\n` +
+    `🚫 مسدود: ${blocked}\n` +
+    `\n📅 *امروز:* ${newToday} کاربر جدید\n` +
+    `📅 *این هفته:* ${newThisWeek} کاربر جدید`,
+  productAnalytics: (total: number, active: number, inactive: number, outOfStock: number, lowStock: number) =>
+    `📦 *آمار محصولات*\n\n` +
+    `📦 کل محصولات: ${total}\n` +
+    `✅ فعال: ${active}\n` +
+    `❌ غیرفعال: ${inactive}\n` +
+    `⛔ ناموجود: ${outOfStock}\n` +
+    `⚠️ کم‌موجودی (<۵): ${lowStock}`,
+  referralAnalytics: (totalCodes: number, activeCodes: number, totalUses: number, referredUsers: number, avgUses: string, topReferrer: string | null) =>
+    `🔗 *آمار معرفی*\n\n` +
+    `📋 کل کدها: ${totalCodes}\n` +
+    `✅ کدهای فعال: ${activeCodes}\n` +
+    `📊 کل استفاده: ${totalUses}\n` +
+    `👥 کاربران معرفی‌شده: ${referredUsers}\n` +
+    `📈 میانگین استفاده: ${avgUses}\n` +
+    `🏆 بهترین معرف: ${topReferrer || '—'}`,
 
   // Confirmations
   confirmDelete: (item: string) => `⚠️ آیا از حذف ${item} مطمئن هستید؟`,
