@@ -69,9 +69,9 @@ export const ClientTexts = {
 
   // Checkout
   orderSubmitted: (orderId: number, grandTotal: number) =>
-    `✅ سفارش شما ثبت شد! شماره: ${orderId}، مبلغ: ${formatPrice(grandTotal)}.`,
+    `✅ سفارش شما ثبت شد! شماره: ${orderId}، مبلغ: ${formatPrice(grandTotal)}.\n\n📌 تمام پیام‌های مربوط به سفارش شما از طریق همین ربات ارسال می‌شود. لطفاً به پیام‌های ربات توجه داشته باشید.`,
   orderSubmittedWithDiscount: (orderId: number, grandTotal: number, subtotal: number, discount: number) =>
-    `✅ سفارش شما ثبت شد! شماره: ${orderId}\n\n💰 مبلغ بدون تخفیف: ${formatPrice(subtotal)}\n🎁 تخفیف ویژه: ${formatPrice(discount)}-\n💳 مبلغ نهایی: ${formatPrice(grandTotal)}\n\nاین تخفیف توسط مدیریت برای شما اعمال شده است.`,
+    `✅ سفارش شما ثبت شد! شماره: ${orderId}\n\n💰 مبلغ بدون تخفیف: ${formatPrice(subtotal)}\n🎁 تخفیف ویژه: ${formatPrice(discount)}-\n💳 مبلغ نهایی: ${formatPrice(grandTotal)}\n\nاین تخفیف توسط مدیریت برای شما اعمال شده است.\n\n📌 تمام پیام‌های مربوط به سفارش شما از طریق همین ربات ارسال می‌شود. لطفاً به پیام‌های ربات توجه داشته باشید.`,
   outOfStock: () => "متأسفانه برخی اقلام موجود نیستند. لطفاً سبد خرید را اصلاح کنید.",
   checkoutError: () => "ثبت سفارش با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید.",
 
@@ -128,7 +128,7 @@ export const ClientTexts = {
   sendReceiptPrompt: () => "📸 لطفاً عکس رسید پرداخت را ارسال کنید:",
   receiptReceived: () => "✅ رسید دریافت شد. مدیر به‌زودی بررسی می‌کند.",
   receiptApproved: (orderId: number, etaText?: string) =>
-    `✅ رسید سفارش #${orderId} تأیید شد.${etaText ? `\n\n${etaText}` : ''}`,
+    `✅ رسید سفارش #${orderId} تأیید شد.${etaText ? `\n\n${etaText}` : ''}\n\n📌 پیگیری و ارسال سفارش شما از طریق همین ربات انجام می‌شود. لطفاً منتظر پیام‌های بعدی باشید.`,
   receiptRejected: (orderId: number, reason?: string) => 
     `❌ رسید سفارش #${orderId} تأیید نشد.${reason ? `\n\nعلت: ${reason}` : ''}\n\nلطفاً یک عکس جدید از رسید ارسال کنید.`,
   noActiveOrderForReceipt: () => "❌ سفارشی که منتظر رسید باشد ندارید.",
@@ -383,5 +383,6 @@ export const ChannelTexts = {
     (cardNumber ? `🏦 شماره کارت: \`${cardNumber}\`\n\n` : '') +
     `لطفاً مبلغ فوق را به شماره کارت ذکر شده واریز کنید ` +
     `و سپس عکس رسید را در ربات فروشگاه ارسال نمایید.\n\n` +
-    `⏳ این پیام پس از ثبت رسید یا اتمام مهلت پرداخت حذف خواهد شد.`,
+    `⏳ این پیام پس از ثبت رسید یا اتمام مهلت پرداخت حذف خواهد شد.\n\n` +
+    `📌 تمام پیام‌های مربوط به سفارش شما از طریق همین ربات ارسال می‌شود. لطفاً به پیام‌های ربات توجه داشته باشید.`,
 };
