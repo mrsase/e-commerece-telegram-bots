@@ -98,7 +98,7 @@ function buildOrderDetailText(order: {
   text += `تلفن: ${esc(u.phone) || "-"}\n`;
   text += `آدرس: ${esc(u.address) || "-"}\n`;
   if (u.locationLat != null) text += `📍 موقعیت ثبت شده\n`;
-  else if (u.locationText) text += `📍 موقعیت: ${u.locationText}\n`;
+  else if (u.locationText) text += `📍 موقعیت: ${esc(u.locationText)}\n`;
   text += "\n";
 
   // Items
@@ -112,13 +112,13 @@ function buildOrderDetailText(order: {
 
   // Receipts
   if (order.receipts.length > 0) {
-    text += `\n🧾 رسیدها: ${order.receipts.length} عدد (آخرین: ${receiptStatusLabel(order.receipts[0].reviewStatus)})\n`;
+    text += `\n🧾 رسیدها: ${order.receipts.length} عدد (آخرین: ${esc(receiptStatusLabel(order.receipts[0].reviewStatus))})\n`;
   }
 
   // Delivery
   if (order.delivery) {
     const d = order.delivery;
-    text += `\n🚚 ارسال: ${deliveryStatusLabel(d.status)}`;
+    text += `\n🚚 ارسال: ${esc(deliveryStatusLabel(d.status))}`;
     if (d.assignedCourier) text += ` (پیک: @${esc(d.assignedCourier.username) || d.assignedCourier.id})`;
     text += "\n";
   }
@@ -127,7 +127,7 @@ function buildOrderDetailText(order: {
   if (order.events.length > 0) {
     text += `\n📋 *تاریخچه:*\n`;
     order.events.forEach((e) => {
-      text += `  ${e.createdAt.toISOString().split("T")[0]} · ${eventTypeLabel(e.eventType)}\n`;
+      text += `  ${e.createdAt.toISOString().split("T")[0]} · ${esc(eventTypeLabel(e.eventType))}\n`;
     });
   }
 
@@ -963,7 +963,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       let text = "🧾 *سفارش‌های دارای رسید در انتظار:*\n\n";
       receipts.forEach((r) => {
         const label = r.user.username || r.user.firstName || `#${r.user.id}`;
-        text += `سفارش #${r.orderId} - ${label} - ${formatPrice(r.order.grandTotal)}\n`;
+        text += `سفارش #${r.orderId} - ${escapeMarkdown(label)} - ${formatPrice(r.order.grandTotal)}\n`;
       });
 
       const kb = new InlineKeyboard();
@@ -1588,7 +1588,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       const label = targetUser?.username || targetUser?.firstName || `#${userId}`;
 
-      let text = `📦 *سفارش‌های ${label}*\n\n`;
+      let text = `📦 *سفارش‌های ${escapeMarkdown(label)}*\n\n`;
       if (userOrders.length === 0) {
         text += "سفارشی یافت نشد.\n";
       } else {
@@ -1629,7 +1629,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         select: { id: true, username: true, firstName: true },
       });
 
-      let text = `🔗 *معرفی‌های ${label}*\n\n`;
+      let text = `🔗 *معرفی‌های ${escapeMarkdown(label)}*\n\n`;
 
       if (referralCodes.length > 0) {
         text += "*کدهای معرفی:*\n";
@@ -1640,7 +1640,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       text += `\n*کاربران معرفی شده:* ${referredUsers.length}\n`;
       referredUsers.forEach((u) => {
-        text += `  ${u.username || u.firstName || `#${u.id}`}\n`;
+        text += `  ${escapeMarkdown(u.username || u.firstName || `#${u.id}`)}\n`;
       });
 
       await safeRender(ctx, text, {
@@ -2218,7 +2218,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       codes.forEach((c) => {
         const creator = c.createdByUser?.username || (c.createdByManager ? 'مدیر' : 'نامشخص');
         const status = c.isActive ? "✅" : "❌";
-        text += `${status} \`${c.code}\` - توسط ${creator} - ${c.usedCount}/${c.maxUses || '∞'} استفاده\n`;
+        text += `${status} \`${c.code}\` - توسط ${escapeMarkdown(creator)} - ${c.usedCount}/${c.maxUses || '∞'} استفاده\n`;
       });
 
       await safeRender(ctx, text, {
@@ -2382,7 +2382,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           totalUses,
           referredUsers,
           avgUses,
-          topReferrer?.createdByUser?.username || null
+          topReferrer?.createdByUser?.username ? escapeMarkdown(topReferrer.createdByUser.username) : null
         ),
         {
           parse_mode: "Markdown",
@@ -2652,14 +2652,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      const userLabel = conversation.user.username || conversation.user.firstName || `کاربر #${conversation.user.id}`;
+      const userLabel = escapeMarkdown(conversation.user.username || conversation.user.firstName || `کاربر #${conversation.user.id}`);
       let convText = `💬 *گفتگوی پشتیبانی #${convId}*\nکاربر: ${userLabel}\n\n`;
 
       if (conversation.messages.length > 0) {
         const sorted = [...conversation.messages].reverse();
         sorted.forEach((m) => {
           const sender = m.senderType === SupportSenderType.USER ? "کاربر" : "مدیر";
-          convText += `*${sender}:* ${m.text}\n\n`;
+          convText += `*${sender}:* ${escapeMarkdown(m.text)}\n\n`;
         });
       } else {
         convText += "هنوز پیامی ارسال نشده.\n";
