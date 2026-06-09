@@ -1289,9 +1289,88 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     // ===========================================
+    // DELETE ORDER — Show confirmation
+    // ===========================================
+    if (data.startsWith("mgr:order:delete:") && !data.startsWith("mgr:order:delete:confirm:")) {
+      const orderId = safeId(parts[3]);
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      if (!order || order.status === OrderStatus.CANCELLED) {
+        await answerCallback({ text: "این سفارش قبلاً لغو شده است.", show_alert: true });
+        return;
+      }
+
+      const confirmKb = new InlineKeyboard()
+        .text("✅ بله، حذف شود", `mgr:order:delete:confirm:${orderId}`)
+        .row()
+        .text("❌ خیر", `mgr:order:${orderId}`);
+
+      await safeRender(ctx, `⚠️ *آیا از حذف سفارش #${orderId} مطمئن هستید؟*\n\nوضعیت فعلی: ${orderStatusLabel(order.status)}\n\nاین اقدام قابل بازگشت نیست.`, {
+        parse_mode: "Markdown",
+        reply_markup: confirmKb,
+      });
+      return;
+    }
+
+    // ===========================================
+    // DELETE ORDER — Execute
+    // ===========================================
+    if (data.startsWith("mgr:order:delete:confirm:")) {
+      const orderId = safeId(parts[4]);
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { user: true },
+      });
+
+      if (!order) {
+        await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
+        return;
+      }
+
+      if (order.status === OrderStatus.CANCELLED) {
+        await answerCallback({ text: "این سفارش قبلاً لغو شده است.", show_alert: true });
+        return;
+      }
+
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          status: OrderStatus.CANCELLED,
+          events: {
+            create: {
+              actorType: "manager",
+              actorId: manager.id,
+              eventType: "order_deleted",
+            },
+          },
+        },
+      });
+
+      // Notify client
+      try {
+        await clientBot?.api.sendMessage(
+          order.user.tgUserId.toString(),
+          `❌ سفارش #${orderId} توسط مدیریت حذف شد.`
+        );
+      } catch (err) {
+        console.error(`[DELETE ORDER] Failed to notify client for order #${orderId}:`, err);
+      }
+
+      await answerCallback({ text: `✅ سفارش #${orderId} حذف شد.`, show_alert: true });
+
+      await safeRender(ctx, `✅ سفارش #${orderId} با موفقیت حذف شد.`, {
+        reply_markup: new InlineKeyboard()
+          .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
+          .text("📊 همه سفارش‌ها", "mgr:allorders")
+          .row()
+          .text("« منو", "mgr:menu"),
+      });
+      return;
+    }
+
+    // ===========================================
     // ORDER DETAIL
     // ===========================================
-    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders") && !data.startsWith("mgr:order:location:") && !data.startsWith("mgr:order:cancel:")) {
+    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders") && !data.startsWith("mgr:order:location:") && !data.startsWith("mgr:order:cancel:") && !data.startsWith("mgr:order:delete:")) {
       const orderId = safeId(parts[2]);
       const order = await prisma.order.findUnique({
         where: { id: orderId },
@@ -1321,8 +1400,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       if (order.user.locationLat != null && order.user.locationLng != null) {
       }
       if (order.status !== OrderStatus.CANCELLED) {
-        const isCompleted = order.status === OrderStatus.COMPLETED;
-        detailKb.text(isCompleted ? "❌ حذف سفارش" : "❌ لغو سفارش", `mgr:order:cancel:${order.id}`).row();
+        detailKb
+          .text("❌ لغو سفارش", `mgr:order:cancel:${order.id}`)
+          .text("🗑️ حذف سفارش", `mgr:order:delete:${order.id}`)
+          .row();
       }
       detailKb.text("📊 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
 
