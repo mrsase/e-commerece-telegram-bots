@@ -54,7 +54,7 @@ interface ManagerBotDeps {
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
 import { NotificationService } from "../../services/notification-service.js";
-import { orderStatusLabel } from "../../utils/order-status.js";
+import { orderStatusLabel, eventTypeLabel, receiptStatusLabel, deliveryStatusLabel } from "../../utils/order-status.js";
 import { ReferralAnalyticsService, formatReferralTree } from "../../services/referral-analytics-service.js";
 import { safeRender } from "../../utils/safe-reply.js";
 import { escapeMarkdown } from "../../utils/escape-markdown.js";
@@ -73,6 +73,65 @@ async function getManager(ctx: Context, prisma: PrismaClient): Promise<Manager |
 
   if (!manager || !manager.isActive) return null;
   return manager;
+}
+
+/**
+ * Build a formatted order detail text with Persian labels for all statuses.
+ */
+function buildOrderDetailText(order: {
+  id: number; status: OrderStatus; createdAt: Date;
+  subtotal: number; discountTotal: number; grandTotal: number;
+  user: { firstName: string | null; username: string | null; phone: string | null; address: string | null; locationLat: number | null; locationLng: number | null; locationText: string | null };
+  items: { product: { title: string }; qty: number; lineTotal: number }[];
+  receipts: { reviewStatus: string }[];
+  delivery: { status: string; assignedCourier: { username: string | null; id: number } | null } | null;
+  events: { createdAt: Date; eventType: string }[];
+}): string {
+  const esc = escapeMarkdown;
+  let text = `📦 *سفارش #${order.id}*\n`;
+  text += `وضعیت: ${esc(orderStatusLabel(order.status))}\n`;
+  text += `تاریخ: ${order.createdAt.toISOString().split("T")[0]}\n\n`;
+
+  // User info
+  const u = order.user;
+  text += `*مشتری:* ${esc(u.firstName)} (@${esc(u.username)})\n`;
+  text += `تلفن: ${esc(u.phone) || "-"}\n`;
+  text += `آدرس: ${esc(u.address) || "-"}\n`;
+  if (u.locationLat != null) text += `📍 موقعیت ثبت شده\n`;
+  else if (u.locationText) text += `📍 موقعیت: ${u.locationText}\n`;
+  text += "\n";
+
+  // Items
+  text += `*اقلام:*\n`;
+  order.items.forEach((item) => {
+    text += `  ${esc(item.product.title)} x${item.qty} = ${formatPrice(item.lineTotal)}\n`;
+  });
+  text += `\nجمع: ${formatPrice(order.subtotal)}\n`;
+  if (order.discountTotal > 0) text += `تخفیف: ${formatPrice(order.discountTotal)}\n`;
+  text += `*نهایی: ${formatPrice(order.grandTotal)}*\n`;
+
+  // Receipts
+  if (order.receipts.length > 0) {
+    text += `\n🧾 رسیدها: ${order.receipts.length} عدد (آخرین: ${receiptStatusLabel(order.receipts[0].reviewStatus)})\n`;
+  }
+
+  // Delivery
+  if (order.delivery) {
+    const d = order.delivery;
+    text += `\n🚚 ارسال: ${deliveryStatusLabel(d.status)}`;
+    if (d.assignedCourier) text += ` (پیک: @${esc(d.assignedCourier.username) || d.assignedCourier.id})`;
+    text += "\n";
+  }
+
+  // Events
+  if (order.events.length > 0) {
+    text += `\n📋 *تاریخچه:*\n`;
+    order.events.forEach((e) => {
+      text += `  ${e.createdAt.toISOString().split("T")[0]} · ${eventTypeLabel(e.eventType)}\n`;
+    });
+  }
+
+  return text;
 }
 
 /**
@@ -1222,6 +1281,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await safeRender(ctx, `✅ سفارش #${orderId} با موفقیت ${doneLabel} شد.`, {
         reply_markup: new InlineKeyboard()
           .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
+          .text("📊 همه سفارش‌ها", "mgr:allorders")
+          .row()
           .text("« منو", "mgr:menu"),
       });
       return;
@@ -1248,50 +1309,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      const esc = escapeMarkdown;
-      let detailText = `📦 *سفارش #${order.id}*\n`;
-      detailText += `وضعیت: ${esc(orderStatusLabel(order.status))}\n`;
-      detailText += `تاریخ: ${order.createdAt.toISOString().split("T")[0]}\n\n`;
-
-      // User info
-      const u = order.user;
-      detailText += `*مشتری:* ${esc(u.firstName)} (@${esc(u.username)})\n`;
-      detailText += `تلفن: ${esc(u.phone) || "-"}\n`;
-      detailText += `آدرس: ${esc(u.address) || "-"}\n`;
-      if (u.locationLat != null) detailText += `📍 موقعیت ثبت شده\n`;
-      else if (u.locationText) detailText += `📍 موقعیت: ${u.locationText}\n`;
-      detailText += "\n";
-
-      // Items
-      detailText += `*اقلام:*\n`;
-      order.items.forEach((item) => {
-        detailText += `  ${esc(item.product.title)} x${item.qty} = ${formatPrice(item.lineTotal)}\n`;
-      });
-      detailText += `\nجمع: ${formatPrice(order.subtotal)}\n`;
-      if (order.discountTotal > 0) detailText += `تخفیف: ${formatPrice(order.discountTotal)}\n`;
-      detailText += `*نهایی: ${formatPrice(order.grandTotal)}*\n`;
-
-      // Receipts
-      if (order.receipts.length > 0) {
-        detailText += `\n🧾 رسیدها: ${order.receipts.length} عدد (آخرین: ${esc(order.receipts[0].reviewStatus)})\n`;
-      }
-
-      // Delivery
-      if (order.delivery) {
-        const d = order.delivery;
-        detailText += `\n🚚 ارسال: ${esc(d.status)}`;
-        if (d.assignedCourier) detailText += ` (پیک: @${esc(d.assignedCourier.username) || d.assignedCourier.id})`;
-        detailText += "\n";
-      }
-
-      // Events
-      if (order.events.length > 0) {
-        detailText += `\n📋 *تاریخچه:*\n`;
-        order.events.forEach((e) => {
-          detailText += `  ${e.createdAt.toISOString().split("T")[0]} · ${esc(e.eventType)}\n`;
-        });
-      }
-
+      const detailText = buildOrderDetailText(order);
       const detailKb = new InlineKeyboard();
       const pendingReceipt = order.receipts.find(r => r.reviewStatus === ReceiptReviewStatus.PENDING);
       if (pendingReceipt) {
@@ -1300,14 +1318,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           .text("❌ رد رسید", `mgr:receipt:reject:${pendingReceipt.id}`)
           .row();
       }
-      if (u.locationLat != null && u.locationLng != null) {
-        detailKb.text("📍 مشاهده موقعیت", `mgr:order:location:${order.id}`).row();
+      if (order.user.locationLat != null && order.user.locationLng != null) {
       }
       if (order.status !== OrderStatus.CANCELLED) {
         const isCompleted = order.status === OrderStatus.COMPLETED;
         detailKb.text(isCompleted ? "❌ حذف سفارش" : "❌ لغو سفارش", `mgr:order:cancel:${order.id}`).row();
       }
-      detailKb.text("« منو", "mgr:menu");
+      detailKb.text("📊 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
 
       await safeRender(ctx, detailText, {
         parse_mode: "Markdown",
@@ -2419,7 +2436,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         data: { receiptId },
       });
 
-      await answerCallback();
+      await answerCallback({ text: "⏳ متن زمان تحویل را وارد کنید." });
       await ctx.reply(ManagerTexts.enterEtaMessage(), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
@@ -2433,7 +2450,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         state: "receipt:reject:reason", 
         data: { receiptId } 
       });
-      await answerCallback();
+      await answerCallback({ text: "⏳ علت رد را وارد کنید." });
       await ctx.reply(ManagerTexts.enterRejectReason(), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });

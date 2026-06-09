@@ -265,16 +265,17 @@ export const ManagerTexts = {
   analyticsMenuTitle: () => "📊 *داشبورد آمار*\n\nهر کدام از بخش‌ها را انتخاب کنید:",
   orderAnalytics: (total: number, statusBreakdown: Record<string, number>, revenue: number, todayOrders: number, todayRevenue: number, weekOrders: number, weekRevenue: number) => {
     let text = `📦 *آمار سفارش‌ها*\n\n`;
-    text += `📊 کل سفارش‌ها: ${total}\n`;
+    text += `📊 *کل:* ${total}\n`;
     text += `─────────────────\n`;
     for (const [label, count] of Object.entries(statusBreakdown)) {
-      text += `${label}: ${count}\n`;
+      if (count > 0) text += `${label}: ${count}\n`;
     }
-    text += `\n💰 *جمع فروش (پرداخت‌شده):* ${formatPrice(revenue)}\n`;
-    text += `\n📅 *امروز*\n`;
+    text += `\n💰 *فروش:* ${formatPrice(revenue)}\n\n`;
+    text += `─────────────────\n`;
+    text += `📅 *امروز*\n`;
     text += `   سفارش‌ها: ${todayOrders}\n`;
-    text += `   فروش: ${formatPrice(todayRevenue)}\n`;
-    text += `\n📅 *این هفته*\n`;
+    text += `   فروش: ${formatPrice(todayRevenue)}\n\n`;
+    text += `📅 *این هفته*\n`;
     text += `   سفارش‌ها: ${weekOrders}\n`;
     text += `   فروش: ${formatPrice(weekRevenue)}`;
     return text;
