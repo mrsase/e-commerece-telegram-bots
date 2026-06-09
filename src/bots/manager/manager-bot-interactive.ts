@@ -1294,8 +1294,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data.startsWith("mgr:order:delete:") && !data.startsWith("mgr:order:delete:confirm:")) {
       const orderId = safeId(parts[3]);
       const order = await prisma.order.findUnique({ where: { id: orderId } });
-      if (!order || order.status === OrderStatus.CANCELLED) {
-        await answerCallback({ text: "این سفارش قبلاً لغو شده است.", show_alert: true });
+      if (!order) {
+        await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
         return;
       }
 
@@ -1323,11 +1323,6 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       if (!order) {
         await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
-        return;
-      }
-
-      if (order.status === OrderStatus.CANCELLED) {
-        await answerCallback({ text: "این سفارش قبلاً لغو شده است.", show_alert: true });
         return;
       }
 
@@ -1400,11 +1395,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       if (order.user.locationLat != null && order.user.locationLng != null) {
       }
       if (order.status !== OrderStatus.CANCELLED) {
-        detailKb
-          .text("❌ لغو سفارش", `mgr:order:cancel:${order.id}`)
-          .text("🗑️ حذف سفارش", `mgr:order:delete:${order.id}`)
-          .row();
+        detailKb.text("❌ لغو سفارش", `mgr:order:cancel:${order.id}`);
       }
+      detailKb.text("🗑️ حذف سفارش", `mgr:order:delete:${order.id}`).row();
       detailKb.text("📊 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
 
       await safeRender(ctx, detailText, {
