@@ -346,15 +346,13 @@ async function continueCheckoutFlow(
   const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
   if (!updatedUser) return;
 
-  // P2-1 Fix: Use nullish check instead of truthiness (0 is a valid coordinate)
-  const needsLocation = (updatedUser.locationLat == null || updatedUser.locationLng == null) && !updatedUser.locationText;
+  const needsLocation = updatedUser.locationLat == null || updatedUser.locationLng == null;
   const needsAddress = !updatedUser.address;
 
   if (needsLocation) {
     userSessions.set(ctx.from!.id, { state: "checkout_location" });
     const keyboard = new Keyboard()
       .requestLocation(ClientTexts.askLocationButton())
-      .text(ClientTexts.askLocationManualButton())
       .resized()
       .oneTime();
     await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
@@ -395,7 +393,7 @@ async function showProfile(
   profileText += `نام کاربری: ${user.username ? "@" + user.username : "-"}\n`;
   profileText += `تلفن: ${user.phone ?? "ثبت نشده"}\n`;
   profileText += `آدرس: ${user.address ?? "ثبت نشده"}\n`;
-  profileText += `موقعیت: ${user.locationLat != null ? "✅ ثبت شده" : user.locationText ?? "ثبت نشده"}\n`;
+  profileText += `موقعیت: ${user.locationLat != null ? "✅ ثبت شده" : "ثبت نشده"}\n`;
   const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
   profileText += `⭐ امتیاز وفاداری: ${effectiveScore}/10\n`;
 
@@ -532,44 +530,9 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
-    // Handle manual location text input
+    // Reject text input when waiting for location — only Telegram location format is accepted
     if (session?.state === "checkout_location") {
-      const text = ctx.message.text.trim();
-
-      // If they clicked the manual entry button, prompt for text
-      if (text === ClientTexts.askLocationManualButton()) {
-        await ctx.reply(ClientTexts.askLocationManualPrompt(), { reply_markup: { remove_keyboard: true } });
-        return;
-      }
-
-      // Save as text-based location
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
-
-      if (!user) {
-        await ctx.reply(ClientTexts.unableToIdentify());
-        return;
-      }
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          locationLat: null,
-          locationLng: null,
-          locationText: text,
-        },
-      });
-
-      userSessions.delete(ctx.from.id);
-      await ctx.reply(ClientTexts.locationReceived(), { reply_markup: { remove_keyboard: true } });
-
-      if (session.fromProfile) {
-        const updated = await prisma.user.findUnique({ where: { id: user.id } });
-        if (updated) await showProfile(ctx, updated);
-      } else {
-        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
-      }
+      await ctx.reply(ClientTexts.invalidLocation());
       return;
     }
 
@@ -1233,8 +1196,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       // Check if we need to gather info
       const needsPhone = !user.phone;
-      // P2-1 Fix: Use nullish check instead of truthiness (0 is a valid coordinate)
-      const needsLocation = (user.locationLat == null || user.locationLng == null) && !user.locationText;
+      const needsLocation = user.locationLat == null || user.locationLng == null;
       const needsAddress = !user.address;
 
       if (needsPhone || needsLocation || needsAddress) {
@@ -1256,7 +1218,6 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           userSessions.set(ctx.from.id, { state: "checkout_location" });
           const keyboard = new Keyboard()
             .requestLocation(ClientTexts.askLocationButton())
-            .text(ClientTexts.askLocationManualButton())
             .resized()
             .oneTime();
           await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
@@ -1480,7 +1441,6 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
       const keyboard = new Keyboard()
         .requestLocation(ClientTexts.askLocationButton())
-        .text(ClientTexts.askLocationManualButton())
         .resized()
         .oneTime();
       await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
