@@ -1417,6 +1417,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           .row();
       }
       if (order.user.locationLat != null && order.user.locationLng != null) {
+        detailKb.text("📍 موقعیت", `mgr:order:location:${order.id}`).row();
       }
       if (order.status !== OrderStatus.CANCELLED) {
         detailKb.text("❌ لغو سفارش", `mgr:order:cancel:${order.id}`);
@@ -1876,7 +1877,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "setmaxcodes", "message"].includes(parts[2])) {
+    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "setmaxcodes", "message", "location"].includes(parts[2])) {
       const userId = safeId(parts[2]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
@@ -1996,6 +1997,31 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, user.discountPercent, user.maxReferralCodes),
         }
       );
+      return;
+    }
+
+    // USER LOCATION — sends location pin to manager
+    if (data.startsWith("mgr:user:location:")) {
+      const userId = safeId(parts[3]);
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { locationLat: true, locationLng: true, locationText: true },
+      });
+
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
+      if (user.locationLat != null && user.locationLng != null) {
+        await answerCallback();
+        await ctx.replyWithLocation(user.locationLat, user.locationLng);
+      } else if (user.locationText) {
+        await answerCallback();
+        await ctx.reply(`📍 موقعیت مشتری: ${user.locationText}`);
+      } else {
+        await answerCallback({ text: "موقعیت کاربر ثبت نشده است." });
+      }
       return;
     }
 

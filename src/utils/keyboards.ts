@@ -270,6 +270,7 @@ export const ManagerKeyboards = {
     return new InlineKeyboard()
       .text("📦 سفارش‌ها", `mgr:user:orders:${userId}`)
       .text("📋 اطلاعات تماس", `mgr:user:contact:${userId}`)
+      .text("📍 موقعیت", `mgr:user:location:${userId}`)
       .row()
       .text("🔗 معرفی‌ها", `mgr:user:referrals:${userId}`)
       .text(
