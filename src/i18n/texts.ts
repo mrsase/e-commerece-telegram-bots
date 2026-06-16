@@ -83,6 +83,10 @@ export const ClientTexts = {
   noReferralCode: () => "شما هنوز کد معرفی ایجاد نکرده‌اید.",
   referralCodeGenerated: (code: string) => `✅ کد معرفی جدید شما: \`${code}\`\n\nاین کد را برای دوستانتان ارسال کنید.`,
   referralStats: (count: number) => `📊 تعداد معرفی‌های شما: ${count} نفر`,
+  referralNoPermission: () => "شما مجوز ساخت کد معرفی ندارید. با مدیریت تماس بگیرید.",
+  referralMaxCodesReached: (max: number) => `حداکثر می‌توانید ${max} کد معرفی بسازید.`,
+  enterReferralScore: () => "⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربر این کد وارد کنید.\nبرای رد شدن /skip بزنید:",
+  invalidReferralScore: () => "❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد. دوباره وارد کنید:",
   
   // Product View
   productDetails: (title: string, description: string | null, price: number, _currency?: string, stock?: number | null) =>
@@ -219,8 +223,8 @@ export const ManagerTexts = {
   usersMenuTitle: () => "👥 *مدیریت کاربران*",
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
-  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountPercent?: number | null) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\n🎯 تخفیف: ${discountPercent != null ? `${discountPercent}%` : 'ندارد'}\nتعداد سفارش: ${orderCount}`,
+  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountPercent?: number | null, maxReferralCodes?: number) =>
+    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n🔢 حداکثر کد معرفی: ${maxReferralCodes ?? 3}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (بازنویسی مدیر)' : ''}\n🎯 تخفیف: ${discountPercent != null ? `${discountPercent}%` : 'ندارد'}\nتعداد سفارش: ${orderCount}`,
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,
   userUnblocked: (username: string | null) => `✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,
   userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی به ${username || 'کاربر'} داده شد.`,
@@ -238,6 +242,11 @@ export const ManagerTexts = {
   // User Discount
   enterUserDiscount: () => "🎯 درصد تخفیف جدید را وارد کنید (۰ تا ۱۰۰):",
   invalidDiscountPercent: () => "❌ درصد تخفیف باید عددی بین ۰ تا ۱۰۰ باشد.",
+
+  // User Max Referral Codes
+  enterMaxReferralCodes: (current: number) => `🔢 حداکثر تعداد کدهای معرفی را وارد کنید (۰ تا ۱۰۰).\nمقدار فعلی: ${current}`,
+  invalidMaxReferralCodes: () => "❌ لطفاً عددی بین ۰ تا ۱۰۰ وارد کنید.",
+  userMaxCodesUpdated: (max: number) => `✅ حداکثر تعداد کدهای معرفی به ${max} تنظیم شد.`,
 
   // Courier Management
   couriersMenuTitle: () => "🚚 *مدیریت پیک‌ها*",

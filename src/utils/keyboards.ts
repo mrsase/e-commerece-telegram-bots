@@ -93,10 +93,10 @@ export const ClientKeyboards = {
   },
 
   /** Referral menu */
-  referralMenu: (codeCount: number, canCreate: boolean = false) => {
+  referralMenu: (codeCount: number, canCreate: boolean = false, maxCodes: number = 3) => {
     const kb = new InlineKeyboard();
     
-    if (canCreate && codeCount < 3) {
+    if (canCreate && codeCount < maxCodes) {
       kb.text("🔑 ساخت کد معرفی", "client:referral:generate").row();
     }
     
@@ -266,7 +266,7 @@ export const ManagerKeyboards = {
   },
 
   /** User detail actions */
-  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountPercent?: number | null) => {
+  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountPercent?: number | null, maxReferralCodes?: number) => {
     return new InlineKeyboard()
       .text("📦 سفارش‌ها", `mgr:user:orders:${userId}`)
       .text("📋 اطلاعات تماس", `mgr:user:contact:${userId}`)
@@ -278,6 +278,8 @@ export const ManagerKeyboards = {
       )
       .row()
       .text("⭐ تغییر امتیاز", `mgr:user:setscore:${userId}`)
+      .text(`🔢 حداکثر ${maxReferralCodes ?? 3} کد`, `mgr:user:setmaxcodes:${userId}`)
+      .row()
       .text(
         isActive ? "🚫 مسدود کردن" : "✅ رفع مسدودیت",
         `mgr:user:toggle:${userId}`

@@ -92,46 +92,55 @@ async function getOrCreateUser(
 }
 
 /**
- * Validate and use a referral code
+ * Validate and use a referral code atomically.
+ * Uses interactive transaction + conditional updateMany to prevent race conditions
+ * where two concurrent requests use the same code.
  */
 async function validateAndUseReferralCode(
   userId: number,
   code: string,
   prisma: PrismaClient
 ): Promise<boolean> {
-  // Find the referral code
-  const referralCode = await prisma.referralCode.findUnique({
-    where: { code: code.toUpperCase() },
-  });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const referralCode = await tx.referralCode.findUnique({
+        where: { code: code.toUpperCase() },
+      });
 
-  if (!referralCode) return false;
-  if (!referralCode.isActive) return false;
-  if (referralCode.expiresAt && referralCode.expiresAt < new Date()) return false;
-  // Each code is for 1 person only — reject if already used
-  const effectiveMaxUses = referralCode.maxUses ?? 1;
-  if (referralCode.usedCount >= effectiveMaxUses) return false;
+      if (!referralCode) return false;
+      if (!referralCode.isActive) return false;
+      if (referralCode.expiresAt && referralCode.expiresAt < new Date()) return false;
+      const effectiveMaxUses = referralCode.maxUses ?? 1;
+      if (referralCode.usedCount >= effectiveMaxUses) return false;
 
-  // Update user, referral code, and deactivate the code (1 person per code)
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: userId },
-      data: {
-        isVerified: true,
-        usedReferralCodeId: referralCode.id,
-        referredById: referralCode.createdByUserId, // Link to who referred them
-        loyaltyScore: referralCode.loyaltyScore,     // Assign score from referral code
-      },
-    }),
-    prisma.referralCode.update({
-      where: { id: referralCode.id },
-      data: {
-        usedCount: { increment: 1 },
-        isActive: false, // Deactivate after single use
-      },
-    }),
-  ]);
+      // Atomically claim the code — only succeeds if still active
+      const claimResult = await tx.referralCode.updateMany({
+        where: { id: referralCode.id, isActive: true },
+        data: {
+          usedCount: { increment: 1 },
+          isActive: false,
+          expiresAt: new Date(),
+        },
+      });
 
-  return true;
+      if (claimResult.count === 0) return false; // Someone else claimed it first
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          isVerified: true,
+          usedReferralCodeId: referralCode.id,
+          referredById: referralCode.createdByUserId,
+          loyaltyScore: referralCode.loyaltyScore,
+        },
+      });
+
+      return true;
+    });
+  } catch (error) {
+    console.error("[validateAndUseReferralCode] Transaction failed:", error);
+    return false;
+  }
 }
 
 /**
@@ -599,7 +608,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const text = ctx.message.text.trim();
       const score = text === "/skip" ? 0 : parseInt(text);
       if (text !== "/skip" && (!Number.isFinite(score) || score < 0 || score > 10)) {
-        await ctx.reply("❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد. دوباره وارد کنید:");
+        await ctx.reply(ClientTexts.invalidReferralScore());
         return;
       }
 
@@ -1486,6 +1495,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       const totalReferred = referralCodes.reduce((sum, c) => sum + c.usedCount, 0);
 
+      // Re-fetch user to get canCreateReferral and maxReferralCodes
+      const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
+      const canCreate = freshUser?.canCreateReferral ?? false;
+      const maxCodes = freshUser?.maxReferralCodes ?? 3;
+
       let text = "🔗 *معرفی‌های من*\n\n";
       
       if (referralCodes.length > 0) {
@@ -1499,13 +1513,9 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       text += `\n${ClientTexts.referralStats(totalReferred)}`;
 
-      // Re-fetch user to get canCreateReferral
-      const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
-      const canCreate = freshUser?.canCreateReferral ?? false;
-
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
-        reply_markup: ClientKeyboards.referralMenu(referralCodes.length, canCreate),
+        reply_markup: ClientKeyboards.referralMenu(referralCodes.length, canCreate, maxCodes),
       });
       return;
     }
@@ -1551,27 +1561,29 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
       if (!freshUser?.canCreateReferral) {
         await answerCallback({
-          text: "شما مجوز ساخت کد معرفی ندارید. با مدیریت تماس بگیرید.",
+          text: ClientTexts.referralNoPermission(),
           show_alert: true,
         });
         return;
       }
 
-      // Check if user already has a code (limit to 3 per user)
+      const maxCodes = freshUser.maxReferralCodes ?? 3;
+
+      // Check if user already reached their max
       const existingCodes = await prisma.referralCode.count({
         where: { createdByUserId: user.id },
       });
 
-      if (existingCodes >= 3) {
+      if (existingCodes >= maxCodes) {
         await answerCallback({
-          text: "حداکثر می‌توانید ۳ کد معرفی بسازید.",
+          text: ClientTexts.referralMaxCodesReached(maxCodes),
           show_alert: true,
         });
         return;
       }
 
       userSessions.set(ctx.from.id, { state: "referral_score" });
-      await safeRender(ctx, "⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربر این کد وارد کنید.\nبرای رد شدن /skip بزنید:", {
+      await safeRender(ctx, ClientTexts.enterReferralScore(), {
         parse_mode: "Markdown",
       });
       return;

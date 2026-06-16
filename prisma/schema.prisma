@@ -25,6 +25,7 @@ model User {
   isActive        Boolean          @default(true)
   isVerified      Boolean          @default(false)  // Has entered a valid referral code
   canCreateReferral Boolean        @default(false)  // Manager must grant this permission
+  maxReferralCodes  Int            @default(3)       // Max referral codes this user can create
   loyaltyScore    Int              @default(0)       // Score assigned by parent or manager (0-10)
   loyaltyScoreOverride Int?                           // Manager override of loyalty score
   discountPercent  Int?

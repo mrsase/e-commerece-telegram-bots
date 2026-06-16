@@ -36,7 +36,8 @@ type SessionState =
   | "settings:deliverymsg"
   | "courier:add"
   | "user:setscore"
-  | "user:discount";
+  | "user:discount"
+  | "user:setmaxcodes";
 
 interface ManagerSession {
   state: SessionState;
@@ -685,6 +686,29 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           reply_markup: ManagerKeyboards.backToMenu(),
         }
       );
+      return;
+    }
+
+    // USER MAX REFERRAL CODES
+    if (session.state === "user:setmaxcodes") {
+      const input = ctx.message.text.trim();
+      const maxCodes = parseInt(input, 10);
+
+      if (!Number.isFinite(maxCodes) || maxCodes < 0 || maxCodes > 100) {
+        await ctx.reply(ManagerTexts.invalidMaxReferralCodes());
+        return;
+      }
+
+      const userId = session.data?.userId as number;
+      await prisma.user.update({
+        where: { id: userId },
+        data: { maxReferralCodes: maxCodes },
+      });
+
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.userMaxCodesUpdated(maxCodes), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
       return;
     }
 
@@ -1852,7 +1876,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "message"].includes(parts[2])) {
+    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "setmaxcodes", "message"].includes(parts[2])) {
       const userId = safeId(parts[2]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
@@ -1866,10 +1890,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const hasOverride = user.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, user.discountPercent),
+        ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, user.discountPercent, user.maxReferralCodes),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, user.discountPercent),
+          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, user.discountPercent, user.maxReferralCodes),
         }
       );
       return;
@@ -1906,10 +1930,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const hasOvr = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr, updated.discountPercent),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr, updated.discountPercent, updated.maxReferralCodes),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, updated.discountPercent),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, updated.discountPercent, updated.maxReferralCodes),
         }
       );
       return;
@@ -1946,10 +1970,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const hasOvr2 = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2, updated.discountPercent),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2, updated.discountPercent, updated.maxReferralCodes),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, updated.discountPercent),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, updated.discountPercent, updated.maxReferralCodes),
         }
       );
       return;
@@ -1969,7 +1993,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ManagerTexts.userContactInfo(user.phone, user.address, user.locationLat, user.locationLng, user.locationText),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, user.discountPercent),
+          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, user.discountPercent, user.maxReferralCodes),
         }
       );
       return;
@@ -2003,6 +2027,25 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
             .text("« منو", "mgr:menu"),
         }
       );
+      return;
+    }
+
+    // SET USER MAX REFERRAL CODES
+    if (data.startsWith("mgr:user:setmaxcodes:")) {
+      const userId = safeId(parts[3]);
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
+      managerSessions.set(ctx.from.id, { state: "user:setmaxcodes", data: { userId } });
+      await safeRender(ctx, ManagerTexts.enterMaxReferralCodes(user.maxReferralCodes), {
+        reply_markup: new InlineKeyboard()
+          .text("« کاربر", `mgr:user:${userId}`)
+          .text("« منو", "mgr:menu"),
+      });
       return;
     }
 
