@@ -15,6 +15,26 @@ async function main(): Promise<void> {
   const prisma = new PrismaClient();
   await prisma.$connect();
 
+  // Backfill users with null username to use their profile name
+  try {
+    const nullUsernameUsers = await prisma.user.findMany({
+      where: { username: null },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    for (const u of nullUsernameUsers) {
+      const fallback = u.firstName || u.lastName || `user_${u.id}`;
+      await prisma.user.update({
+        where: { id: u.id },
+        data: { username: fallback },
+      });
+    }
+    if (nullUsernameUsers.length > 0) {
+      console.log(`✓ Backfilled ${nullUsernameUsers.length} users with null usernames`);
+    }
+  } catch (error) {
+    console.error("Failed to backfill null usernames:", error);
+  }
+
   const clientBot = createClientBot(config.clientBotToken);
   const managerBot = createManagerBot(config.managerBotToken);
   const courierBot = createCourierBot(config.courierBotToken);

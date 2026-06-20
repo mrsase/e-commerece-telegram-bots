@@ -312,9 +312,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           take: 10,
         });
       } else {
-        // Search by username
+        // Search by username, firstName, or lastName
         users = await prisma.user.findMany({
-          where: { username: { contains: query } },
+          where: {
+            OR: [
+              { username: { contains: query } },
+              { firstName: { contains: query } },
+              { lastName: { contains: query } },
+            ],
+          },
           take: 10,
         });
       }

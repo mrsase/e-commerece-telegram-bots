@@ -76,11 +76,17 @@ async function getOrCreateUser(
     return { user, needsReferral: false };
   }
 
+  // Build username: prefer Telegram handle, fall back to profile name
+  const displayName = ctx.from.username
+    || ctx.from.first_name
+    || ctx.from.last_name
+    || `${ctx.from.id}`;
+
   // Create new user (unverified)
   user = await prisma.user.create({
     data: {
       tgUserId,
-      username: ctx.from.username,
+      username: displayName,
       firstName: ctx.from.first_name,
       lastName: ctx.from.last_name,
       referralCode: `USR_${ctx.from.id}`,
