@@ -27,9 +27,17 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await prisma.discountUsage.deleteMany({ where: { userId } });
+  await prisma.discount.deleteMany({});
+  await prisma.orderItem.deleteMany({ where: { order: { userId } } });
+  await prisma.order.deleteMany({ where: { userId } });
   await prisma.user.update({
     where: { id: userId },
-    data: { discountPercent: null },
+    data: {
+      discountPercent: null,
+      discountType: null,
+      discountValue: null,
+    },
   });
 });
 
@@ -42,7 +50,7 @@ function makeCart(qty: number, unitPrice = 1000): CartContext {
 }
 
 describe("DiscountService", () => {
-  it("returns no discount when user has no discountPercent", async () => {
+  it("returns no discount when user has no assigned discount", async () => {
     const result = await service.calculateDiscounts(makeCart(2));
     expect(result.subtotal).toBe(2000);
     expect(result.totalDiscount).toBe(0);
@@ -50,10 +58,13 @@ describe("DiscountService", () => {
     expect(result.appliedDiscounts).toHaveLength(0);
   });
 
-  it("applies percent discount based on user's discountPercent", async () => {
+  it("applies percent discount assigned to the user", async () => {
     await prisma.user.update({
       where: { id: userId },
-      data: { discountPercent: 15 },
+      data: {
+        discountType: "PERCENT",
+        discountValue: 15,
+      },
     });
 
     const result = await service.calculateDiscounts(makeCart(3, 2000));
@@ -64,15 +75,60 @@ describe("DiscountService", () => {
     expect(result.appliedDiscounts[0].description).toBe("15% تخفیف");
   });
 
+  it("applies fixed amount discount assigned to the user", async () => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        discountType: "FIXED",
+        discountValue: 750,
+      },
+    });
+
+    const result = await service.calculateDiscounts(makeCart(3, 1000));
+    expect(result.subtotal).toBe(3000);
+    expect(result.totalDiscount).toBe(750);
+    expect(result.grandTotal).toBe(2250);
+    expect(result.appliedDiscounts[0].description).toBe("750 تومان تخفیف");
+  });
+
+  it("caps fixed discount at subtotal", async () => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        discountType: "FIXED",
+        discountValue: 5000,
+      },
+    });
+
+    const result = await service.calculateDiscounts(makeCart(2, 1000));
+    expect(result.subtotal).toBe(2000);
+    expect(result.totalDiscount).toBe(2000);
+    expect(result.grandTotal).toBe(0);
+  });
+
   it("returns no discount for empty or zero subtotal", async () => {
     await prisma.user.update({
       where: { id: userId },
-      data: { discountPercent: 10 },
+      data: {
+        discountType: "PERCENT",
+        discountValue: 10,
+      },
     });
 
     const result = await service.calculateDiscounts(makeCart(0, 1000));
     expect(result.subtotal).toBe(0);
     expect(result.totalDiscount).toBe(0);
     expect(result.appliedDiscounts).toHaveLength(0);
+  });
+
+  it("still supports legacy discountPercent values", async () => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { discountPercent: 20 },
+    });
+
+    const result = await service.calculateDiscounts(makeCart(2, 1000));
+    expect(result.totalDiscount).toBe(400);
+    expect(result.grandTotal).toBe(1600);
   });
 });

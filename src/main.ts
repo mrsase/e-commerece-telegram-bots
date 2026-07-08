@@ -9,6 +9,13 @@ import { registerInteractiveManagerBot } from "./bots/manager/manager-bot-intera
 import { buildServer } from "./infra/http/server.js";
 import { startScheduler, type Scheduler } from "./infra/scheduler/interval-scheduler.js";
 
+function startPolling(botName: string, bot: ReturnType<typeof createClientBot>): void {
+  void bot.start().catch((error) => {
+    console.error(`${botName} polling failed`, error);
+    process.exit(1);
+  });
+}
+
 async function main(): Promise<void> {
   const config = loadAppConfigFromEnv();
 
@@ -74,25 +81,24 @@ async function main(): Promise<void> {
     console.error("Failed to register courier bot commands:", error);
   }
 
-  const webhookHandlers = createTelegramWebhookHandlers(clientBot, managerBot, courierBot);
-
   const isPollingMode = config.updatesMode === "polling";
   
   if (isPollingMode) {
-    clientBot.start();
-    managerBot.start();
-    courierBot.start();
+    startPolling("Client bot", clientBot);
+    startPolling("Manager bot", managerBot);
+    startPolling("Courier bot", courierBot);
+    console.log("✓ Bots started in polling mode");
   }
 
   const scheduler: Scheduler = startScheduler({
     prisma,
   });
 
-  const app = buildServer(webhookHandlers, {
-    webhookSecretToken: config.webhookSecretToken,
-  });
-  const port = config.port;
-  const host = "0.0.0.0";
+  const app = !isPollingMode
+    ? buildServer(createTelegramWebhookHandlers(clientBot, managerBot, courierBot), {
+        webhookSecretToken: config.webhookSecretToken,
+      })
+    : undefined;
 
   const shutdown = async () => {
     console.log("Shutting down gracefully...");
@@ -108,8 +114,10 @@ async function main(): Promise<void> {
     console.log("Stopping scheduler...");
     scheduler.stop();
     
-    console.log("Closing HTTP server...");
-    await app.close();
+    if (app) {
+      console.log("Closing HTTP server...");
+      await app.close();
+    }
     
     console.log("Disconnecting from database...");
     await prisma.$disconnect();
@@ -121,7 +129,9 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  await app.listen({ port, host });
+  if (app) {
+    await app.listen({ port: config.port, host: "0.0.0.0" });
+  }
 }
 
 // Only run main when executed directly, not when imported by tests.

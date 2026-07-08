@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { PrismaClient, ManagerRole, DiscountType } from "@prisma/client";
+import { PrismaClient, ManagerRole } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -7,7 +7,6 @@ interface SeedOptions {
   adminTgUserId?: string;
   courierTgUserId?: string;
   includeProducts?: boolean;
-  includeDiscounts?: boolean;
 }
 
 function getOptions(): SeedOptions {
@@ -15,7 +14,6 @@ function getOptions(): SeedOptions {
     adminTgUserId: process.env.ADMIN_TG_USER_ID,
     courierTgUserId: process.env.COURIER_TG_USER_ID,
     includeProducts: process.env.SEED_PRODUCTS === "true",
-    includeDiscounts: process.env.SEED_DISCOUNTS === "true",
   };
 }
 
@@ -109,8 +107,8 @@ async function seedProducts(): Promise<void> {
 
 async function seedReferralCodes(managerId: number): Promise<void> {
   const codes = [
-    { code: "WELCOME2024", maxUses: 100 },
-    { code: "VIP_ACCESS", maxUses: 10 },
+    { code: "WELCOME2024", maxUses: 1 },
+    { code: "VIP_ACCESS", maxUses: 1 },
   ];
 
   for (const codeData of codes) {
@@ -132,56 +130,6 @@ async function seedReferralCodes(managerId: number): Promise<void> {
       },
     });
     console.log(`✓ Created referral code: ${codeData.code}`);
-  }
-}
-
-async function seedDiscounts(): Promise<void> {
-  const discounts = [
-    {
-      code: "WELCOME10",
-      type: DiscountType.PERCENT,
-      value: 10,
-      perUserLimit: 1,
-      isActive: true,
-    },
-    {
-      code: "FLAT5000",
-      type: DiscountType.FIXED,
-      value: 5000,
-      perUserLimit: 1,
-      isActive: true,
-    },
-    {
-      autoRule: "first_order",
-      type: DiscountType.PERCENT,
-      value: 15,
-      isActive: true,
-    },
-  ];
-
-  for (const discount of discounts) {
-    const identifier = discount.code || discount.autoRule;
-
-    if (discount.code) {
-      const existing = await prisma.discount.findUnique({
-        where: { code: discount.code },
-      });
-      if (existing) {
-        console.log(`✓ Discount "${identifier}" already exists`);
-        continue;
-      }
-    } else {
-      const existing = await prisma.discount.findFirst({
-        where: { autoRule: discount.autoRule },
-      });
-      if (existing) {
-        console.log(`✓ Discount "${identifier}" already exists`);
-        continue;
-      }
-    }
-
-    await prisma.discount.create({ data: discount });
-    console.log(`✓ Created discount: ${identifier}`);
   }
 }
 
@@ -227,13 +175,6 @@ async function main(): Promise<void> {
   if (options.includeProducts) {
     console.log("--- Seeding Products ---");
     await seedProducts();
-    console.log("");
-  }
-
-  // Seed discounts (optional)
-  if (options.includeDiscounts) {
-    console.log("--- Seeding Discounts ---");
-    await seedDiscounts();
     console.log("");
   }
 

@@ -161,9 +161,10 @@ export class OrderService {
         },
       });
 
-      if (appliedDiscounts.length > 0 && appliedDiscounts[0].discountId > 0) {
+      const usageDiscounts = appliedDiscounts.filter((d) => d.discountId > 0);
+      if (usageDiscounts.length > 0) {
         await tx.discountUsage.createMany({
-          data: appliedDiscounts.map((d) => ({
+          data: usageDiscounts.map((d) => ({
             userId,
             discountId: d.discountId,
             orderId: order.id,

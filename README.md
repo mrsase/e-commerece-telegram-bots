@@ -1,6 +1,6 @@
 # Amoosh Telegram Bots
 
-A dual-bot e-commerce system for Telegram built with TypeScript, Fastify, Prisma, and grammY.
+A three-bot e-commerce system for Telegram built with TypeScript, Fastify, Prisma, and grammY.
 
 ## Table of Contents
 
@@ -23,20 +23,21 @@ A dual-bot e-commerce system for Telegram built with TypeScript, Fastify, Prisma
 
 ## Overview
 
-This project implements two Telegram bots for an e-commerce platform:
+This project implements three Telegram bots for an e-commerce platform:
 
 1. **Client Bot** - Customer-facing bot for browsing products, managing shopping cart, and placing orders
-2. **Manager Bot** - Admin bot for reviewing and approving/rejecting customer orders
+2. **Manager Bot** - Admin bot for products, users, receipts, referrals, support, analytics, settings, and courier assignment
+3. **Courier Bot** - Delivery bot for assigned couriers to update delivery progress
 
 ### Key Features
 
 - **Product Catalog**: Browse and view available products
 - **Shopping Cart**: Add/remove items, view cart contents
-- **Order Management**: Submit orders for manager approval
-- **Discount System**: Support for percentage and fixed discounts, auto-rules, usage limits
+- **Order Management**: Submit orders, send payment details, upload receipts, and complete delivery
+- **User Discounts**: Managers can assign a percentage or fixed تومان discount to selected users
 - **Invite Links**: Auto-generate Telegram channel invite links for approved orders
 - **Receipt Upload**: Customers can upload payment receipts
-- **Referral System**: Built-in referral code tracking
+- **Referral System**: One-time referral access codes for first login
 
 ---
 
@@ -47,18 +48,22 @@ This project implements two Telegram bots for an e-commerce platform:
 │                        Telegram API                              │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
-          ┌───────────────┴───────────────┐
-          ▼                               ▼
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
 ┌─────────────────┐             ┌─────────────────┐
 │   Client Bot    │             │  Manager Bot    │
 │   (Customers)   │             │   (Admins)      │
 └────────┬────────┘             └────────┬────────┘
-         │                               │
-         └───────────────┬───────────────┘
+         │          ┌─────────────────┐  │
+         │          │   Courier Bot   │  │
+         │          │   (Delivery)    │  │
+         │          └────────┬────────┘  │
+         └───────────────────┼───────────┘
                          ▼
               ┌─────────────────────┐
-              │   Fastify Server    │
-              │   (HTTP + Webhooks) │
+              │   App Runtime       │
+              │ Polling + optional  │
+              │ Webhook HTTP server │
               └──────────┬──────────┘
                          │
          ┌───────────────┼───────────────┐
@@ -101,19 +106,21 @@ DATABASE_URL=file:./prisma/dev.db
 # Bot Tokens (get from @BotFather on Telegram)
 CLIENT_BOT_TOKEN=your_client_bot_token
 MANAGER_BOT_TOKEN=your_manager_bot_token
+COURIER_BOT_TOKEN=your_courier_bot_token
 
 # Server
 PORT=3000
 NODE_ENV=development
 
-# Update Mode (auto, polling, or webhook)
+# Update Mode (polling by default; webhook is optional)
 UPDATES_MODE=polling
 ```
 
 ### 3. Initialize Database
 
 ```bash
-npx prisma db push
+npx prisma generate
+npx prisma migrate deploy
 ```
 
 ### 4. Seed Database (Add Manager)
@@ -121,7 +128,6 @@ npx prisma db push
 Before using the manager bot, you need to add yourself as a manager:
 
 ```bash
-# TODO: Run the seed script once implemented
 npm run db:seed
 ```
 
@@ -156,7 +162,7 @@ npm run dev
 | `COURIER_TG_USER_ID` | No | - | Telegram user ID for the courier (seed) |
 | `PORT` | No | `3000` | HTTP server port |
 | `NODE_ENV` | No | `development` | Environment mode |
-| `UPDATES_MODE` | No | `auto` | `auto`, `polling`, or `webhook` |
+| `UPDATES_MODE` | No | `polling` | `polling` or `webhook`; legacy `auto` is treated as `polling` |
 | `ENABLE_QUEUES` | No | `false` | Enable Redis/BullMQ workers |
 | `REDIS_URL` | If queues | - | Redis connection string |
 | `CHECKOUT_CHANNEL_ID` | If queues | - | Telegram channel for invite links |
@@ -266,7 +272,7 @@ Bot: Order submitted! ID: 1, total: 20000.
 ### How It Works
 
 1. **Registration**: On `/start`, the bot creates/updates the user record with their Telegram info
-2. **Referral Code**: Each user gets a unique referral code (`TSU_<telegram_id>`)
+2. **Referral Access**: New users enter a one-time referral code to unlock the bot. After one successful use, that code expires.
 3. **Cart Management**: Users have one active cart at a time; adding items creates or updates cart
 4. **Price Snapshot**: Cart items store the price at time of addition (protects against price changes)
 5. **Checkout**: Creates an order, links it to the cart, marks cart as SUBMITTED
@@ -388,15 +394,18 @@ CHECKOUT_CHANNEL_ID=@your_checkout_channel
 
 ## HTTP Endpoints
 
+These endpoints are only used when `UPDATES_MODE=webhook`. In the recommended polling mode, the app does not start the Fastify webhook listener.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check (`{ "status": "ok" }`) |
 | `POST` | `/webhook/client` | Telegram webhook for client bot |
 | `POST` | `/webhook/manager` | Telegram webhook for manager bot |
+| `POST` | `/webhook/courier` | Telegram webhook for courier bot |
 
 ### Setting Up Webhooks
 
-For production, configure Telegram to send updates to your server:
+If you explicitly choose webhook mode, configure Telegram to send updates to your server:
 
 ```bash
 # Client bot webhook
@@ -406,6 +415,10 @@ curl "https://api.telegram.org/bot<CLIENT_TOKEN>/setWebhook" \
 # Manager bot webhook
 curl "https://api.telegram.org/bot<MANAGER_TOKEN>/setWebhook" \
   -d "url=https://your-domain.com/webhook/manager"
+
+# Courier bot webhook
+curl "https://api.telegram.org/bot<COURIER_TOKEN>/setWebhook" \
+  -d "url=https://your-domain.com/webhook/courier"
 ```
 
 ---
@@ -527,12 +540,12 @@ export const ClientTexts = {
 ### Production Checklist
 
 1. ✅ Set `NODE_ENV=production`
-2. ✅ Use PostgreSQL instead of SQLite
-3. ✅ Set `UPDATES_MODE=webhook`
-4. ✅ Configure HTTPS for webhook endpoints
+2. ✅ Run `npx prisma generate` and `npx prisma migrate deploy`
+3. ✅ Set `UPDATES_MODE=polling`
+4. ✅ Run a single app instance per bot token while using polling
 5. ✅ Set up Redis if using background jobs
 6. ✅ Add manager(s) to database
-7. ✅ Register webhooks with Telegram API
+7. ✅ Seed optional courier(s) if delivery workflow is enabled
 
 ### PM2 Configuration
 
@@ -553,7 +566,8 @@ module.exports = {
         DATABASE_URL: "postgresql://user:pass@localhost:5432/amoosh",
         CLIENT_BOT_TOKEN: "<token>",
         MANAGER_BOT_TOKEN: "<token>",
-        UPDATES_MODE: "webhook",
+        COURIER_BOT_TOKEN: "<token>",
+        UPDATES_MODE: "polling",
         ENABLE_QUEUES: "true",
         REDIS_URL: "redis://localhost:6379",
         CHECKOUT_CHANNEL_ID: "@your_channel",
@@ -578,9 +592,9 @@ pm2 save
 ### Bot Not Responding
 
 1. **Check bot token**: Ensure tokens are correct in `.env`
-2. **Check updates mode**: In development, use `UPDATES_MODE=polling`
+2. **Check updates mode**: Use `UPDATES_MODE=polling`
 3. **Check logs**: Look for errors in console output
-4. **Verify webhook**: If using webhooks, ensure URL is accessible and HTTPS
+4. **Avoid duplicate polling**: Only one running process should poll a given Telegram bot token
 
 ### Manager Bot Says "Not Authorized"
 
@@ -597,15 +611,15 @@ pm2 save
 
 ### Database Errors
 
-1. **Run migrations**: `npx prisma db push`
+1. **Run migrations**: `npx prisma generate && npx prisma migrate deploy`
 2. **Check connection**: Verify `DATABASE_URL` is correct
 3. **Generate client**: `npx prisma generate`
 
 ### Test Failures
 
-1. **Database state**: Tests share the database; run them in isolation
-2. **Missing env**: Ensure `DATABASE_URL` is set for tests
-3. **Skipped tests**: Some tests are skipped due to shared state issues
+1. **Test database setup**: Vitest recreates `prisma/test.db` from the checked-in migrations before each test file
+2. **Missing tools**: Run `npm ci` before tests so Vitest, TypeScript, ESLint, and Prisma are installed
+3. **Skipped tests**: One legacy command-handler test is still skipped and should be revisited during the refactor
 
 ---
 

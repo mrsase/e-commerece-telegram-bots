@@ -147,19 +147,19 @@
     "group": "ClientTexts",
     "name": "noReferralCode",
     "params": [],
-    "text": "شما هنوز کد معرفی ایجاد نکرده‌اید."
+    "text": "شما هنوز کد معرفی یک‌بارمصرف ایجاد نکرده‌اید."
   },
   {
     "group": "ClientTexts",
     "name": "referralCodeGenerated",
     "params": ["code"],
-    "text": "✅ کد معرفی جدید شما: `{code}`\n\nاین کد را برای دوستانتان ارسال کنید."
+    "text": "✅ کد معرفی یک‌بارمصرف شما ساخته شد:\n`{code}`\n\nاین کد را فقط برای یک نفر ارسال کنید؛ بعد از اولین ورود، منقضی می‌شود."
   },
   {
     "group": "ClientTexts",
     "name": "referralStats",
     "params": ["count"],
-    "text": "📊 تعداد معرفی‌های شما: {count} نفر"
+    "text": "📊 تعداد کدهای استفاده‌شده شما: {count}"
   },
   {
     "group": "ClientTexts",
@@ -291,7 +291,7 @@
     "group": "ClientTexts",
     "name": "orderApprovedWithInvite",
     "params": ["orderId", "inviteLink"],
-    "text": "✅ سفارش #{orderId} تأیید شد.\n\n📢 برای اطلاعات پرداخت وارد کانال شوید:\n{inviteLink}\n\nپس از پرداخت، عکس رسید را همینجا ارسال کنید."
+    "text": "✅ سفارش #{orderId} تأیید شد.\n\nاطلاعات پرداخت برای شما ارسال شد. پس از پرداخت، عکس واضح رسید را همین‌جا ارسال کنید."
   },
   {
     "group": "ClientTexts",
@@ -675,7 +675,7 @@
     "group": "ManagerTexts",
     "name": "referralListTitle",
     "params": [],
-    "text": "🔗 *لیست کدهای معرفی*"
+    "text": "🔗 *کدهای معرفی یک‌بارمصرف*"
   },
   {
     "group": "ManagerTexts",
@@ -729,7 +729,7 @@
     "group": "ManagerTexts",
     "name": "referralAnalytics",
     "params": ["totalCodes", "totalUses", "topReferrer"],
-    "text": "🔗 *آمار معرفی*\n\nکل کدها: {totalCodes}\nکل استفاده: {totalUses}\nبهترین معرف: {topReferrer || '—'}"
+    "text": "🔗 *آمار معرفی*\n\nکل کدها: {totalCodes}\nکدهای استفاده‌شده: {totalUses}\nبهترین معرف: {topReferrer || '—'}"
   },
   {
     "group": "ManagerTexts",
@@ -783,13 +783,13 @@
     "group": "ManagerTexts",
     "name": "orderApprovedInviteSent",
     "params": ["orderId", "userTgId"],
-    "text": "✅ سفارش #{orderId} تأیید شد. لینک کانال برای کاربر {userTgId} ارسال شد."
+    "text": "✅ سفارش #{orderId} تأیید شد و اطلاعات پرداخت برای کاربر {userTgId} ارسال شد."
   },
   {
     "group": "ManagerTexts",
     "name": "inviteSendFailed",
     "params": ["orderId"],
-    "text": "⚠️ سفارش #{orderId} تأیید شد اما ارسال لینک کانال به کاربر ناموفق بود."
+    "text": "⚠️ سفارش #{orderId} تأیید شد اما ارسال اطلاعات پرداخت به کاربر ناموفق بود."
   },
   {
     "group": "ManagerTexts",
@@ -872,8 +872,8 @@
   {
     "group": "ManagerTexts",
     "name": "settingsMenuTitle",
-    "params": ["imageStatus", "expiryMinutes", "paymentMethod"],
-    "text": "⚙️ *تنظیمات ربات*\n\n💳 روش پرداخت: {paymentMethod === \"channel\" ? \"📢 کانال\" : \"💳 مستقیم\"}\n🖼️ تصویر پرداخت: {imageStatus}\n⏳ مهلت پرداخت: {expiryMinutes} دقیقه"
+    "params": ["imageStatus", "cardStatus", "deliveryMsgStatus"],
+    "text": "⚙️ *تنظیمات ربات*\n\n🖼️ تصویر پرداخت: {imageStatus}\n🏦 شماره کارت: {cardStatus || '❌ تنظیم نشده'}\n🚚 پیام ارسال: {deliveryMsgStatus || '❌ تنظیم نشده'}"
   },
   {
     "group": "ManagerTexts",
@@ -891,7 +891,7 @@
     "group": "ManagerTexts",
     "name": "settingsImageAsk",
     "params": [],
-    "text": "🖼️ تصویر پرداخت را ارسال کنید (عکسی که در کانال نمایش داده می‌شود):"
+    "text": "🖼️ تصویر پرداخت را ارسال کنید (این تصویر همراه اطلاعات پرداخت برای کاربر ارسال می‌شود):"
   },
   {
     "group": "ManagerTexts",
@@ -915,7 +915,7 @@
     "group": "ManagerTexts",
     "name": "settingsPayMethodToggled",
     "params": ["method"],
-    "text": "method === \"channel\" ? \"✅ روش پرداخت به \\\"کانال\\\" تغییر یافت. اطلاعات پرداخت در کانال پست می‌شود.\" : \"✅ روش پرداخت به \\\"مستقیم\\\" تغییر یافت. اطلاعات پرداخت مستقیماً به کاربر ارسال می‌شود.\""
+    "text": "✅ اطلاعات پرداخت مستقیماً برای کاربر ارسال می‌شود."
   },
   {
     "group": "CourierTexts",
@@ -987,13 +987,13 @@
     "group": "CourierTexts",
     "name": "askFailureReasonEmpty",
     "params": [],
-    "text": "لطفاً علت را ارسال کنید."
+    "text": "لطفاً علت تحویل ناموفق را ارسال کنید."
   },
   {
     "group": "CourierTexts",
     "name": "statusAssigned",
     "params": [],
-    "text": "اختصاص داده شده"
+    "text": "اختصاص داده‌شده"
   },
   {
     "group": "CourierTexts",
@@ -1011,24 +1011,24 @@
     "group": "CourierTexts",
     "name": "statusDelivered",
     "params": [],
-    "text": "تحویل شد"
+    "text": "تحویل داده شد"
   },
   {
     "group": "CourierTexts",
     "name": "statusFailed",
     "params": [],
-    "text": "ناموفق"
+    "text": "تحویل ناموفق"
   },
   {
     "group": "NotificationTexts",
     "name": "orderApprovedWithInvite",
     "params": ["orderId", "inviteLink"],
-    "text": "سفارش #{orderId} تأیید شد. برای پرداخت وارد کانال شوید: {inviteLink}"
+    "text": "سفارش #{orderId} تأیید شد. اطلاعات پرداخت برای شما ارسال شد."
   },
   {
     "group": "ChannelTexts",
     "name": "paymentMessage",
     "params": ["orderId", "grandTotal", "currency"],
-    "text": "💳 *پرداخت سفارش #{orderId}*\n\nمبلغ قابل پرداخت: *{grandTotal.toLocaleString(\"fa-IR\")} {currency}*\n\nلطفاً مبلغ فوق را به شماره کارت/حساب ذکر شده واریز کنید و سپس عکس رسید را در ربات فروشگاه ارسال نمایید.\n\n⏳ این پیام پس از ثبت رسید یا اتمام مهلت پرداخت حذف خواهد شد."
+    "text": "💳 *پرداخت سفارش #{orderId}*\n\nمبلغ قابل پرداخت: *{grandTotal.toLocaleString(\"fa-IR\")} {currency}*\n\nلطفاً مبلغ فوق را به شماره کارت ذکرشده واریز کنید و سپس عکس رسید را در همین ربات ارسال نمایید.\n\n⏳ این پیام پس از اتمام مهلت پرداخت حذف خواهد شد."
   }
 ]

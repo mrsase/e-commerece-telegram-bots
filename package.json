@@ -12,12 +12,12 @@
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:seed": "tsx prisma/seed.ts",
-    "db:seed:all": "SEED_PRODUCTS=true SEED_DISCOUNTS=true tsx prisma/seed.ts"
+    "db:seed:all": "SEED_PRODUCTS=true tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
     "dotenv": "^17.2.3",
-    "fastify": "^4.28.1",
+    "fastify": "^5.10.0",
     "grammy": "^1.25.0",
     "pino": "^10.1.0",
     "zod": "^4.1.12"

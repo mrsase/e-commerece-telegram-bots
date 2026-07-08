@@ -5,7 +5,7 @@ function safeId(value: string | undefined, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 import type { PrismaClient, Manager } from "@prisma/client";
-import { OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
+import { DiscountType, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 import { formatPrice } from "../../utils/format-price.js";
@@ -20,6 +20,7 @@ type SessionState =
   | "product:add:price"
   | "product:add:stock"
   | "product:add:image"
+  | "product:add:preview"
   | "product:edit:title"
   | "product:edit:description"
   | "product:edit:price"
@@ -34,10 +35,14 @@ type SessionState =
   | "settings:expiry"
   | "settings:card"
   | "settings:deliverymsg"
+  | "settings:card:preview"
+  | "settings:deliverymsg:preview"
+  | "settings:expiry:preview"
   | "courier:add"
   | "user:setscore"
   | "user:discount"
-  | "user:setmaxcodes";
+  | "user:setmaxcodes"
+  | "support:reply:preview";
 
 interface ManagerSession {
   state: SessionState;
@@ -52,6 +57,12 @@ interface ManagerBotDeps {
   courierBot?: Bot;
   checkoutImageFileId?: string;
 }
+
+type UserDiscountFields = {
+  discountPercent?: number | null;
+  discountType?: DiscountType | null;
+  discountValue?: number | null;
+};
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
 import { NotificationService } from "../../services/notification-service.js";
@@ -74,6 +85,412 @@ async function getManager(ctx: Context, prisma: PrismaClient): Promise<Manager |
 
   if (!manager || !manager.isActive) return null;
   return manager;
+}
+
+function userDiscountLabel(user: UserDiscountFields): string {
+  const type = user.discountType ?? (user.discountPercent != null ? DiscountType.PERCENT : null);
+  const value = user.discountValue ?? user.discountPercent ?? null;
+  if (!type || value == null || value <= 0) return "ندارد";
+  return type === DiscountType.PERCENT ? `${value}%` : `${formatPrice(value)}`;
+}
+
+function parseUserDiscountInput(input: string):
+  | { remove: true }
+  | { remove: false; type: DiscountType; value: number }
+  | null {
+  const normalized = input.trim().replace(/\s+/g, "");
+  if (normalized === "0" || normalized === "/delete" || normalized === "حذف") {
+    return { remove: true };
+  }
+
+  if (normalized.endsWith("%")) {
+    const value = parseInt(normalized.slice(0, -1), 10);
+    if (!Number.isFinite(value) || value <= 0 || value > 100) return null;
+    return { remove: false, type: DiscountType.PERCENT, value };
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    const value = parseInt(normalized, 10);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return { remove: false, type: DiscountType.FIXED, value };
+  }
+
+  return null;
+}
+
+type ProductAddStep = "title" | "description" | "price" | "stock" | "image";
+
+function productAddStateForStep(step: ProductAddStep): SessionState {
+  return `product:add:${step}` as SessionState;
+}
+
+function productAddStepFromState(state: SessionState): ProductAddStep | null {
+  if (!state.startsWith("product:add:")) return null;
+  const step = state.split(":")[2];
+  if (step === "title" || step === "description" || step === "price" || step === "stock" || step === "image") {
+    return step;
+  }
+  return null;
+}
+
+function buildProductDraftPreview(data: Record<string, unknown>): string {
+  const title = String(data.title ?? "ثبت نشده");
+  const description = typeof data.description === "string" && data.description.trim() ? data.description : "ندارد";
+  const price = typeof data.price === "number" ? formatPrice(data.price) : "ثبت نشده";
+  const stock = typeof data.stock === "number" ? `${data.stock}` : "نامحدود / نامشخص";
+  const image = typeof data.photoFileId === "string" && data.photoFileId ? "دارد" : "ندارد";
+
+  return [
+    "🛍️ *پیش‌نمایش محصول جدید*",
+    "",
+    `📝 عنوان: ${escapeMarkdown(title)}`,
+    `📄 توضیحات: ${escapeMarkdown(description)}`,
+    `💰 قیمت: ${price}`,
+    `📦 موجودی: ${stock}`,
+    `🖼️ تصویر: ${image}`,
+    "",
+    "اگر همه چیز درست است، «ثبت محصول» را بزنید. برای اصلاح هر بخش از دکمه‌های پایین استفاده کنید.",
+  ].join("\n");
+}
+
+function productDraftValidationError(data: Record<string, unknown>): string | null {
+  if (typeof data.title !== "string" || !data.title.trim()) return "عنوان محصول هنوز ثبت نشده است.";
+  if (typeof data.price !== "number" || data.price <= 0) return "قیمت محصول هنوز معتبر نیست.";
+  if (data.stock != null && (typeof data.stock !== "number" || data.stock < 0)) return "موجودی محصول معتبر نیست.";
+  return null;
+}
+
+async function promptProductAddStep(ctx: Context, step: ProductAddStep): Promise<void> {
+  const text = step === "title" ? ManagerTexts.enterProductTitle()
+    : step === "description" ? ManagerTexts.enterProductDescription()
+    : step === "price" ? ManagerTexts.enterProductPrice()
+    : step === "stock" ? ManagerTexts.enterProductStock()
+    : ManagerTexts.sendProductImage();
+
+  await safeRender(ctx, text, {
+    reply_markup: ManagerKeyboards.productAddStep(step),
+  });
+}
+
+async function showProductDraftPreview(ctx: Context, session: ManagerSession): Promise<void> {
+  session.state = "product:add:preview";
+  managerSessions.set(ctx.from!.id, session);
+  await safeRender(ctx, buildProductDraftPreview(session.data ?? {}), {
+    parse_mode: "Markdown",
+    reply_markup: ManagerKeyboards.productAddPreview(),
+  });
+}
+
+async function buildManagerDashboardText(prisma: PrismaClient): Promise<string> {
+  const [pendingReceiptsCount, awaitingReceiptCount, paidOrdersCount, openSupportCount] = await Promise.all([
+    prisma.receipt.count({ where: { reviewStatus: ReceiptReviewStatus.PENDING } }),
+    prisma.order.count({ where: { status: OrderStatus.AWAITING_RECEIPT } }),
+    prisma.order.count({ where: { status: OrderStatus.PAID } }),
+    prisma.supportConversation.count({ where: { status: SupportConversationStatus.OPEN } }),
+  ]);
+
+  return [
+    ManagerTexts.mainMenuTitle(),
+    "",
+    `🧾 رسیدهای منتظر بررسی: ${pendingReceiptsCount}`,
+    `📸 سفارش‌های منتظر رسید مشتری: ${awaitingReceiptCount}`,
+    `💰 سفارش‌های پرداخت‌شده و آماده پیگیری: ${paidOrdersCount}`,
+    `💬 گفتگوهای باز پشتیبانی: ${openSupportCount}`,
+  ].join("\n");
+}
+
+async function renderManagerUserView(ctx: Context, prisma: PrismaClient, userId: number): Promise<boolean> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    await safeRender(ctx, "کاربر یافت نشد.", {
+      reply_markup: ManagerKeyboards.backToMenu(),
+    });
+    return false;
+  }
+
+  const orderCount = await prisma.order.count({ where: { userId } });
+  const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
+  const hasOverride = user.loyaltyScoreOverride != null;
+  const discountLabel = userDiscountLabel(user);
+
+  await safeRender(ctx,
+    ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, discountLabel, user.maxReferralCodes),
+    {
+      parse_mode: "Markdown",
+      reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, discountLabel, user.maxReferralCodes),
+    }
+  );
+  return true;
+}
+
+async function createManagerReferralCode(
+  ctx: Context,
+  prisma: PrismaClient,
+  managerId: number,
+  score: number,
+): Promise<void> {
+  const code = await createReferralCodeWithRetry(prisma, {
+    createdByManagerId: managerId,
+    maxUses: 1,
+    loyaltyScore: score,
+    prefix: "MGR_",
+    length: 6,
+  });
+
+  managerSessions.delete(ctx.from!.id);
+  await safeRender(ctx, ManagerTexts.referralCodeCreated(code), {
+    parse_mode: "Markdown",
+    reply_markup: new InlineKeyboard()
+      .text("➕ ساخت دعوت‌نامه دیگر", "mgr:referrals:create")
+      .text("📋 لیست دعوت‌نامه‌ها", "mgr:referrals:list")
+      .row()
+      .text("« منو", "mgr:menu"),
+  });
+}
+
+async function rejectReceipt(
+  ctx: Context,
+  prisma: PrismaClient,
+  manager: Manager,
+  clientBot: Bot | undefined,
+  receiptId: number,
+  reason: string | null,
+): Promise<void> {
+  const claimed = await prisma.receipt.updateMany({
+    where: { id: receiptId, reviewStatus: ReceiptReviewStatus.PENDING },
+    data: {
+      reviewStatus: ReceiptReviewStatus.REJECTED,
+      reviewedById: manager.id,
+      reviewNotes: reason,
+    },
+  });
+
+  if (claimed.count === 0) {
+    managerSessions.delete(ctx.from!.id);
+    await safeRender(ctx, "این رسید قبلاً بررسی شده است.", { reply_markup: ManagerKeyboards.backToMenu() });
+    return;
+  }
+
+  const receipt = await prisma.receipt.findUnique({
+    where: { id: receiptId },
+    include: { order: true },
+  });
+
+  if (!receipt) {
+    managerSessions.delete(ctx.from!.id);
+    await safeRender(ctx, "رسید یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
+    return;
+  }
+
+  if (receipt.order.status === OrderStatus.AWAITING_RECEIPT || receipt.order.status === OrderStatus.INVITE_SENT) {
+    await prisma.order.update({
+      where: { id: receipt.orderId },
+      data: {
+        status: OrderStatus.AWAITING_RECEIPT,
+        events: {
+          create: {
+            actorType: "manager",
+            actorId: manager.id,
+            eventType: "receipt_rejected",
+            payload: reason ? JSON.stringify({ reason }) : null,
+          },
+        },
+      },
+    });
+  }
+
+  managerSessions.delete(ctx.from!.id);
+
+  const orderWithUser = await prisma.order.findUnique({
+    where: { id: receipt.orderId },
+    include: { user: true },
+  });
+  if (clientBot && orderWithUser?.user) {
+    try {
+      await clientBot.api.sendMessage(
+        orderWithUser.user.tgUserId.toString(),
+        ClientTexts.receiptRejected(receipt.orderId, reason || undefined),
+      );
+    } catch (error) {
+      console.error("Failed to notify client of receipt rejection:", error);
+    }
+  }
+
+  await safeRender(ctx, ManagerTexts.receiptRejected(receipt.orderId), {
+    reply_markup: new InlineKeyboard()
+      .text("📋 مشاهده سفارش", `mgr:order:${receipt.orderId}`)
+      .text("« رسیدها", "mgr:receipts"),
+  });
+}
+
+async function approveReceipt(
+  ctx: Context,
+  prisma: PrismaClient,
+  manager: Manager,
+  notificationService: NotificationService,
+  clientBot: Bot | undefined,
+  receiptId: number,
+  etaText?: string,
+): Promise<void> {
+  const receipt = await prisma.receipt.findUnique({
+    where: { id: receiptId },
+    include: { order: { include: { user: true } } },
+  });
+
+  if (!receipt) {
+    managerSessions.delete(ctx.from!.id);
+    await safeRender(ctx, "رسید یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
+    return;
+  }
+
+  const claimed = await prisma.receipt.updateMany({
+    where: { id: receiptId, reviewStatus: ReceiptReviewStatus.PENDING },
+    data: {
+      reviewStatus: ReceiptReviewStatus.ACCEPTED,
+      reviewedById: manager.id,
+    },
+  });
+
+  if (claimed.count === 0) {
+    managerSessions.delete(ctx.from!.id);
+    await safeRender(ctx, "این رسید قبلاً بررسی شده است.", { reply_markup: ManagerKeyboards.backToMenu() });
+    return;
+  }
+
+  const txResult = await prisma.$transaction(async (tx) => {
+    const activeCourier = await tx.courier.findFirst({
+      where: { isActive: true },
+    });
+
+    await tx.order.update({
+      where: { id: receipt.orderId },
+      data: {
+        status: OrderStatus.PAID,
+        events: {
+          create: {
+            actorType: "manager",
+            actorId: manager.id,
+            eventType: "receipt_approved",
+          },
+        },
+      },
+    });
+
+    if (activeCourier) {
+      await tx.delivery.create({
+        data: {
+          orderId: receipt.orderId,
+          assignedCourierId: activeCourier.id,
+        },
+      });
+    }
+
+    return { courier: activeCourier };
+  });
+
+  if (clientBot && receipt.order.channelMessageId) {
+    try {
+      await clientBot.api.deleteMessage(
+        receipt.order.user.tgUserId.toString(),
+        receipt.order.channelMessageId,
+      );
+    } catch (err) {
+      console.error(`[RECEIPT APPROVE] Failed to delete payment DM for order #${receipt.orderId}:`, err);
+    }
+    await prisma.order.update({
+      where: { id: receipt.orderId },
+      data: { channelMessageId: null },
+    });
+  }
+
+  if (receipt.order.user) {
+    await notificationService.notifyClientReceiptApproved(
+      receipt.order.user.tgUserId,
+      receipt.orderId,
+      etaText,
+    );
+  }
+
+  if (txResult.courier) {
+    const orderUser = receipt.order.user;
+    await notificationService.notifyCourierNewDelivery(
+      txResult.courier.tgUserId,
+      receipt.orderId,
+      `${orderUser?.firstName ?? ""} ${orderUser?.lastName ?? ""}`.trim() || "-",
+      orderUser?.phone ?? "-",
+      orderUser?.address ?? "-",
+    );
+  }
+
+  managerSessions.delete(ctx.from!.id);
+
+  await safeRender(ctx, ManagerTexts.receiptApproved(receipt.orderId), {
+    reply_markup: new InlineKeyboard()
+      .text("📋 مشاهده سفارش", `mgr:order:${receipt.orderId}`)
+      .text("« رسیدها", "mgr:receipts"),
+  });
+}
+
+async function showSettingsMenu(
+  ctx: Context,
+  settingsService: BotSettingsService,
+  fallbackImageFileId?: string,
+): Promise<void> {
+  const imageFileId = await settingsService.getCheckoutImageFileId(fallbackImageFileId);
+  const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
+  const cardNumber = await settingsService.getPaymentCardNumber();
+  const cardStatus = cardNumber ? `✅ ${cardNumber}` : undefined;
+  const deliveryMsg = await settingsService.getOutForDeliveryMessage();
+  const deliveryMsgStatus = deliveryMsg ? "✅ تنظیم شده" : undefined;
+
+  await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, cardStatus, deliveryMsgStatus), {
+    parse_mode: "Markdown",
+    reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
+  });
+}
+
+async function sendManagerSupportReply(
+  ctx: Context,
+  prisma: PrismaClient,
+  manager: Manager,
+  notificationService: NotificationService,
+  conversationId: number,
+  replyText: string,
+): Promise<void> {
+  const conversation = await prisma.supportConversation.findUnique({
+    where: { id: conversationId },
+    include: { user: true },
+  });
+
+  if (!conversation) {
+    managerSessions.delete(ctx.from!.id);
+    await safeRender(ctx, "گفتگو یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
+    return;
+  }
+
+  await prisma.$transaction([
+    prisma.supportMessage.create({
+      data: {
+        conversationId,
+        senderType: SupportSenderType.MANAGER,
+        senderManagerId: manager.id,
+        text: replyText,
+      },
+    }),
+    prisma.supportConversation.update({
+      where: { id: conversationId },
+      data: { lastMessageAt: new Date() },
+    }),
+  ]);
+
+  await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText, conversation.id);
+
+  managerSessions.delete(ctx.from!.id);
+  await safeRender(ctx, ManagerTexts.supportReplySent(), {
+    reply_markup: new InlineKeyboard()
+      .text("💬 مشاهده گفتگو", `mgr:support:conv:${conversationId}`)
+      .text("« صندوق", "mgr:support"),
+  });
 }
 
 /**
@@ -158,12 +575,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    const pendingReceiptsCount = await prisma.receipt.count({
-      where: { reviewStatus: ReceiptReviewStatus.PENDING },
-    });
-
     await ctx.reply(
-      `${ManagerTexts.mainMenuTitle()}\n\n🧾 رسیدهای در انتظار بررسی: ${pendingReceiptsCount}`,
+      await buildManagerDashboardText(prisma),
       {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.mainMenu(),
@@ -183,12 +596,20 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     const text = ctx.message.text.trim();
 
+    if (text === "/cancel" || text === "انصراف") {
+      managerSessions.delete(ctx.from.id);
+      await ctx.reply(ManagerTexts.actionCancelled(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
     // PRODUCT CREATION FLOW
     if (session.state === "product:add:title") {
       session.data = { ...session.data, title: text };
       session.state = "product:add:description";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.enterProductDescription());
+      await promptProductAddStep(ctx, "description");
       return;
     }
 
@@ -196,7 +617,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       session.data = { ...session.data, description: text === "/skip" ? null : text };
       session.state = "product:add:price";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.enterProductPrice());
+      await promptProductAddStep(ctx, "price");
       return;
     }
 
@@ -209,7 +630,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       session.data = { ...session.data, price };
       session.state = "product:add:stock";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.enterProductStock());
+      await promptProductAddStep(ctx, "stock");
       return;
     }
 
@@ -222,28 +643,25 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       session.data = { ...session.data, stock };
       session.state = "product:add:image";
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.sendProductImage());
+      await promptProductAddStep(ctx, "image");
       return;
     }
 
     if (session.state === "product:add:image" && text === "/skip") {
-      // Create product without image
-      const data = session.data!;
-      await prisma.product.create({
-        data: {
-          title: data.title as string,
-          description: data.description as string | null,
-          price: data.price as number,
-          stock: data.stock as number | null,
-          currency: "IRR",
-          isActive: true,
-        },
-      });
+      session.data = { ...session.data, photoFileId: null };
+      await showProductDraftPreview(ctx, session);
+      return;
+    }
 
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.productCreated(data.title as string), {
-        reply_markup: ManagerKeyboards.backToMenu(),
+    if (session.state === "product:add:image") {
+      await ctx.reply(ManagerTexts.sendProductImage(), {
+        reply_markup: ManagerKeyboards.productAddStep("image"),
       });
+      return;
+    }
+
+    if (session.state === "product:add:preview") {
+      await ctx.reply("برای ثبت یا ویرایش محصول، از دکمه‌های پیش‌نمایش استفاده کنید.");
       return;
     }
 
@@ -349,19 +767,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      const code = await createReferralCodeWithRetry(prisma, {
-        createdByManagerId: manager.id,
-        maxUses: 1,
-        loyaltyScore: score,
-        prefix: "MGR_",
-        length: 6,
-      });
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.referralCodeCreated(code), {
-        parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
+      await createManagerReferralCode(ctx, prisma, manager.id, score);
       return;
     }
 
@@ -377,73 +783,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
 
       const reason = input === "/skip" ? null : input;
-
-      // Atomically claim the receipt for rejection
-      const claimed = await prisma.receipt.updateMany({
-        where: { id: receiptId, reviewStatus: ReceiptReviewStatus.PENDING },
-        data: {
-          reviewStatus: ReceiptReviewStatus.REJECTED,
-          reviewedById: manager.id,
-          reviewNotes: reason,
-        },
-      });
-
-      if (claimed.count === 0) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply("این رسید قبلاً بررسی شده است.", { reply_markup: ManagerKeyboards.backToMenu() });
-        return;
-      }
-
-      const receipt = await prisma.receipt.findUnique({
-        where: { id: receiptId },
-        include: { order: true },
-      });
-
-      if (!receipt) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply("رسید یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
-        return;
-      }
-
-      // Only regress order status if it's still awaiting receipt
-      if (receipt.order.status === OrderStatus.AWAITING_RECEIPT || receipt.order.status === OrderStatus.INVITE_SENT) {
-        await prisma.order.update({
-          where: { id: receipt.orderId },
-          data: {
-            status: OrderStatus.AWAITING_RECEIPT,
-            events: {
-              create: {
-                actorType: "manager",
-                actorId: manager.id,
-                eventType: "receipt_rejected",
-                payload: reason ? JSON.stringify({ reason }) : null,
-              },
-            },
-          },
-        });
-      }
-
-      managerSessions.delete(ctx.from.id);
-
-      // Notify client about rejection (best-effort)
-      const orderWithUser = await prisma.order.findUnique({
-        where: { id: receipt.orderId },
-        include: { user: true },
-      });
-      if (clientBot && orderWithUser?.user) {
-        try {
-          await clientBot.api.sendMessage(
-            orderWithUser.user.tgUserId.toString(),
-            ClientTexts.receiptRejected(receipt.orderId, reason || undefined)
-          );
-        } catch (error) {
-          console.error("Failed to notify client of receipt rejection:", error);
-        }
-      }
-
-      await ctx.reply(ManagerTexts.receiptRejected(receipt.orderId), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
+      await rejectReceipt(ctx, prisma, manager, clientBot, receiptId, reason);
       return;
     }
 
@@ -459,109 +799,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
 
       const etaText = input === "/skip" ? undefined : input;
-
-      const receipt = await prisma.receipt.findUnique({
-        where: { id: receiptId },
-        include: { order: { include: { user: true } } },
-      });
-
-      if (!receipt) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply("رسید یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
-        return;
-      }
-
-      // Atomically claim the receipt
-      const claimed = await prisma.receipt.updateMany({
-        where: { id: receiptId, reviewStatus: ReceiptReviewStatus.PENDING },
-        data: {
-          reviewStatus: ReceiptReviewStatus.ACCEPTED,
-          reviewedById: manager.id,
-        },
-      });
-
-      if (claimed.count === 0) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply("این رسید قبلاً بررسی شده است.", { reply_markup: ManagerKeyboards.backToMenu() });
-        return;
-      }
-
-      // Update order + create delivery inside a transaction
-      const txResult = await prisma.$transaction(async (tx) => {
-        const activeCourier = await tx.courier.findFirst({
-          where: { isActive: true },
-        });
-
-        await tx.order.update({
-          where: { id: receipt.orderId },
-          data: {
-            status: OrderStatus.PAID,
-            events: {
-              create: {
-                actorType: "manager",
-                actorId: manager.id,
-                eventType: "receipt_approved",
-              },
-            },
-          },
-        });
-
-        if (activeCourier) {
-          await tx.delivery.create({
-            data: {
-              orderId: receipt.orderId,
-              assignedCourierId: activeCourier.id,
-            },
-          });
-        }
-
-        return { courier: activeCourier };
-      });
-
-      // Cleanup — delete the payment DM sent to the user
-      if (clientBot && receipt.order.channelMessageId) {
-        try {
-          await clientBot.api.deleteMessage(
-            receipt.order.user.tgUserId.toString(),
-            receipt.order.channelMessageId,
-          );
-        } catch (err) {
-          console.error(`[RECEIPT APPROVE] Failed to delete payment DM for order #${receipt.orderId}:`, err);
-        }
-        await prisma.order.update({
-          where: { id: receipt.orderId },
-          data: { channelMessageId: null },
-        });
-      }
-
-      // Notify client with ETA text
-      if (receipt.order.user) {
-        await notificationService.notifyClientReceiptApproved(
-          receipt.order.user.tgUserId,
-          receipt.orderId,
-          etaText,
-        );
-      }
-
-      // Notify courier if assigned
-      if (txResult.courier) {
-        const orderUser = receipt.order.user;
-        await notificationService.notifyCourierNewDelivery(
-          txResult.courier.tgUserId,
-          receipt.orderId,
-          `${orderUser?.firstName ?? ""} ${orderUser?.lastName ?? ""}`.trim() || "-",
-          orderUser?.phone ?? "-",
-          orderUser?.address ?? "-",
-        );
-      }
-
-      managerSessions.delete(ctx.from.id);
-
-      await ctx.reply(ManagerTexts.receiptApproved(receipt.orderId), {
-        reply_markup: new InlineKeyboard()
-          .text("📋 مشاهده سفارش", `mgr:order:${receipt.orderId}`)
-          .text("« بازگشت به منو", "mgr:menu"),
-      });
+      await approveReceipt(ctx, prisma, manager, notificationService, clientBot, receiptId, etaText);
       return;
     }
 
@@ -575,13 +813,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await settingsService.set(SettingKeys.INVITE_EXPIRY_MINUTES, String(minutes));
-      managerSessions.delete(ctx.from.id);
-
-      await ctx.reply(ManagerTexts.settingsExpiryUpdated(minutes), {
-        reply_markup: ManagerKeyboards.settingsMenu(
-          !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
-        ),
+      managerSessions.set(ctx.from.id, {
+        state: "settings:expiry:preview",
+        data: { minutes },
+      });
+      await ctx.reply(`⏳ *پیش‌نمایش مهلت پرداخت*\n\nمهلت پرداخت به ${minutes} دقیقه تغییر می‌کند.`, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.settingsConfirm("expiry"),
       });
       return;
     }
@@ -594,7 +832,6 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         managerSessions.delete(ctx.from.id);
 
         const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
-        const cardStatus = null;
         await ctx.reply(ManagerTexts.settingsCardDeleted(), {
           reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
         });
@@ -606,15 +843,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await settingsService.set(SettingKeys.PAYMENT_CARD_NUMBER, input);
-      managerSessions.delete(ctx.from.id);
-
-      const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
-      const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
-
-      await ctx.reply(ManagerTexts.settingsCardUpdated(input), {
+      managerSessions.set(ctx.from.id, {
+        state: "settings:card:preview",
+        data: { cardNumber: input },
+      });
+      await ctx.reply(`💳 *پیش‌نمایش شماره کارت پرداخت*\n\n\`${input}\`\n\nاین شماره در پیام پرداخت مشتری نمایش داده می‌شود.`, {
         parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
+        reply_markup: ManagerKeyboards.settingsConfirm("card"),
       });
       return;
     }
@@ -634,13 +869,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await settingsService.set(SettingKeys.OUT_FOR_DELIVERY_MESSAGE, input);
-      managerSessions.delete(ctx.from.id);
-
-      await ctx.reply(ManagerTexts.settingsDeliveryMsgUpdated(input), {
-        reply_markup: ManagerKeyboards.settingsMenu(
-          !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
-        ),
+      managerSessions.set(ctx.from.id, {
+        state: "settings:deliverymsg:preview",
+        data: { message: input },
+      });
+      await ctx.reply(`🚚 *پیش‌نمایش پیام ارسال*\n\n${escapeMarkdown(input)}\n\nاین پیام هنگام «در مسیر ارسال» شدن سفارش برای مشتری ارسال می‌شود.`, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.settingsConfirm("deliverymsg"),
       });
       return;
     }
@@ -668,28 +903,41 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // USER DISCOUNT PERCENTAGE
+    // USER DISCOUNT
     if (session.state === "user:discount") {
       const input = ctx.message.text.trim();
-      const percent = parseInt(input, 10);
+      const parsedDiscount = parseUserDiscountInput(input);
 
-      if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
-        await ctx.reply(ManagerTexts.invalidDiscountPercent());
+      if (!parsedDiscount) {
+        await ctx.reply(ManagerTexts.invalidUserDiscount());
         return;
       }
 
       const userId = session.data?.userId as number;
       await prisma.user.update({
         where: { id: userId },
-        data: { discountPercent: percent > 0 ? percent : null },
+        data: parsedDiscount.remove
+          ? { discountType: null, discountValue: null, discountPercent: null }
+          : {
+              discountType: parsedDiscount.type,
+              discountValue: parsedDiscount.value,
+              discountPercent: parsedDiscount.type === DiscountType.PERCENT ? parsedDiscount.value : null,
+            },
       });
 
       managerSessions.delete(ctx.from.id);
-      await ctx.reply(percent > 0
-        ? `✅ تخفیف ${percent}% برای کاربر اعمال شد.`
-        : "✅ تخفیف کاربر حذف شد.",
+      await ctx.reply(parsedDiscount.remove
+        ? ManagerTexts.userDiscountRemoved()
+        : ManagerTexts.userDiscountUpdated(
+            userDiscountLabel({
+              discountType: parsedDiscount.type,
+              discountValue: parsedDiscount.value,
+            }),
+          ),
         {
-          reply_markup: ManagerKeyboards.backToMenu(),
+          reply_markup: new InlineKeyboard()
+            .text("« کاربر", `mgr:user:${userId}`)
+            .text("« منو", "mgr:menu"),
         }
       );
       return;
@@ -723,7 +971,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const input = ctx.message.text.trim();
 
       if (!input || !/^\d+$/.test(input)) {
-        await ctx.reply(ManagerTexts.invalidTgId());
+        await ctx.reply(ManagerTexts.invalidTgId(), {
+          reply_markup: new InlineKeyboard()
+            .text("« پیک‌ها", "mgr:couriers")
+            .text("« منو", "mgr:menu"),
+        });
         return;
       }
 
@@ -747,7 +999,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       managerSessions.delete(ctx.from.id);
       await ctx.reply(ManagerTexts.courierAdded(input), {
-        reply_markup: ManagerKeyboards.courierManagement(),
+        reply_markup: new InlineKeyboard()
+          .text("📋 لیست پیک‌ها", "mgr:couriers:list")
+          .text("➕ افزودن پیک دیگر", "mgr:couriers:add")
+          .row()
+          .text("« منو", "mgr:menu"),
       });
       return;
     }
@@ -758,37 +1014,13 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const replyText = ctx.message.text.trim();
       if (!replyText) return;
 
-      const conversation = await prisma.supportConversation.findUnique({
-        where: { id: conversationId },
-        include: { user: true },
+      managerSessions.set(ctx.from.id, {
+        state: "support:reply:preview",
+        data: { conversationId, replyText },
       });
-
-      if (!conversation) {
-        managerSessions.delete(ctx.from.id);
-        await ctx.reply("گفتگو یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
-        return;
-      }
-
-      await prisma.$transaction([
-        prisma.supportMessage.create({
-          data: {
-            conversationId,
-            senderType: SupportSenderType.MANAGER,
-            senderManagerId: manager.id,
-            text: replyText,
-          },
-        }),
-        prisma.supportConversation.update({
-          where: { id: conversationId },
-          data: { lastMessageAt: new Date() },
-        }),
-      ]);
-
-      await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText, conversation.id);
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.supportReplySent(), {
-        reply_markup: ManagerKeyboards.backToMenu(),
+      await ctx.reply(`💬 *پیش‌نمایش پاسخ پشتیبانی*\n\n${escapeMarkdown(replyText)}\n\nبعد از تأیید، این پیام برای مشتری ارسال می‌شود.`, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.supportReplyPreview(conversationId),
       });
       return;
     }
@@ -808,23 +1040,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const photo = ctx.message.photo;
       const fileId = photo[photo.length - 1].file_id; // Get largest photo
 
-      const data = session.data!;
-      await prisma.product.create({
-        data: {
-          title: data.title as string,
-          description: data.description as string | null,
-          price: data.price as number,
-          stock: data.stock as number | null,
-          currency: "IRR",
-          isActive: true,
-          photoFileId: fileId,
-        },
-      });
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.productCreated(data.title as string), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
+      session.data = { ...session.data, photoFileId: fileId };
+      await showProductDraftPreview(ctx, session);
       return;
     }
 
@@ -882,23 +1099,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     const fileId = doc.file_id;
 
     if (session.state === "product:add:image") {
-      const data = session.data!;
-      await prisma.product.create({
-        data: {
-          title: data.title as string,
-          description: data.description as string | null,
-          price: data.price as number,
-          stock: data.stock as number | null,
-          currency: "IRR",
-          isActive: true,
-          photoFileId: fileId,
-        },
-      });
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.productCreated(data.title as string), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
+      session.data = { ...session.data, photoFileId: fileId };
+      await showProductDraftPreview(ctx, session);
       return;
     }
 
@@ -958,12 +1160,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     // MAIN MENU
     if (data === "mgr:menu") {
-      const pendingReceiptsCount = await prisma.receipt.count({
-        where: { reviewStatus: ReceiptReviewStatus.PENDING },
-      });
-
+      managerSessions.delete(ctx.from.id);
       await safeRender(ctx, 
-        `${ManagerTexts.mainMenuTitle()}\n\n🧾 رسیدهای در انتظار بررسی: ${pendingReceiptsCount}`,
+        await buildManagerDashboardText(prisma),
         {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.mainMenu(),
@@ -1103,7 +1302,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         try {
           await clientBot.api.sendMessage(
             userTgId,
-            `✅ سفارش #${orderId} تأیید شد.\n\nپس از پرداخت، عکس رسید را همینجا ارسال کنید.`,
+            `✅ سفارش #${orderId} تأیید شد.\n\nاطلاعات پرداخت ارسال شد. پس از پرداخت، عکس واضح رسید را همین‌جا ارسال کنید.`,
           );
         } catch (err) {
           console.error("[APPROVE] Failed to send receipt instruction:", err);
@@ -1243,10 +1442,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
 
       const isCompleted = order.status === OrderStatus.COMPLETED;
-      const actionLabel = isCompleted ? "حذف" : "لغو";
+      const actionLabel = isCompleted ? "حذف از فهرست فعال" : "لغو";
 
       const confirmKb = new InlineKeyboard()
-        .text(`✅ بله، ${actionLabel} شود`, `mgr:order:cancel:confirm:${orderId}`)
+        .text(isCompleted ? "✅ بله، حذف شود" : "✅ بله، لغو شود", `mgr:order:cancel:confirm:${orderId}`)
         .row()
         .text("❌ خیر", `mgr:order:${orderId}`);
 
@@ -1298,7 +1497,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         await clientBot?.api.sendMessage(
           order.user.tgUserId.toString(),
           isCompleted
-            ? `❌ سفارش #${orderId} توسط مدیریت حذف شد.`
+            ? `سفارش #${orderId} توسط مدیریت از فهرست فعال خارج شد.`
             : `❌ سفارش #${orderId} توسط مدیریت لغو شد.`
         );
       } catch (err) {
@@ -1311,7 +1510,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await safeRender(ctx, `✅ سفارش #${orderId} با موفقیت ${doneLabel} شد.`, {
         reply_markup: new InlineKeyboard()
           .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
-          .text("📊 همه سفارش‌ها", "mgr:allorders")
+          .text("📋 همه سفارش‌ها", "mgr:allorders")
           .row()
           .text("« منو", "mgr:menu"),
       });
@@ -1374,7 +1573,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       try {
         await clientBot?.api.sendMessage(
           order.user.tgUserId.toString(),
-          `❌ سفارش #${orderId} توسط مدیریت حذف شد.`
+          `سفارش #${orderId} توسط مدیریت از فهرست فعال خارج شد.`
         );
       } catch (err) {
         console.error(`[DELETE ORDER] Failed to notify client for order #${orderId}:`, err);
@@ -1385,7 +1584,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await safeRender(ctx, `✅ سفارش #${orderId} با موفقیت حذف شد.`, {
         reply_markup: new InlineKeyboard()
           .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
-          .text("📊 همه سفارش‌ها", "mgr:allorders")
+          .text("📋 همه سفارش‌ها", "mgr:allorders")
           .row()
           .text("« منو", "mgr:menu"),
       });
@@ -1428,8 +1627,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       if (order.status !== OrderStatus.CANCELLED) {
         detailKb.text("❌ لغو سفارش", `mgr:order:cancel:${order.id}`);
       }
-      detailKb.text("🗑️ حذف سفارش", `mgr:order:delete:${order.id}`).row();
-      detailKb.text("📊 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
+      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.COMPLETED) {
+        detailKb.text("🗑️ حذف سفارش", `mgr:order:delete:${order.id}`);
+      }
+      detailKb.row();
+      detailKb.text("📋 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
 
       await safeRender(ctx, detailText, {
         parse_mode: "Markdown",
@@ -1498,7 +1700,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-      let text = `📊 *همه سفارش‌ها*`;
+      let text = `📋 *همه سفارش‌ها*`;
       if (statusFilter) text += ` (فیلتر: ${orderStatusLabel(statusFilter)})`;
       text += `\n${total} سفارش یافت شد.\n\n`;
 
@@ -1513,16 +1715,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const allKb = new InlineKeyboard();
 
-      // Status filter buttons (2 rows of 3)
+      // Action-focused filters first; archive-like states are secondary.
       allKb
-        .text("⏳ در انتظار تأیید", "mgr:allorders:AWAITING_MANAGER_APPROVAL:0")
-        .text("🧾 در انتظار رسید", "mgr:allorders:AWAITING_RECEIPT:0")
-        .text("✅ تأیید شده", "mgr:allorders:APPROVED:0")
+        .text("🧾 رسید لازم", "mgr:allorders:AWAITING_RECEIPT:0")
+        .text("💰 پرداخت‌شده", "mgr:allorders:PAID:0")
+        .text("⏳ بررسی مدیر", "mgr:allorders:AWAITING_MANAGER_APPROVAL:0")
         .row()
-        .text("💰 پرداخت شده", "mgr:allorders:PAID:0")
-        .text("✅ تکمیل شده", "mgr:allorders:COMPLETED:0")
-        .text("❌ لغو شده", "mgr:allorders:CANCELLED:0")
-        .text("🗑️ حذف شده‌ها", "mgr:deletedorders:0")
+        .text("✅ تأییدشده", "mgr:allorders:APPROVED:0")
+        .text("✅ تکمیل‌شده", "mgr:allorders:COMPLETED:0")
+        .text("❌ لغوشده", "mgr:allorders:CANCELLED:0")
         .row();
 
       // Per-order detail buttons (3 per row)
@@ -1540,7 +1741,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       allKb.text("📋 همه", "mgr:allorders");
       allKb.row();
 
-      allKb.text("« منو", "mgr:menu");
+      allKb.text("🗑️ حذف‌شده‌ها", "mgr:deletedorders:0").text("« منو", "mgr:menu");
 
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
@@ -1573,9 +1774,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       ]);
 
       const totalPages = Math.max(1, Math.ceil(total / pageSize));
-      let text = `🗑️ *سفارش‌های حذف شده*\n${total} سفارش.\n\n`;
+      let text = `🗑️ *سفارش‌های حذف‌شده*\n${total} سفارش.\n\n`;
       if (orders.length === 0) {
-        text += "هیچ سفارش حذف شده‌ای یافت نشد.\n";
+        text += "هیچ سفارش حذف‌شده‌ای یافت نشد.\n";
       } else {
         orders.forEach((o) => {
           const userLabel = escapeMarkdown(o.user.username || o.user.firstName) || `کاربر #${o.userId}`;
@@ -1595,7 +1796,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       if (page < totalPages - 1) delKb.text("بعدی »", `mgr:deletedorders:${page + 1}`);
       delKb.row();
 
-      delKb.text("📊 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
+      delKb.text("📋 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
 
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
@@ -1660,16 +1861,16 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         select: { id: true, username: true, firstName: true },
       });
 
-      let text = `🔗 *معرفی‌های ${escapeMarkdown(label)}*\n\n`;
+      let text = `🔗 *کدهای معرفی یک‌بارمصرف ${escapeMarkdown(label)}*\n\n`;
 
       if (referralCodes.length > 0) {
-        text += "*کدهای معرفی:*\n";
+        text += "*کدها:*\n";
         referralCodes.forEach((c) => {
-          text += `\`${c.code}\` · ${c.usedCount} استفاده\n`;
+          text += `\`${c.code}\` · ${c.usedCount > 0 ? "مصرف‌شده" : "قابل استفاده"}\n`;
         });
       }
 
-      text += `\n*کاربران معرفی شده:* ${referredUsers.length}\n`;
+      text += `\n*کاربران واردشده با این کدها:* ${referredUsers.length}\n`;
       referredUsers.forEach((u) => {
         text += `  ${escapeMarkdown(u.username || u.firstName || `#${u.id}`)}\n`;
       });
@@ -1685,6 +1886,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // PRODUCTS
     // ===========================================
     if (data === "mgr:products") {
+      managerSessions.delete(ctx.from.id);
       await safeRender(ctx, ManagerTexts.productsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.productManagement(),
@@ -1722,11 +1924,139 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
     if (data === "mgr:products:add") {
       managerSessions.set(ctx.from.id, { state: "product:add:title", data: {} });
-      await safeRender(ctx, ManagerTexts.enterProductTitle());
+      await promptProductAddStep(ctx, "title");
+      return;
+    }
+
+    if (data.startsWith("mgr:product:delete:confirm:")) {
+      const productId = safeId(parts[4]);
+      const product = await prisma.product.findUnique({ where: { id: productId } });
+
+      if (!product) {
+        await answerCallback({ text: "محصول یافت نشد" });
+        return;
+      }
+
+      await prisma.product.update({
+        where: { id: productId },
+        data: { isActive: false },
+      });
+
+      await answerCallback({ text: ManagerTexts.productDeleted(), show_alert: true });
+      await safeRender(ctx, ManagerTexts.productDeleted(), {
+        reply_markup: new InlineKeyboard()
+          .text("📋 محصولات", "mgr:products:list")
+          .text("« منو", "mgr:menu"),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:product:delete:")) {
+      const productId = safeId(parts[3]);
+      const product = await prisma.product.findUnique({ where: { id: productId } });
+
+      if (!product) {
+        await answerCallback({ text: "محصول یافت نشد" });
+        return;
+      }
+
+      await safeRender(ctx, `⚠️ *غیرفعال‌سازی محصول*\n\nمحصول «${escapeMarkdown(product.title)}» از فروشگاه مشتری‌ها پنهان می‌شود. سفارش‌های قبلی حذف نمی‌شوند.\n\nادامه می‌دهید؟`, {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard()
+          .text("✅ بله، غیرفعال شود", `mgr:product:delete:confirm:${productId}`)
+          .row()
+          .text("❌ انصراف", `mgr:product:edit:${productId}`)
+          .text("« محصولات", "mgr:products:list"),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:productdraft:")) {
+      const session = managerSessions.get(ctx.from.id);
+      if (!session || !session.state.startsWith("product:add")) {
+        await answerCallback({ text: "فرآیند افزودن محصول فعال نیست.", show_alert: true });
+        return;
+      }
+
+      const action = parts[2];
+      const value = parts[3] as ProductAddStep | undefined;
+
+      if (action === "cancel") {
+        managerSessions.delete(ctx.from.id);
+        await safeRender(ctx, ManagerTexts.actionCancelled(), {
+          reply_markup: ManagerKeyboards.productManagement(),
+        });
+        return;
+      }
+
+      if (action === "back" || action === "edit") {
+        if (!value || !["title", "description", "price", "stock", "image"].includes(value)) {
+          await answerCallback({ text: "مرحله معتبر نیست.", show_alert: true });
+          return;
+        }
+        session.state = productAddStateForStep(value);
+        managerSessions.set(ctx.from.id, session);
+        await promptProductAddStep(ctx, value);
+        return;
+      }
+
+      if (action === "skip") {
+        if (value === "description") {
+          session.data = { ...session.data, description: null };
+          session.state = "product:add:price";
+          managerSessions.set(ctx.from.id, session);
+          await promptProductAddStep(ctx, "price");
+          return;
+        }
+        if (value === "stock") {
+          session.data = { ...session.data, stock: null };
+          session.state = "product:add:image";
+          managerSessions.set(ctx.from.id, session);
+          await promptProductAddStep(ctx, "image");
+          return;
+        }
+        if (value === "image") {
+          session.data = { ...session.data, photoFileId: null };
+          await showProductDraftPreview(ctx, session);
+          return;
+        }
+      }
+
+      if (action === "confirm") {
+        const data = session.data ?? {};
+        const validationError = productDraftValidationError(data);
+        if (validationError) {
+          await answerCallback({ text: validationError, show_alert: true });
+          const step = productAddStepFromState(session.state) ?? "title";
+          await promptProductAddStep(ctx, step);
+          return;
+        }
+
+        const product = await prisma.product.create({
+          data: {
+            title: data.title as string,
+            description: data.description as string | null,
+            price: data.price as number,
+            stock: data.stock as number | null,
+            currency: "IRR",
+            isActive: true,
+            photoFileId: (data.photoFileId as string | null | undefined) ?? null,
+          },
+        });
+
+        managerSessions.delete(ctx.from.id);
+        await safeRender(ctx, ManagerTexts.productCreated(product.title), {
+          reply_markup: ManagerKeyboards.productEdit(product.id, !!product.photoFileId),
+        });
+        return;
+      }
+
+      await answerCallback({ text: "عملیات نامعتبر است.", show_alert: true });
       return;
     }
 
     if (data.startsWith("mgr:product:edit:") && parts.length === 4) {
+      managerSessions.delete(ctx.from.id);
       const productId = safeId(parts[3]);
       const product = await prisma.product.findUnique({ where: { id: productId } });
 
@@ -1750,33 +2080,51 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+    if (data.startsWith("mgr:product:edit:") && parts.length === 6 && parts[4] === "removeimage" && parts[5] === "confirm") {
+      const productId = safeId(parts[3]);
+      await prisma.product.update({
+        where: { id: productId },
+        data: { photoFileId: null },
+      });
+
+      const product = await prisma.product.findUnique({ where: { id: productId } });
+      if (!product) {
+        await answerCallback({ text: "محصول یافت نشد" });
+        return;
+      }
+      const text = `*ویرایش محصول: ${escapeMarkdown(product.title)}*\n\n` +
+        `📝 عنوان: ${escapeMarkdown(product.title)}\n` +
+        `📄 توضیحات: ${product.description ? escapeMarkdown(product.description) : '—'}\n` +
+        `💰 قیمت: ${formatPrice(product.price)}\n` +
+        `📦 موجودی: ${product.stock ?? 'نامحدود'}\n` +
+        `🖼️ تصویر: ندارد\n` +
+        `وضعیت: ${product.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
+
+      await safeRender(ctx, text, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.productEdit(productId, false),
+      });
+      return;
+    }
+
     if (data.startsWith("mgr:product:edit:") && parts.length === 5) {
       const productId = safeId(parts[3]);
       const field = parts[4];
 
-      // Handle remove image immediately (no user input needed)
       if (field === "removeimage") {
-        await prisma.product.update({
-          where: { id: productId },
-          data: { photoFileId: null },
-        });
-
         const product = await prisma.product.findUnique({ where: { id: productId } });
         if (!product) {
           await answerCallback({ text: "محصول یافت نشد" });
           return;
         }
-        const text = `*ویرایش محصول: ${escapeMarkdown(product.title)}*\n\n` +
-          `📝 عنوان: ${escapeMarkdown(product.title)}\n` +
-          `📄 توضیحات: ${product.description ? escapeMarkdown(product.description) : '—'}\n` +
-          `💰 قیمت: ${formatPrice(product.price)}\n` +
-          `📦 موجودی: ${product.stock ?? 'نامحدود'}\n` +
-          `🖼️ تصویر: ندارد\n` +
-          `وضعیت: ${product.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
 
-        await safeRender(ctx, text, {
+        await safeRender(ctx, `⚠️ *حذف تصویر محصول*\n\nتصویر محصول «${escapeMarkdown(product.title)}» حذف می‌شود. آیا مطمئن هستید؟`, {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.productEdit(productId, false),
+          reply_markup: new InlineKeyboard()
+            .text("✅ بله، حذف شود", `mgr:product:edit:${productId}:removeimage:confirm`)
+            .row()
+            .text("❌ انصراف", `mgr:product:edit:${productId}`)
+            .text("« محصولات", "mgr:products:list"),
         });
         return;
       }
@@ -1787,11 +2135,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         data: { productId },
       });
 
-      if (field === "title") await safeRender(ctx, ManagerTexts.enterProductTitle());
-      else if (field === "desc") await safeRender(ctx, ManagerTexts.enterProductDescription());
-      else if (field === "price") await safeRender(ctx, ManagerTexts.enterProductPrice());
-      else if (field === "stock") await safeRender(ctx, ManagerTexts.enterProductStock());
-      else if (field === "image") await safeRender(ctx, ManagerTexts.sendProductImage());
+      const backToProduct = new InlineKeyboard()
+        .text("« محصول", `mgr:product:edit:${productId}`)
+        .text("« منو", "mgr:menu");
+
+      if (field === "title") await safeRender(ctx, ManagerTexts.enterProductTitle(), { reply_markup: backToProduct });
+      else if (field === "desc") await safeRender(ctx, ManagerTexts.enterProductDescription(), { reply_markup: backToProduct });
+      else if (field === "price") await safeRender(ctx, ManagerTexts.enterProductPrice(), { reply_markup: backToProduct });
+      else if (field === "stock") await safeRender(ctx, ManagerTexts.enterProductStock(), { reply_markup: backToProduct });
+      else if (field === "image") await safeRender(ctx, ManagerTexts.sendProductImage(), { reply_markup: backToProduct });
       return;
     }
 
@@ -1883,26 +2235,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "setmaxcodes", "message", "location"].includes(parts[2])) {
+    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "discount", "setmaxcodes", "message", "location"].includes(parts[2])) {
       const userId = safeId(parts[2]);
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-
-      if (!user) {
-        await answerCallback({ text: "کاربر یافت نشد" });
-        return;
-      }
-
-      const orderCount = await prisma.order.count({ where: { userId } });
-      const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
-      const hasOverride = user.loyaltyScoreOverride != null;
-
-      await safeRender(ctx, 
-        ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, user.discountPercent, user.maxReferralCodes),
-        {
-          parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, user.discountPercent, user.maxReferralCodes),
-        }
-      );
+      await renderManagerUserView(ctx, prisma, userId);
       return;
     }
 
@@ -1937,10 +2272,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const hasOvr = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr, updated.discountPercent, updated.maxReferralCodes),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr, userDiscountLabel(updated), updated.maxReferralCodes),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, updated.discountPercent, updated.maxReferralCodes),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes),
         }
       );
       return;
@@ -1977,10 +2312,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const hasOvr2 = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2, updated.discountPercent, updated.maxReferralCodes),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2, userDiscountLabel(updated), updated.maxReferralCodes),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, updated.discountPercent, updated.maxReferralCodes),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes),
         }
       );
       return;
@@ -2000,7 +2335,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ManagerTexts.userContactInfo(user.phone, user.address, user.locationLat, user.locationLng, user.locationText),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, user.discountPercent, user.maxReferralCodes),
+          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, userDiscountLabel(user), user.maxReferralCodes),
         }
       );
       return;
@@ -2043,22 +2378,80 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // SET USER DISCOUNT PERCENTAGE
+    // SET USER DISCOUNT
     if (data.startsWith("mgr:user:setdiscount:")) {
       const userId = safeId(parts[3]);
-      managerSessions.set(ctx.from.id, { state: "user:discount", data: { userId } });
+      managerSessions.delete(ctx.from.id);
       const user = await prisma.user.findUnique({ where: { id: userId } });
-      const current = user?.discountPercent;
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
       await safeRender(ctx,
-        current != null
-          ? `🎯 تخفیف فعلی این کاربر: ${current}%\n\nدرصد تخفیف جدید را وارد کنید (۰ = حذف تخفیف):`
-          : ManagerTexts.enterUserDiscount(),
+        ManagerTexts.enterUserDiscount(user ? userDiscountLabel(user) : "ندارد"),
         {
-          reply_markup: new InlineKeyboard()
-            .text("« کاربر", `mgr:user:${userId}`)
-            .text("« منو", "mgr:menu"),
+          reply_markup: ManagerKeyboards.userDiscountMenu(userId, userDiscountLabel(user) !== "ندارد"),
         }
       );
+      return;
+    }
+
+    if (data.startsWith("mgr:user:discount:")) {
+      const action = parts[3];
+
+      if (action === "custom") {
+        const userId = safeId(parts[4]);
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+          await answerCallback({ text: "کاربر یافت نشد" });
+          return;
+        }
+        managerSessions.set(ctx.from.id, { state: "user:discount", data: { userId } });
+        await safeRender(ctx,
+          ManagerTexts.enterUserDiscount(userDiscountLabel(user)),
+          {
+            reply_markup: new InlineKeyboard()
+              .text("« تخفیف‌ها", `mgr:user:setdiscount:${userId}`)
+              .text("« منو", "mgr:menu"),
+          }
+        );
+        return;
+      }
+
+      if (action === "remove") {
+        const userId = safeId(parts[4]);
+        await prisma.user.update({
+          where: { id: userId },
+          data: { discountType: null, discountValue: null, discountPercent: null },
+        });
+        await answerCallback({ text: ManagerTexts.userDiscountRemoved(), show_alert: true });
+        await renderManagerUserView(ctx, prisma, userId);
+        return;
+      }
+
+      if (action === "pct") {
+        const userId = safeId(parts[4]);
+        const value = safeId(parts[5]);
+        if (value <= 0 || value > 100) {
+          await answerCallback({ text: ManagerTexts.invalidUserDiscount(), show_alert: true });
+          return;
+        }
+
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            discountType: DiscountType.PERCENT,
+            discountValue: value,
+            discountPercent: value,
+          },
+        });
+        await answerCallback({ text: ManagerTexts.userDiscountUpdated(`${value}%`), show_alert: true });
+        await renderManagerUserView(ctx, prisma, userId);
+        return;
+      }
+
+      await answerCallback({ text: "عملیات تخفیف معتبر نیست.", show_alert: true });
       return;
     }
 
@@ -2116,8 +2509,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     // DELETE USER
-    if (data.startsWith("mgr:user:delete:")) {
-      const userId = safeId(parts[3]);
+    if (data.startsWith("mgr:user:delete:confirm:")) {
+      const userId = safeId(parts[4]);
       const user = await prisma.user.findUnique({ where: { id: userId } });
 
       if (!user) {
@@ -2125,7 +2518,6 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      // Soft-delete: deactivate + clear personal data
       await prisma.user.update({
         where: { id: userId },
         data: {
@@ -2142,6 +2534,25 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       await safeRender(ctx, ManagerTexts.userDeleted(user.username), {
         reply_markup: ManagerKeyboards.userManagement(),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:user:delete:")) {
+      const userId = safeId(parts[3]);
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد" });
+        return;
+      }
+
+      await safeRender(ctx, ManagerTexts.userDeleteConfirm(user.username), {
+        reply_markup: new InlineKeyboard()
+          .text("✅ بله، حذف شود", `mgr:user:delete:confirm:${userId}`)
+          .row()
+          .text("❌ انصراف", `mgr:user:${userId}`)
+          .text("« منو", "mgr:menu"),
       });
       return;
     }
@@ -2179,7 +2590,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data === "mgr:couriers:add") {
       managerSessions.set(ctx.from.id, { state: "courier:add" });
       await safeRender(ctx, ManagerTexts.enterCourierTgId(), {
-        reply_markup: ManagerKeyboards.backToMenu(),
+        reply_markup: new InlineKeyboard()
+          .text("« پیک‌ها", "mgr:couriers")
+          .text("« منو", "mgr:menu"),
       });
       return;
     }
@@ -2232,8 +2645,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:courier:delete:")) {
-      const courierId = safeId(parts[3]);
+    if (data.startsWith("mgr:courier:delete:confirm:")) {
+      const courierId = safeId(parts[4]);
       const courier = await prisma.courier.findUnique({ where: { id: courierId } });
 
       if (!courier) {
@@ -2248,7 +2661,6 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         show_alert: true,
       });
 
-      // Back to courier list
       const couriers = await prisma.courier.findMany({ orderBy: { id: "desc" } });
       if (couriers.length === 0) {
         await safeRender(ctx, ManagerTexts.noCouriers(), {
@@ -2263,10 +2675,30 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+    if (data.startsWith("mgr:courier:delete:")) {
+      const courierId = safeId(parts[3]);
+      const courier = await prisma.courier.findUnique({ where: { id: courierId } });
+
+      if (!courier) {
+        await answerCallback({ text: "پیک یافت نشد" });
+        return;
+      }
+
+      await safeRender(ctx, ManagerTexts.confirmDelete(`پیک ${courier.username || `#${courier.id}`}`), {
+        reply_markup: new InlineKeyboard()
+          .text("✅ بله، حذف شود", `mgr:courier:delete:confirm:${courierId}`)
+          .row()
+          .text("❌ انصراف", `mgr:courier:${courierId}`)
+          .text("« پیک‌ها", "mgr:couriers:list"),
+      });
+      return;
+    }
+
     // ===========================================
     // REFERRALS
     // ===========================================
     if (data === "mgr:referrals") {
+      managerSessions.delete(ctx.from.id);
       await safeRender(ctx, ManagerTexts.referralsMenuTitle(), {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.referralManagement(),
@@ -2275,8 +2707,29 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:referrals:create") {
+      await safeRender(ctx, ManagerTexts.enterReferralScore(), {
+        reply_markup: ManagerKeyboards.referralScoreMenu(),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:referrals:create:score:")) {
+      const score = safeId(parts[4]);
+      if (score < 0 || score > 10) {
+        await answerCallback({ text: ManagerTexts.invalidScore(), show_alert: true });
+        return;
+      }
+      await createManagerReferralCode(ctx, prisma, manager.id, score);
+      return;
+    }
+
+    if (data === "mgr:referrals:create:custom") {
       managerSessions.set(ctx.from.id, { state: "referral:create:score" });
-      await safeRender(ctx, ManagerTexts.enterReferralScore());
+      await safeRender(ctx, ManagerTexts.enterReferralScore(), {
+        reply_markup: new InlineKeyboard()
+          .text("« انتخاب سریع", "mgr:referrals:create")
+          .text("« منو", "mgr:menu"),
+      });
       return;
     }
 
@@ -2301,7 +2754,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       codes.forEach((c) => {
         const creator = c.createdByUser?.username || (c.createdByManager ? 'مدیر' : 'نامشخص');
         const status = c.isActive ? "✅" : "❌";
-        text += `${status} \`${c.code}\` - توسط ${escapeMarkdown(creator)} - ${c.usedCount}/${c.maxUses || '∞'} استفاده\n`;
+        const usageLabel = c.usedCount > 0 ? "استفاده‌شده" : "قابل استفاده";
+        text += `${status} \`${c.code}\` - توسط ${escapeMarkdown(creator)} - ${usageLabel}\n`;
       });
 
       await safeRender(ctx, text, {
@@ -2737,12 +3191,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // APPROVE RECEIPT — Ask for ETA text first
+    // APPROVE RECEIPT — choose ETA preset or custom text first
     if (data.startsWith("mgr:receipt:approve:")) {
       const receiptId = safeId(parts[3]);
       const receipt = await prisma.receipt.findUnique({
         where: { id: receiptId },
-        include: { order: { include: { user: true } } },
       });
 
       if (!receipt) {
@@ -2750,29 +3203,67 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      managerSessions.set(ctx.from.id, {
-        state: "receipt:approve:eta",
-        data: { receiptId },
-      });
-
-      await answerCallback({ text: "⏳ متن زمان تحویل را وارد کنید." });
-      await ctx.reply(ManagerTexts.enterEtaMessage(), {
-        reply_markup: ManagerKeyboards.backToMenu(),
+      await safeRender(ctx, ManagerTexts.enterEtaMessage(), {
+        reply_markup: ManagerKeyboards.receiptApprovalMenu(receiptId),
       });
       return;
     }
 
-    // REJECT RECEIPT - Ask for reason
+    if (data.startsWith("mgr:receipt:approveeta:")) {
+      const receiptId = safeId(parts[3]);
+      const choice = parts[4];
+
+      if (choice === "custom") {
+        managerSessions.set(ctx.from.id, {
+          state: "receipt:approve:eta",
+          data: { receiptId },
+        });
+        await safeRender(ctx, ManagerTexts.enterEtaMessage(), {
+          reply_markup: new InlineKeyboard()
+            .text("« انتخاب سریع", `mgr:receipt:approve:${receiptId}`)
+            .text("« رسیدها", "mgr:receipts"),
+        });
+        return;
+      }
+
+      const etaText = choice === "today" ? "سفارش شما امروز برای ارسال آماده می‌شود."
+        : choice === "24h" ? "سفارش شما تا ۲۴ ساعت آینده برای ارسال آماده می‌شود."
+        : undefined;
+      await approveReceipt(ctx, prisma, manager, notificationService, clientBot, receiptId, etaText);
+      return;
+    }
+
+    // REJECT RECEIPT - choose preset reason or custom text
     if (data.startsWith("mgr:receipt:reject:")) {
       const receiptId = safeId(parts[3]);
-      managerSessions.set(ctx.from.id, { 
-        state: "receipt:reject:reason", 
-        data: { receiptId } 
+      await safeRender(ctx, ManagerTexts.enterRejectReason(), {
+        reply_markup: ManagerKeyboards.receiptRejectMenu(receiptId),
       });
-      await answerCallback({ text: "⏳ علت رد را وارد کنید." });
-      await ctx.reply(ManagerTexts.enterRejectReason(), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
+      return;
+    }
+
+    if (data.startsWith("mgr:receipt:rejectreason:")) {
+      const receiptId = safeId(parts[3]);
+      const choice = parts[4];
+
+      if (choice === "custom") {
+        managerSessions.set(ctx.from.id, {
+          state: "receipt:reject:reason",
+          data: { receiptId },
+        });
+        await safeRender(ctx, ManagerTexts.enterRejectReason(), {
+          reply_markup: new InlineKeyboard()
+            .text("« انتخاب سریع", `mgr:receipt:reject:${receiptId}`)
+            .text("« رسیدها", "mgr:receipts"),
+        });
+        return;
+      }
+
+      const reason = choice === "blurred" ? "عکس رسید واضح نیست. لطفاً تصویر واضح‌تری ارسال کنید."
+        : choice === "amount" ? "مبلغ پرداختی با مبلغ سفارش مطابقت ندارد."
+        : choice === "wrong_order" ? "رسید ارسال‌شده مربوط به این سفارش نیست."
+        : null;
+      await rejectReceipt(ctx, prisma, manager, clientBot, receiptId, reason);
       return;
     }
 
@@ -2869,6 +3360,29 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+    if (data.startsWith("mgr:support:replyconfirm:")) {
+      const convId = safeId(parts[3]);
+      const session = managerSessions.get(ctx.from.id);
+      const replyText = session?.state === "support:reply:preview" && session.data?.conversationId === convId
+        ? String(session.data.replyText ?? "")
+        : "";
+
+      if (!replyText) {
+        await answerCallback({ text: "متن پاسخ پیدا نشد. لطفاً دوباره پاسخ را بنویسید.", show_alert: true });
+        managerSessions.set(ctx.from.id, {
+          state: "support:reply",
+          data: { conversationId: convId },
+        });
+        await safeRender(ctx, ManagerTexts.supportAskReply(), {
+          reply_markup: ManagerKeyboards.backToMenu(),
+        });
+        return;
+      }
+
+      await sendManagerSupportReply(ctx, prisma, manager, notificationService, convId, replyText);
+      return;
+    }
+
     // CLOSE SUPPORT CONVERSATION
     if (data.startsWith("mgr:support:close:")) {
       const convId = safeId(parts[3]);
@@ -2897,17 +3411,57 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // SETTINGS
     // ===========================================
     if (data === "mgr:settings") {
-      const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
-      const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
-      const cardNumber = await settingsService.getPaymentCardNumber();
-      const cardStatus = cardNumber ? `✅ ${cardNumber}` : undefined;
-      const deliveryMsg = await settingsService.getOutForDeliveryMessage();
-      const deliveryMsgStatus = deliveryMsg ? "✅ تنظیم شده" : undefined;
+      managerSessions.delete(ctx.from.id);
+      await showSettingsMenu(ctx, settingsService, checkoutImageFileId);
+      return;
+    }
 
-      await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, cardStatus, deliveryMsgStatus), {
-        parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
-      });
+    if (data.startsWith("mgr:settings:confirm:")) {
+      const kind = parts[3] as "card" | "deliverymsg" | "expiry";
+      const session = managerSessions.get(ctx.from.id);
+
+      if (kind === "card" && session?.state === "settings:card:preview") {
+        const cardNumber = String(session.data?.cardNumber ?? "");
+        await settingsService.set(SettingKeys.PAYMENT_CARD_NUMBER, cardNumber);
+        managerSessions.delete(ctx.from.id);
+        await safeRender(ctx, ManagerTexts.settingsCardUpdated(cardNumber), {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.settingsMenu(
+            !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
+          ),
+        });
+        return;
+      }
+
+      if (kind === "deliverymsg" && session?.state === "settings:deliverymsg:preview") {
+        const message = String(session.data?.message ?? "");
+        await settingsService.set(SettingKeys.OUT_FOR_DELIVERY_MESSAGE, message);
+        managerSessions.delete(ctx.from.id);
+        await safeRender(ctx, ManagerTexts.settingsDeliveryMsgUpdated(message), {
+          reply_markup: ManagerKeyboards.settingsMenu(
+            !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
+          ),
+        });
+        return;
+      }
+
+      if (kind === "expiry" && session?.state === "settings:expiry:preview") {
+        const minutes = Number(session.data?.minutes ?? 0);
+        if (!Number.isFinite(minutes) || minutes <= 0) {
+          await answerCallback({ text: ManagerTexts.settingsExpiryInvalid(), show_alert: true });
+          return;
+        }
+        await settingsService.set(SettingKeys.INVITE_EXPIRY_MINUTES, String(minutes));
+        managerSessions.delete(ctx.from.id);
+        await safeRender(ctx, ManagerTexts.settingsExpiryUpdated(minutes), {
+          reply_markup: ManagerKeyboards.settingsMenu(
+            !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
+          ),
+        });
+        return;
+      }
+
+      await answerCallback({ text: "پیش‌نمایش تنظیمات پیدا نشد. لطفاً دوباره مقدار را وارد کنید.", show_alert: true });
       return;
     }
 
@@ -2920,6 +3474,17 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:settings:image:delete") {
+      await safeRender(ctx, "⚠️ *حذف تصویر پرداخت*\n\nبعد از حذف، پیام پرداخت مشتری فقط به صورت متن ارسال می‌شود. آیا مطمئن هستید؟", {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard()
+          .text("✅ بله، حذف شود", "mgr:settings:image:delete:confirm")
+          .row()
+          .text("❌ انصراف", "mgr:settings"),
+      });
+      return;
+    }
+
+    if (data === "mgr:settings:image:delete:confirm") {
       await settingsService.delete(SettingKeys.CHECKOUT_IMAGE_FILE_ID);
       await answerCallback({ text: ManagerTexts.settingsImageDeleted(), show_alert: true });
 

@@ -102,7 +102,7 @@ async function getOrCreateUser(
  * Uses interactive transaction + conditional updateMany to prevent race conditions
  * where two concurrent requests use the same code.
  */
-async function validateAndUseReferralCode(
+export async function validateAndUseReferralCode(
   userId: number,
   code: string,
   prisma: PrismaClient
@@ -116,12 +116,15 @@ async function validateAndUseReferralCode(
       if (!referralCode) return false;
       if (!referralCode.isActive) return false;
       if (referralCode.expiresAt && referralCode.expiresAt < new Date()) return false;
-      const effectiveMaxUses = referralCode.maxUses ?? 1;
-      if (referralCode.usedCount >= effectiveMaxUses) return false;
+      if (referralCode.usedCount > 0) return false;
 
-      // Atomically claim the code — only succeeds if still active
+      // Referral access codes are one-time tokens. Claim and expire immediately.
       const claimResult = await tx.referralCode.updateMany({
-        where: { id: referralCode.id, isActive: true },
+        where: {
+          id: referralCode.id,
+          isActive: true,
+          usedCount: 0,
+        },
         data: {
           usedCount: { increment: 1 },
           isActive: false,
@@ -352,18 +355,7 @@ async function continueCheckoutFlow(
   const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
   if (!updatedUser) return;
 
-  const needsLocation = updatedUser.locationLat == null || updatedUser.locationLng == null;
   const needsAddress = !updatedUser.address;
-
-  if (needsLocation) {
-    userSessions.set(ctx.from!.id, { state: "checkout_location" });
-    const keyboard = new Keyboard()
-      .requestLocation(ClientTexts.askLocationButton())
-      .resized()
-      .oneTime();
-    await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
-    return;
-  }
 
   if (needsAddress) {
     userSessions.set(ctx.from!.id, { state: "checkout_address" });
@@ -445,8 +437,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
-    // Show main menu
-    await ctx.reply(ClientTexts.referralCodeAccepted(), {
+    const displayName = user.firstName || user.username || "دوست عزیز";
+    await ctx.reply(`${ClientTexts.welcomeBack(displayName)}\n\n${ClientTexts.welcome()}`, {
       reply_markup: ClientKeyboards.mainMenu(),
       parse_mode: "Markdown",
     });
@@ -457,9 +449,21 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   // ===========================================
   bot.on("message:text", async (ctx) => {
     const session = userSessions.get(ctx.from.id);
+    const incomingText = ctx.message.text.trim();
+
+    if (session && session.state !== "awaiting_referral" && (incomingText === "/cancel" || incomingText === "انصراف")) {
+      userSessions.delete(ctx.from.id);
+      await ctx.reply(ClientTexts.actionCancelled(), {
+        reply_markup: { remove_keyboard: true },
+      });
+      await ctx.reply(ClientTexts.welcome(), {
+        reply_markup: ClientKeyboards.mainMenu(),
+      });
+      return;
+    }
     
     if (session?.state === "awaiting_referral") {
-      const code = ctx.message.text.trim();
+      const code = incomingText;
       
       const user = await prisma.user.findUnique({
         where: { tgUserId: BigInt(ctx.from.id) },
@@ -486,7 +490,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // Handle manual phone number input during checkout
     if (session?.state === "checkout_phone") {
-      const text = ctx.message.text.trim();
+      const text = incomingText;
 
       // User clicked the "typing" button text — guide them
       if (text === ClientTexts.askPhoneManualButton()) {
@@ -544,7 +548,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // Handle address input during checkout
     if (session?.state === "checkout_address") {
-      const address = ctx.message.text.trim();
+      const address = incomingText;
       
       const user = await prisma.user.findUnique({
         where: { tgUserId: BigInt(ctx.from.id) },
@@ -574,7 +578,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // Handle referral score input — step 2 of client referral code creation
     if (session?.state === "referral_score") {
-      const text = ctx.message.text.trim();
+      const text = incomingText;
       const score = text === "/skip" ? 0 : parseInt(text);
       if (text !== "/skip" && (!Number.isFinite(score) || score < 0 || score > 10)) {
         await ctx.reply(ClientTexts.invalidReferralScore());
@@ -602,7 +606,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // Handle support message
     if (session?.state === "support_message" && session.supportConversationId) {
-      const messageText = ctx.message.text.trim();
+      const messageText = incomingText;
       if (!messageText) return;
 
       const user = await prisma.user.findUnique({
@@ -627,7 +631,9 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         }),
       ]);
 
-      await ctx.reply(ClientTexts.supportMessageSent());
+      await ctx.reply(ClientTexts.supportMessageSent(), {
+        reply_markup: ClientKeyboards.supportActions(session.supportConversationId),
+      });
 
       // Notify managers
       const userLabel = user.username || user.firstName || `#${user.id}`;
@@ -721,7 +727,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       // Only accept receipt photos when user has explicitly selected an order
       if (session?.state !== "awaiting_receipt" || !session.orderId) {
-        await ctx.reply("برای ارسال رسید، ابتدا از منوی «سفارش‌های من» سفارش مورد نظر را انتخاب کرده و دکمه «📸 ارسال رسید پرداخت» را بزنید.");
+        await ctx.reply("برای ارسال رسید، ابتدا از منوی «سفارش‌های من» سفارش مورد نظر را باز کنید و دکمه «📸 ارسال رسید پرداخت» را بزنید.");
         return;
       }
 
@@ -748,13 +754,13 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       if (order.status !== OrderStatus.APPROVED && order.status !== OrderStatus.INVITE_SENT && order.status !== OrderStatus.AWAITING_RECEIPT) {
         userSessions.delete(ctx.from.id);
-        await ctx.reply("این سفارش دیگر در وضعیت ارسال رسید نیست.");
+        await ctx.reply("برای این سفارش امکان ارسال رسید وجود ندارد.");
         return;
       }
 
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
 
-      const [_, receipt] = await prisma.$transaction([
+      const [, receipt] = await prisma.$transaction([
         // Mark existing pending receipts as superseded
         prisma.receipt.updateMany({
           where: {
@@ -840,7 +846,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // MAIN MENU
     if (data === "client:menu") {
-      await safeRender(ctx, ClientTexts.referralCodeAccepted(), {
+      await safeRender(ctx, ClientTexts.welcome(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
@@ -1202,10 +1208,9 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       // Check if we need to gather info
       const needsPhone = !user.phone;
-      const needsLocation = user.locationLat == null || user.locationLng == null;
       const needsAddress = !user.address;
 
-      if (needsPhone || needsLocation || needsAddress) {
+      if (needsPhone || needsAddress) {
         // Delete the inline message to avoid stacking
         try { await ctx.deleteMessage(); } catch { /* ignore */ }
         
@@ -1217,16 +1222,6 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
             .resized()
             .oneTime();
           await ctx.reply(ClientTexts.askPhone(), { reply_markup: keyboard });
-          return;
-        }
-        
-        if (needsLocation) {
-          userSessions.set(ctx.from.id, { state: "checkout_location" });
-          const keyboard = new Keyboard()
-            .requestLocation(ClientTexts.askLocationButton())
-            .resized()
-            .oneTime();
-          await ctx.reply(ClientTexts.askLocation(), { reply_markup: keyboard });
           return;
         }
         
@@ -1270,11 +1265,20 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       orders.forEach((o) => {
         text += `سفارش #${o.id} · ${orderStatusLabel(o.status)} · ${formatPrice(o.grandTotal)}\n`;
       });
+      text += "\nبرای هر سفارش، دکمه مهم‌ترین اقدام همان سفارش نمایش داده شده است.";
 
       const { InlineKeyboard } = await import("grammy");
       const kb = new InlineKeyboard();
       orders.forEach((o) => {
-        kb.text(`📋 جزئیات سفارش #${o.id}`, `client:order:${o.id}`).row();
+        if (o.status === OrderStatus.APPROVED || o.status === OrderStatus.INVITE_SENT || o.status === OrderStatus.AWAITING_RECEIPT) {
+          kb.text(`📸 ارسال رسید #${o.id}`, `client:receipt:${o.id}`).text("جزئیات", `client:order:${o.id}`).row();
+          return;
+        }
+        if (o.status === OrderStatus.AWAITING_MANAGER_APPROVAL) {
+          kb.text(`📋 سفارش #${o.id}`, `client:order:${o.id}`).text("❌ لغو", `client:cancel:${o.id}`).row();
+          return;
+        }
+        kb.text(`📋 سفارش #${o.id}`, `client:order:${o.id}`).row();
       });
       kb.text("« بازگشت به منو", "client:menu");
 
@@ -1318,9 +1322,9 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       if (order.delivery) {
         const dlabel = order.delivery.status === "DELIVERED" ? "تحویل داده شده ✅"
           : order.delivery.status === "OUT_FOR_DELIVERY" ? "در حال ارسال 🚚"
-          : order.delivery.status === "PICKED_UP" ? "برداشته شده 📦"
-          : order.delivery.status === "FAILED" ? "ناموفق ❌"
-          : "تخصیص داده شده 📋";
+          : order.delivery.status === "PICKED_UP" ? "بسته تحویل پیک شده 📦"
+          : order.delivery.status === "FAILED" ? "تحویل ناموفق ❌"
+          : "اختصاص داده‌شده به پیک 📋";
         detailText += `\nوضعیت ارسال: ${dlabel}\n`;
       }
 
@@ -1350,7 +1354,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     if (data === "client:receipt:cancel") {
       userSessions.delete(ctx.from.id);
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
-      await ctx.reply("انصراف از ارسال رسید.", {
+      await ctx.reply("ارسال رسید لغو شد.", {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;
@@ -1367,7 +1371,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       }
 
       if (order.status !== OrderStatus.APPROVED && order.status !== OrderStatus.INVITE_SENT && order.status !== OrderStatus.AWAITING_RECEIPT) {
-        await answerCallback({ text: "این سفارش در وضعیت ارسال رسید نیست.", show_alert: true });
+        await answerCallback({ text: "برای این سفارش امکان ارسال رسید وجود ندارد.", show_alert: true });
         return;
       }
 
@@ -1437,7 +1441,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     // EDIT ADDRESS
     if (data === "client:profile:edit:address") {
       userSessions.set(ctx.from.id, { state: "checkout_address", fromProfile: true });
-      await safeRender(ctx, "📍 آدرس جدید خود را ارسال کنید:");
+      await safeRender(ctx, "🏠 آدرس کامل تحویل را ارسال کنید:");
       return;
     }
 
@@ -1466,15 +1470,15 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const canCreate = freshUser?.canCreateReferral ?? false;
       const maxCodes = freshUser?.maxReferralCodes ?? 3;
 
-      let text = "🔗 *معرفی‌های من*\n\n";
+      let text = "🔗 *کدهای معرفی یک‌بارمصرف من*\n\n";
       
       if (referralCodes.length > 0) {
-        text += "کدهای معرفی شما:\n";
+        text += "کدهای شما:\n";
         referralCodes.forEach((c) => {
-          text += `\`${c.code}\` - ${c.usedCount}/${c.maxUses || '∞'} استفاده\n`;
+          text += `\`${c.code}\` - ${c.usedCount > 0 ? "استفاده‌شده" : "قابل استفاده"}\n`;
         });
       } else {
-        text += "هنوز هیچ کد معرفی‌ای نساخته‌اید.\n";
+        text += "هنوز هیچ کد معرفی یک‌بارمصرفی نساخته‌اید.\n";
       }
 
       text += `\n${ClientTexts.referralStats(totalReferred)}`;
@@ -1500,13 +1504,13 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         select: { username: true, firstName: true, createdAt: true },
       });
 
-      let text = "📊 *آمار معرفی‌های من*\n\n";
-      text += `تعداد کدها: ${referralCodes.length}\n`;
-      text += `کل استفاده: ${totalReferred}\n`;
+      let text = "📊 *آمار کدهای معرفی من*\n\n";
+      text += `کل کدها: ${referralCodes.length}\n`;
+      text += `کدهای مصرف‌شده: ${totalReferred}\n`;
       text += `کاربران معرفی‌شده: ${referredUsers.length}\n`;
 
       if (referredUsers.length > 0) {
-        text += "\nافرادی که با کد شما عضو شده‌اند:\n";
+        text += "\nکاربرانی که با کد یک‌بارمصرف شما وارد شده‌اند:\n";
         referredUsers.forEach((u) => {
           const name = u.username || u.firstName || "ناشناس";
           const date = u.createdAt.toISOString().split("T")[0];

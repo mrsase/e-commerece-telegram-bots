@@ -35,6 +35,7 @@ describe("loadAppConfigFromEnv", () => {
     expect(config.clientBotToken).toBe("TEST_CLIENT_TOKEN");
     expect(config.managerBotToken).toBe("TEST_MANAGER_TOKEN");
     expect(config.courierBotToken).toBe("TEST_COURIER_TOKEN");
+    expect(config.updatesMode).toBe("polling");
   });
 
   it("throws when a required variable is missing", () => {
@@ -61,5 +62,20 @@ describe("loadAppConfigFromEnv", () => {
 
     const config: AppConfig = loadAppConfigFromEnv();
     expect(config.nodeEnv).toBe("development");
+    expect(config.updatesMode).toBe("polling");
+  });
+
+  it("keeps deprecated auto mode on polling", () => {
+    setEnv({
+      NODE_ENV: "production",
+      DATABASE_URL: "file:./dev.db",
+      CLIENT_BOT_TOKEN: "TEST_CLIENT_TOKEN",
+      MANAGER_BOT_TOKEN: "TEST_MANAGER_TOKEN",
+      COURIER_BOT_TOKEN: "TEST_COURIER_TOKEN",
+      UPDATES_MODE: "auto",
+    });
+
+    const config: AppConfig = loadAppConfigFromEnv();
+    expect(config.updatesMode).toBe("polling");
   });
 });

@@ -39,7 +39,7 @@ export async function createReferralCodeWithRetry(
           code,
           createdByUserId: opts.createdByUserId ?? null,
           createdByManagerId: opts.createdByManagerId ?? null,
-          maxUses: opts.maxUses ?? null,
+          maxUses: 1,
           loyaltyScore: opts.loyaltyScore ?? 0,
         },
       });

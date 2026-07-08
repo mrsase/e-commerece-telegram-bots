@@ -28,7 +28,9 @@ model User {
   maxReferralCodes  Int            @default(3)       // Max referral codes this user can create
   loyaltyScore    Int              @default(0)       // Score assigned by parent or manager (0-10)
   loyaltyScoreOverride Int?                           // Manager override of loyalty score
-  discountPercent  Int?
+  discountPercent  Int?                               // Deprecated: use discountType + discountValue
+  discountType     DiscountType?
+  discountValue    Int?
   createdAt       DateTime         @default(now())
   lastSeenAt      DateTime?
 
@@ -72,7 +74,7 @@ model ReferralCode {
   createdByUser   User?     @relation("ReferralCodeCreator", fields: [createdByUserId], references: [id])
   createdByManagerId Int?
   createdByManager   Manager? @relation("ReferralCodeByManager", fields: [createdByManagerId], references: [id])
-  maxUses         Int?      // null = unlimited
+  maxUses         Int?      // Deprecated: referral codes are one-time access tokens
   usedCount       Int       @default(0)
   loyaltyScore    Int       @default(0)  // Score (0-10) assigned to users who use this code
   isActive        Boolean   @default(true)

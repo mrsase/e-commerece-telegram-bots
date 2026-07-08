@@ -87,7 +87,7 @@ describe("client bot basic handlers", () => {
     await handler(ctx);
 
     expect(replies.length).toBe(1);
-    expect(replies[0]).toContain("به فروشگاه آموز خوش آمدید");
+    expect(replies[0]).toContain("به فروشگاه ایرانی خوش آمدید");
 
     const user = await prisma.user.findUniqueOrThrow({
       where: { tgUserId: BigInt(TEST_TG_USER_ID) },

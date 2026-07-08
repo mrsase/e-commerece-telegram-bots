@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    fileParallelism: false,
+    setupFiles: ["src/test/setup-prisma.ts"],
     include: ["src/**/*.test.ts"],
     exclude: ["dist/**", "node_modules/**"],
     coverage: {

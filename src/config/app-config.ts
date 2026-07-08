@@ -22,7 +22,7 @@ const EnvSchema = z.object({
   CLIENT_BOT_TOKEN: z.string().min(1, "CLIENT_BOT_TOKEN is required"),
   MANAGER_BOT_TOKEN: z.string().min(1, "MANAGER_BOT_TOKEN is required"),
   COURIER_BOT_TOKEN: z.string().min(1, "COURIER_BOT_TOKEN is required"),
-  UPDATES_MODE: z.enum(["auto", "webhook", "polling"]).optional().default("auto"),
+  UPDATES_MODE: z.enum(["auto", "webhook", "polling"]).optional().default("polling"),
   CHECKOUT_IMAGE_FILE_ID: z.string().optional(),
   WEBHOOK_SECRET_TOKEN: z.string().optional(),
 });
@@ -52,8 +52,7 @@ export function loadAppConfigFromEnv(): AppConfig {
   } else if (env.UPDATES_MODE === "polling") {
     updatesMode = "polling";
   } else {
-    // auto: polling in development, webhook otherwise
-    updatesMode = env.NODE_ENV === "development" ? "polling" : "webhook";
+    updatesMode = "polling";
   }
 
   return {

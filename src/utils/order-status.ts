@@ -8,17 +8,17 @@ export function orderStatusLabel(status: OrderStatus): string {
     case OrderStatus.AWAITING_MANAGER_APPROVAL:
       return "⏳ در انتظار تأیید مدیر";
     case OrderStatus.APPROVED:
-      return "✅ تأیید شده";
+      return "✅ تأییدشده";
     case OrderStatus.INVITE_SENT:
-      return "📨 لینک پرداخت ارسال شده";
+      return "💳 اطلاعات پرداخت ارسال‌شده";
     case OrderStatus.AWAITING_RECEIPT:
       return "🧾 در انتظار رسید";
     case OrderStatus.PAID:
-      return "💰 پرداخت شده";
+      return "💰 پرداخت‌شده";
     case OrderStatus.COMPLETED:
-      return "✅ تکمیل شده";
+      return "✅ تکمیل‌شده";
     case OrderStatus.CANCELLED:
-      return "❌ لغو شده";
+      return "❌ لغوشده";
     default:
       console.warn(`[orderStatusLabel] Unknown OrderStatus: ${status}`);
       return status;
@@ -47,8 +47,8 @@ export function eventTypeLabel(eventType: string): string {
 export function receiptStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     PENDING: "⏳ در انتظار بررسی",
-    ACCEPTED: "✅ تأیید شده",
-    REJECTED: "❌ رد شده",
+    ACCEPTED: "✅ تأییدشده",
+    REJECTED: "❌ ردشده",
   };
   return labels[status] || status;
 }
@@ -58,11 +58,11 @@ export function receiptStatusLabel(status: string): string {
  */
 export function deliveryStatusLabel(status: string): string {
   const labels: Record<string, string> = {
-    ASSIGNED: "📋 تعیین پیک",
-    PICKED_UP: "📦 تحویل گرفته شد",
+    ASSIGNED: "📋 اختصاص داده‌شده به پیک",
+    PICKED_UP: "📦 بسته تحویل پیک شد",
     OUT_FOR_DELIVERY: "🛵 در مسیر ارسال",
     DELIVERED: "✅ تحویل داده شد",
-    FAILED: "❌ ناموفق",
+    FAILED: "❌ تحویل ناموفق",
   };
   return labels[status] || status;
 }

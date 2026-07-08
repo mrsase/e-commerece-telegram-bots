@@ -121,7 +121,7 @@ describe("manager bot basic handlers", () => {
     expect(message).toContain("سفارش‌های در انتظار بررسی");
   });
 
-  it.skip("shows 'No pending orders' when none exist on /pending_orders", async () => {
+  it("shows 'No pending orders' when none exist on /pending_orders", async () => {
     const managerTg = BigInt(TEST_MANAGER_TG_ID);
 
     // Ensure there are no globally pending orders from other test suites

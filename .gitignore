@@ -9,3 +9,13 @@ dev.db
 */*.db
 */*/*.db
 prisma/dev.db
+
+# Local generated reports / handoff docs
+DEPLOYMENT_SAFE_ROLLOUT.md
+i18n-editor.html
+owner-bot-flow-report.html
+project-audit-report.html
+refactor-plan.md
+ux-redesign-report.html
+scripts/generate-owner-report.mjs
+scripts/generate-ux-redesign-report.mjs

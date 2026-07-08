@@ -176,7 +176,7 @@ export class NotificationService {
 
     const text = ClientTexts.supportReplyFromManager(replyText);
     const keyboard = new InlineKeyboard()
-      .text("✍️ پاسخ به پشتیبان", `client:support:reply:${conversationId}`);
+      .text("✍️ پاسخ به پشتیبانی", `client:support:reply:${conversationId}`);
     await safeSendMessage(bot.api, userTgId.toString(), text, { reply_markup: keyboard });
   }
 
@@ -257,14 +257,14 @@ export const NotificationServiceTexts = {
     `🧾 رسید جدید!\n\nسفارش #${orderId}\nکاربر: ${userLabel}`,
 
   deliveryStatusForClient: (orderId: number, statusLabel: string, extraText?: string) =>
-    `📦 بروزرسانی ارسال سفارش #${orderId}\n\nوضعیت: ${statusLabel}${extraText ? `\n\n${extraText}` : ''}`,
+    `📦 به‌روزرسانی ارسال سفارش #${orderId}\n\nوضعیت: ${statusLabel}${extraText ? `\n\n${extraText}` : ''}`,
 
   newDeliveryForCourier: (orderId: number, customerName: string, phone: string, address: string) =>
-    `🚚 ارسال جدید!\n\nسفارش #${orderId}\nمشتری: ${customerName}\nتلفن: ${phone}\nآدرس: ${address}\n\nبرای بروزرسانی وضعیت از منوی ربات استفاده کنید.`,
+    `🚚 ارسال جدید\n\nسفارش #${orderId}\nمشتری: ${customerName}\nتلفن: ${phone}\nآدرس: ${address}\n\nبرای تغییر وضعیت ارسال، از دکمه‌های همین ربات استفاده کنید.`,
 
   deliveryFailedForManager: (orderId: number, reason: string) =>
-    `⚠️ ارسال ناموفق!\n\nسفارش #${orderId}\nعلت: ${reason}`,
+    `⚠️ تحویل ناموفق\n\nسفارش #${orderId}\nعلت: ${reason}`,
 
   deliveryStatusForManager: (orderId: number, statusLabel: string, courierLabel: string) =>
-    `🚚 بروزرسانی ارسال\n\nسفارش #${orderId}\nپیک: ${courierLabel}\nوضعیت: ${statusLabel}`,
+    `🚚 به‌روزرسانی ارسال\n\nسفارش #${orderId}\nپیک: ${courierLabel}\nوضعیت: ${statusLabel}`,
 };

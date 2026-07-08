@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { DiscountType, type PrismaClient } from "@prisma/client";
 
 export interface CartItemInput {
   productId: number;
@@ -39,18 +39,30 @@ export class DiscountService {
       return { subtotal, totalDiscount: 0, grandTotal: subtotal, appliedDiscounts: [] };
     }
 
-    // Look up the user's manager-assigned discount percentage
     const user = await this.prisma.user.findUnique({
       where: { id: cart.userId },
-      select: { discountPercent: true },
+      select: {
+        discountPercent: true,
+        discountType: true,
+        discountValue: true,
+      },
     });
 
-    const percent = user?.discountPercent ?? 0;
-    if (percent <= 0) {
+    const discountType = user?.discountType ?? (user?.discountPercent != null ? DiscountType.PERCENT : null);
+    const discountValue = user?.discountValue ?? user?.discountPercent ?? 0;
+
+    if (!discountType || discountValue <= 0) {
       return { subtotal, totalDiscount: 0, grandTotal: subtotal, appliedDiscounts: [] };
     }
 
-    const amount = Math.floor((subtotal * percent) / 100);
+    const rawAmount = discountType === DiscountType.PERCENT
+      ? Math.floor((subtotal * discountValue) / 100)
+      : discountValue;
+    const amount = Math.min(Math.max(rawAmount, 0), subtotal);
+    if (amount <= 0) {
+      return { subtotal, totalDiscount: 0, grandTotal: subtotal, appliedDiscounts: [] };
+    }
+
     return {
       subtotal,
       totalDiscount: amount,
@@ -59,7 +71,9 @@ export class DiscountService {
         discountId: 0,
         code: null,
         amount,
-        description: `${percent}% تخفیف`,
+        description: discountType === DiscountType.PERCENT
+          ? `${discountValue}% تخفیف`
+          : `${discountValue.toLocaleString("en-US")} تومان تخفیف`,
       }],
     };
   }

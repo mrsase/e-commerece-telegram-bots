@@ -162,11 +162,11 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       });
 
       if (deliveries.length === 0) {
-        await render(ctx, "هیچ ارسال تکمیل‌شده‌ای ندارید.", CourierKeyboards.backToMenu());
+        await render(ctx, "هنوز تحویل انجام‌شده‌ای برای شما ثبت نشده است.", CourierKeyboards.backToMenu());
         return;
       }
 
-      let text = "📋 تاریخچه ارسال‌ها:\n\n";
+      let text = "📋 تحویل‌های انجام‌شده:\n\n";
       deliveries.forEach((d) => {
         const date = d.deliveredAt?.toISOString().split("T")[0] ?? "—";
         text += `✅ سفارش #${d.orderId} — ${date}\n`;

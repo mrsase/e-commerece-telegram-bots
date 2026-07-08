@@ -13,14 +13,14 @@ export const ClientKeyboards = {
   /** Main menu for verified users */
   mainMenu: () => {
     return new InlineKeyboard()
-      .text("🛍️ محصولات", "client:products")
-      .text("🛒 سبد خرید", "client:cart")
+      .text("🛍️ شروع خرید", "client:products")
+      .text("🧺 سبد خرید", "client:cart")
       .row()
-      .text("📦 سفارش‌های من", "client:orders")
+      .text("📦 سفارش‌ها", "client:orders")
       .text("💬 پشتیبانی", "client:support")
       .row()
-      .text("🔗 معرفی‌ها", "client:referrals")
-      .text("👤 پروفایل", "client:profile")
+      .text("👤 حساب من", "client:profile")
+      .text("🎟️ دعوت‌نامه‌ها", "client:referrals")
       .row()
       .text("❓ راهنما", "client:help");
   },
@@ -63,9 +63,9 @@ export const ClientKeyboards = {
       .text(`${currentQty}`, "noop")
       .text("+", `client:qty:inc:${productId}`)
       .row()
-      .text("🛒 افزودن و ادامه خرید", `client:addtocart:${productId}:${currentQty}`)
+      .text("🧺 افزودن به سبد", `client:addtocart:${productId}:${currentQty}`)
       .row()
-      .text("✅ افزودن و پرداخت", `client:addandcheckout:${productId}:${currentQty}`)
+      .text("✅ خرید همین محصول", `client:addandcheckout:${productId}:${currentQty}`)
       .row()
       .text("« بازگشت به محصولات", "client:products")
       .row()
@@ -83,8 +83,8 @@ export const ClientKeyboards = {
     });
 
     if (items.length > 0) {
-      kb.text("« بازگشت به محصولات", "client:products")
-        .text("✅ ثبت سفارش", "client:checkout")
+      kb.text("✅ ثبت سفارش", "client:checkout")
+        .text("➕ افزودن محصول", "client:products")
         .row();
     }
 
@@ -97,10 +97,10 @@ export const ClientKeyboards = {
     const kb = new InlineKeyboard();
     
     if (canCreate && codeCount < maxCodes) {
-      kb.text("🔑 ساخت کد معرفی", "client:referral:generate").row();
+      kb.text("🎟️ ساخت دعوت‌نامه", "client:referral:generate").row();
     }
     
-    kb.text("📊 آمار معرفی", "client:referral:stats").row();
+    kb.text("📊 وضعیت دعوت‌نامه‌ها", "client:referral:stats").row();
     kb.text("« بازگشت به منو", "client:menu").text("💬 پشتیبانی", "client:support");
     return kb;
   },
@@ -128,20 +128,19 @@ export const ManagerKeyboards = {
   /** Main menu for managers */
   mainMenu: () => {
     return new InlineKeyboard()
-      .text("🧾 رسیدهای در انتظار", "mgr:receipts")
-      .text("📊 همه سفارش‌ها", "mgr:allorders")
+      .text("🧾 رسیدها", "mgr:receipts")
+      .text("📦 سفارش‌ها", "mgr:allorders")
       .row()
-      .text("📦 محصولات", "mgr:products")
-      .row()
+      .text("🛍️ محصولات", "mgr:products")
       .text("👥 کاربران", "mgr:users")
-      .text("🔗 معرفی‌ها", "mgr:referrals")
-      .row()
-      .text("📊 آمار", "mgr:analytics")
-      .text("💬 پشتیبانی", "mgr:support")
       .row()
       .text("🚚 پیک‌ها", "mgr:couriers")
-      .text("⚙️ تنظیمات", "mgr:settings")
+      .text("💬 پشتیبانی", "mgr:support")
       .row()
+      .text("🎟️ دعوت‌نامه‌ها", "mgr:referrals")
+      .text("📊 گزارش‌ها", "mgr:analytics")
+      .row()
+      .text("⚙️ تنظیمات", "mgr:settings")
       .text("❓ راهنما", "mgr:help");
   },
 
@@ -176,11 +175,49 @@ export const ManagerKeyboards = {
   /** Product management menu */
   productManagement: () => {
     return new InlineKeyboard()
-      .text("📋 لیست محصولات", "mgr:products:list")
+      .text("📋 محصولات فعلی", "mgr:products:list")
       .row()
       .text("➕ افزودن محصول", "mgr:products:add")
       .row()
       .text("« بازگشت به منو", "mgr:menu");
+  },
+
+  /** Product creation wizard controls */
+  productAddStep: (step: "title" | "description" | "price" | "stock" | "image") => {
+    const kb = new InlineKeyboard();
+
+    if (step === "description") {
+      kb.text("رد کردن توضیحات", "mgr:productdraft:skip:description").row();
+      kb.text("« مرحله قبل", "mgr:productdraft:back:title").row();
+    } else if (step === "price") {
+      kb.text("« مرحله قبل", "mgr:productdraft:back:description").row();
+    } else if (step === "stock") {
+      kb.text("نامحدود / نامشخص", "mgr:productdraft:skip:stock").row();
+      kb.text("« مرحله قبل", "mgr:productdraft:back:price").row();
+    } else if (step === "image") {
+      kb.text("بدون تصویر", "mgr:productdraft:skip:image").row();
+      kb.text("« مرحله قبل", "mgr:productdraft:back:stock").row();
+    }
+
+    kb.text("❌ انصراف", "mgr:productdraft:cancel");
+    return kb;
+  },
+
+  /** Product creation preview actions */
+  productAddPreview: () => {
+    return new InlineKeyboard()
+      .text("✅ ثبت محصول", "mgr:productdraft:confirm")
+      .row()
+      .text("📝 عنوان", "mgr:productdraft:edit:title")
+      .text("📄 توضیحات", "mgr:productdraft:edit:description")
+      .row()
+      .text("💰 قیمت", "mgr:productdraft:edit:price")
+      .text("📦 موجودی", "mgr:productdraft:edit:stock")
+      .row()
+      .text("🖼️ تصویر", "mgr:productdraft:edit:image")
+      .row()
+      .text("❌ انصراف", "mgr:productdraft:cancel")
+      .text("« محصولات", "mgr:products");
   },
 
   /** Product list for management */
@@ -236,9 +273,9 @@ export const ManagerKeyboards = {
   /** User management menu */
   userManagement: () => {
     return new InlineKeyboard()
-      .text("📋 لیست کاربران", "mgr:users:list")
+      .text("📋 کاربران", "mgr:users:list")
       .row()
-      .text("🔍 جستجوی کاربر", "mgr:users:search")
+      .text("🔍 جستجو", "mgr:users:search")
       .row()
       .text("« بازگشت به منو", "mgr:menu");
   },
@@ -266,55 +303,88 @@ export const ManagerKeyboards = {
   },
 
   /** User detail actions */
-  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountPercent?: number | null, maxReferralCodes?: number) => {
+  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountLabel?: string, maxReferralCodes?: number) => {
     return new InlineKeyboard()
       .text("📦 سفارش‌ها", `mgr:user:orders:${userId}`)
-      .text("📋 اطلاعات تماس", `mgr:user:contact:${userId}`)
+      .text("📋 تماس و آدرس", `mgr:user:contact:${userId}`)
       .text("📍 موقعیت", `mgr:user:location:${userId}`)
       .row()
-      .text("🔗 معرفی‌ها", `mgr:user:referrals:${userId}`)
+      .text("🎟️ دعوت‌نامه‌ها", `mgr:user:referrals:${userId}`)
       .text(
-        canCreateReferral ? "🔒 لغو مجوز معرفی" : "🔑 مجوز معرفی",
+        canCreateReferral ? "🔒 بستن دعوت‌نامه" : "🔑 اجازه دعوت‌نامه",
         `mgr:user:toggleref:${userId}`
       )
       .row()
-      .text("⭐ تغییر امتیاز", `mgr:user:setscore:${userId}`)
-      .text(`🔢 حداکثر ${maxReferralCodes ?? 3} کد`, `mgr:user:setmaxcodes:${userId}`)
+      .text(discountLabel && discountLabel !== "ندارد" ? `🎯 ${discountLabel}` : "🎯 تخفیف", `mgr:user:setdiscount:${userId}`)
+      .text(`🔢 سقف دعوت: ${maxReferralCodes ?? 3}`, `mgr:user:setmaxcodes:${userId}`)
       .row()
+      .text("⭐ امتیاز", `mgr:user:setscore:${userId}`)
       .text(
-        isActive ? "🚫 مسدود کردن" : "✅ رفع مسدودیت",
+        isActive ? "🚫 مسدودسازی" : "✅ فعال‌سازی",
         `mgr:user:toggle:${userId}`
       )
       .row()
-      .text(discountPercent ? `🎯 تخفیف ${discountPercent}%` : "🎯 تنظیم تخفیف", `mgr:user:setdiscount:${userId}`)
-      .text("🗑️ حذف کاربر", `mgr:user:delete:${userId}`)
-      .row()
       .text("💬 ارسال پیام", `mgr:user:message:${userId}`)
+      .text("🗑️ حذف کاربر", `mgr:user:delete:${userId}`)
       .row()
       .text("« کاربران", "mgr:users:list")
       .text("« منو", "mgr:menu");
   },
 
+  /** User discount shortcuts */
+  userDiscountMenu: (userId: number, hasDiscount: boolean = false) => {
+    const kb = new InlineKeyboard()
+      .text("۵٪", `mgr:user:discount:pct:${userId}:5`)
+      .text("۱۰٪", `mgr:user:discount:pct:${userId}:10`)
+      .text("۱۵٪", `mgr:user:discount:pct:${userId}:15`)
+      .text("۲۰٪", `mgr:user:discount:pct:${userId}:20`)
+      .row()
+      .text("درصد / مبلغ دلخواه", `mgr:user:discount:custom:${userId}`)
+      .row();
+
+    if (hasDiscount) {
+      kb.text("حذف تخفیف", `mgr:user:discount:remove:${userId}`).row();
+    }
+
+    kb.text("« کاربر", `mgr:user:${userId}`).text("« منو", "mgr:menu");
+    return kb;
+  },
+
   /** Referral management menu */
   referralManagement: () => {
     return new InlineKeyboard()
-      .text("📋 لیست کدها", "mgr:referrals:list")
+      .text("📋 دعوت‌نامه‌ها", "mgr:referrals:list")
       .row()
-      .text("➕ ساخت کد", "mgr:referrals:create")
+      .text("➕ ساخت دعوت‌نامه", "mgr:referrals:create")
       .row()
       .text("📊 آمار", "mgr:referrals:stats")
       .row()
       .text("« بازگشت به منو", "mgr:menu");
   },
 
+  /** Referral score choices for manager-created one-time invitations */
+  referralScoreMenu: () => {
+    return new InlineKeyboard()
+      .text("بدون امتیاز", "mgr:referrals:create:score:0")
+      .text("۳", "mgr:referrals:create:score:3")
+      .text("۵", "mgr:referrals:create:score:5")
+      .row()
+      .text("۷", "mgr:referrals:create:score:7")
+      .text("۱۰", "mgr:referrals:create:score:10")
+      .text("مقدار دلخواه", "mgr:referrals:create:custom")
+      .row()
+      .text("« دعوت‌نامه‌ها", "mgr:referrals")
+      .text("« منو", "mgr:menu");
+  },
+
   /** Analytics menu */
   analyticsMenu: () => {
     return new InlineKeyboard()
-      .text("📦 آمار سفارش‌ها", "mgr:analytics:orders")
-      .text("👥 آمار کاربران", "mgr:analytics:users")
+      .text("📦 سفارش‌ها", "mgr:analytics:orders")
+      .text("👥 کاربران", "mgr:analytics:users")
       .row()
-      .text("📦 آمار محصولات", "mgr:analytics:products")
-      .text("🔗 آمار معرفی", "mgr:analytics:referrals")
+      .text("🛍️ محصولات", "mgr:analytics:products")
+      .text("🎟️ دعوت‌نامه‌ها", "mgr:analytics:referrals")
       .row()
       .text("« بازگشت به منو", "mgr:menu");
   },
@@ -335,6 +405,22 @@ export const ManagerKeyboards = {
     }
     kb.text("« بازگشت به منو", "mgr:menu");
     return kb;
+  },
+
+  settingsConfirm: (kind: "card" | "deliverymsg" | "expiry") => {
+    return new InlineKeyboard()
+      .text("✅ تأیید و ذخیره", `mgr:settings:confirm:${kind}`)
+      .row()
+      .text("✏️ ویرایش", `mgr:settings:${kind}`)
+      .text("❌ انصراف", "mgr:settings");
+  },
+
+  supportReplyPreview: (conversationId: number) => {
+    return new InlineKeyboard()
+      .text("✅ ارسال پاسخ", `mgr:support:replyconfirm:${conversationId}`)
+      .row()
+      .text("✏️ ویرایش متن", `mgr:support:reply:${conversationId}`)
+      .text("❌ انصراف", `mgr:support:conv:${conversationId}`);
   },
 
   /** Courier management menu */
@@ -413,6 +499,36 @@ export const ManagerKeyboards = {
       .text("« بازگشت به رسیدها", "mgr:receipts");
   },
 
+  receiptApprovalMenu: (receiptId: number) => {
+    return new InlineKeyboard()
+      .text("بدون پیام زمان", `mgr:receipt:approveeta:${receiptId}:none`)
+      .row()
+      .text("امروز ارسال می‌شود", `mgr:receipt:approveeta:${receiptId}:today`)
+      .row()
+      .text("تا ۲۴ ساعت آینده", `mgr:receipt:approveeta:${receiptId}:24h`)
+      .row()
+      .text("زمان دلخواه", `mgr:receipt:approveeta:${receiptId}:custom`)
+      .row()
+      .text("« رسید", `mgr:receipt:view:${receiptId}`)
+      .text("« رسیدها", "mgr:receipts");
+  },
+
+  receiptRejectMenu: (receiptId: number) => {
+    return new InlineKeyboard()
+      .text("عکس رسید واضح نیست", `mgr:receipt:rejectreason:${receiptId}:blurred`)
+      .row()
+      .text("مبلغ پرداختی مطابقت ندارد", `mgr:receipt:rejectreason:${receiptId}:amount`)
+      .row()
+      .text("رسید مربوط به این سفارش نیست", `mgr:receipt:rejectreason:${receiptId}:wrong_order`)
+      .row()
+      .text("بدون توضیح", `mgr:receipt:rejectreason:${receiptId}:none`)
+      .row()
+      .text("دلیل دلخواه", `mgr:receipt:rejectreason:${receiptId}:custom`)
+      .row()
+      .text("« رسید", `mgr:receipt:view:${receiptId}`)
+      .text("« رسیدها", "mgr:receipts");
+  },
+
   supportInbox: (conversations: { id: number; userLabel: string; lastMessageAtLabel: string }[], page: number = 0, totalPages: number = 1) => {
     const kb = new InlineKeyboard();
 
@@ -464,11 +580,11 @@ export const ManagerKeyboards = {
 export const CourierKeyboards = {
   menu: () => {
     return new InlineKeyboard()
-      .text("🚚 ارسال‌های فعال", "courier:deliveries")
+      .text("🚚 مأموریت‌های امروز", "courier:deliveries")
       .row()
-      .text("📋 تاریخچه", "courier:history")
+      .text("📋 تحویل‌شده‌ها", "courier:history")
       .row()
-      .text("🔄 بروزرسانی", "courier:menu");
+      .text("🔄 به‌روزرسانی", "courier:menu");
   },
   backToMenu: () => {
     return new InlineKeyboard().text("« بازگشت", "courier:menu");
@@ -486,18 +602,18 @@ export const CourierKeyboards = {
 
     // Show only the logical next status transitions
     if (!currentStatus || currentStatus === "ASSIGNED") {
-      kb.text("📦 تحویل گرفتم", `courier:status:${deliveryId}:PICKED_UP`).row();
+      kb.text("📦 بسته را گرفتم", `courier:status:${deliveryId}:PICKED_UP`).row();
     }
     if (!currentStatus || currentStatus === "ASSIGNED" || currentStatus === "PICKED_UP") {
-      kb.text("🛵 در مسیر ارسال", `courier:status:${deliveryId}:OUT_FOR_DELIVERY`).row();
+      kb.text("🛵 به سمت مشتری می‌روم", `courier:status:${deliveryId}:OUT_FOR_DELIVERY`).row();
     }
     if (!currentStatus || (currentStatus !== "DELIVERED" && currentStatus !== "FAILED")) {
       kb.text("✅ تحویل دادم", `courier:status:${deliveryId}:DELIVERED`).row();
-      kb.text("❌ ناموفق", `courier:status:${deliveryId}:FAILED`).row();
+      kb.text("❌ مشکل در تحویل", `courier:status:${deliveryId}:FAILED`).row();
     }
 
     // Location button
-    kb.text("📍 مشاهده موقعیت", `courier:location:${deliveryId}`).row();
+    kb.text("📍 آدرس روی نقشه", `courier:location:${deliveryId}`).row();
 
     kb.text("« بازگشت", "courier:deliveries");
     return kb;
