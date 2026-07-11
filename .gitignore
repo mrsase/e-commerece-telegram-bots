@@ -9,6 +9,7 @@ dev.db
 */*.db
 */*/*.db
 prisma/dev.db
+backups/
 
 # Local generated reports / handoff docs
 DEPLOYMENT_SAFE_ROLLOUT.md

@@ -11,6 +11,8 @@
     "test:coverage": "vitest --coverage",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:migrate": "sh scripts/safe-prisma-deploy.sh",
+    "db:backup": "sh scripts/safe-prisma-deploy.sh --backup-only",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:all": "SEED_PRODUCTS=true tsx prisma/seed.ts"
   },
