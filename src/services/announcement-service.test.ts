@@ -1,4 +1,4 @@
-import { AnnouncementType, ManagerRole, PrismaClient } from "@prisma/client";
+import { AnnouncementAudience, AnnouncementType, ManagerRole, PrismaClient } from "@prisma/client";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { AnnouncementService, formatAnnouncement } from "./announcement-service.js";
 
@@ -53,5 +53,19 @@ describe("AnnouncementService", () => {
     expect(await service.getActiveClosure()).toBeNull();
     expect(formatAnnouncement(announcement)).toContain("📣 جشنواره تابستانی");
     expect(formatAnnouncement(announcement)).toContain("تخفیف عمومی: 15٪");
+  });
+
+  it("keeps test-only announcements invisible to regular users", async () => {
+    const service = new AnnouncementService(prisma, () => now);
+    const announcement = await service.create({
+      type: AnnouncementType.CLOSURE,
+      title: "تعطیلی آزمایشی",
+      audience: AnnouncementAudience.TEST,
+      managerId,
+      durationDays: 1,
+    });
+
+    expect(await service.getActiveClosure(false)).toBeNull();
+    expect((await service.getActiveClosure(true))?.id).toBe(announcement.id);
   });
 });

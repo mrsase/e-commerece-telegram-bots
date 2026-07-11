@@ -317,7 +317,7 @@ export const ManagerKeyboards = {
   },
 
   /** User detail actions */
-  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountLabel?: string, maxReferralCodes?: number) => {
+  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountLabel?: string, maxReferralCodes?: number, isTestUser = false) => {
     return new InlineKeyboard()
       .text("📦 سفارش‌ها", `mgr:user:orders:${userId}`)
       .text("📋 تماس و آدرس", `mgr:user:contact:${userId}`)
@@ -337,6 +337,8 @@ export const ManagerKeyboards = {
         isActive ? "🚫 مسدودسازی" : "✅ فعال‌سازی",
         `mgr:user:toggle:${userId}`
       )
+      .row()
+      .text(isTestUser ? "خروج از گروه آزمایشی" : "🧪 افزودن به گروه آزمایشی", `mgr:user:toggletest:${userId}`)
       .row()
       .text("💬 ارسال پیام", `mgr:user:message:${userId}`)
       .text("🗑️ حذف کاربر", `mgr:user:delete:${userId}`)
@@ -450,6 +452,13 @@ export const ManagerKeyboards = {
     .row()
     .text("درصدی", "mgr:announcement:discount:PERCENT")
     .text("مبلغ ثابت", "mgr:announcement:discount:FIXED")
+    .row()
+    .text("❌ انصراف", "mgr:announcements"),
+
+  announcementAudience: () => new InlineKeyboard()
+    .text("🧪 گروه آزمایشی", "mgr:announcement:audience:TEST")
+    .row()
+    .text("👥 همه کاربران", "mgr:announcement:audience:ALL")
     .row()
     .text("❌ انصراف", "mgr:announcements"),
 

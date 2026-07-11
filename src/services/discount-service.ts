@@ -1,4 +1,4 @@
-import { AnnouncementType, DiscountType, type PrismaClient } from "@prisma/client";
+import { AnnouncementAudience, AnnouncementType, DiscountType, type PrismaClient } from "@prisma/client";
 
 export interface CartItemInput {
   productId: number;
@@ -40,24 +40,28 @@ export class DiscountService {
     }
 
     const now = new Date();
-    const [user, campaign] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: { id: cart.userId },
-        select: { discountPercent: true, discountType: true, discountValue: true },
-      }),
-      this.prisma.announcement.findFirst({
+    const user = await this.prisma.user.findUnique({
+      where: { id: cart.userId },
+      select: { discountPercent: true, discountType: true, discountValue: true, isTestUser: true },
+    });
+    const campaign = await this.prisma.announcement.findFirst({
         where: {
           type: AnnouncementType.GENERAL,
           isActive: true,
           startsAt: { lte: now },
-          OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+          AND: [
+            { OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+            { OR: [
+              { audience: AnnouncementAudience.ALL },
+              ...(user?.isTestUser ? [{ audience: AnnouncementAudience.TEST }] : []),
+            ] },
+          ],
           discountType: { not: null },
           discountValue: { gt: 0 },
         },
         orderBy: { createdAt: "desc" },
         select: { id: true, title: true, discountType: true, discountValue: true },
-      }),
-    ]);
+    });
 
     const discountType = user?.discountType ?? (user?.discountPercent != null ? DiscountType.PERCENT : null);
     const discountValue = user?.discountValue ?? user?.discountPercent ?? 0;

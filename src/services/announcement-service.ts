@@ -1,4 +1,4 @@
-import { AnnouncementType, DiscountType, type Announcement, type PrismaClient } from "@prisma/client";
+import { AnnouncementAudience, AnnouncementType, DiscountType, type Announcement, type PrismaClient } from "@prisma/client";
 import type { Bot } from "grammy";
 import { formatPrice } from "../utils/format-price.js";
 
@@ -25,26 +25,32 @@ export function formatAnnouncement(
 export class AnnouncementService {
   constructor(private readonly prisma: PrismaClient, private readonly now: () => Date = () => new Date()) {}
 
-  async getActive(): Promise<Announcement[]> {
+  async getActive(isTestUser = false): Promise<Announcement[]> {
     const now = this.now();
     return this.prisma.announcement.findMany({
       where: {
         isActive: true,
         startsAt: { lte: now },
-        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+        AND: [
+          { OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+          { OR: [{ audience: AnnouncementAudience.ALL }, ...(isTestUser ? [{ audience: AnnouncementAudience.TEST }] : [])] },
+        ],
       },
       orderBy: { createdAt: "desc" },
     });
   }
 
-  async getActiveClosure(): Promise<Announcement | null> {
+  async getActiveClosure(isTestUser = false): Promise<Announcement | null> {
     const now = this.now();
     return this.prisma.announcement.findFirst({
       where: {
         type: AnnouncementType.CLOSURE,
         isActive: true,
         startsAt: { lte: now },
-        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+        AND: [
+          { OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+          { OR: [{ audience: AnnouncementAudience.ALL }, ...(isTestUser ? [{ audience: AnnouncementAudience.TEST }] : [])] },
+        ],
       },
       orderBy: { createdAt: "desc" },
     });
@@ -56,6 +62,7 @@ export class AnnouncementService {
     message?: string;
     discountType?: DiscountType | null;
     discountValue?: number | null;
+    audience?: AnnouncementAudience;
     managerId: number;
     durationDays: number | null;
   }): Promise<Announcement> {
@@ -67,6 +74,7 @@ export class AnnouncementService {
     return this.prisma.announcement.create({
       data: {
         type: args.type,
+        audience: args.audience ?? AnnouncementAudience.ALL,
         title: args.title,
         message: args.message ?? "",
         discountType: args.type === AnnouncementType.GENERAL ? args.discountType : null,
@@ -80,7 +88,11 @@ export class AnnouncementService {
 
   async broadcast(announcement: Announcement, clientBot: Bot | undefined): Promise<{ targeted: number; sent: number; failed: number }> {
     const users = await this.prisma.user.findMany({
-      where: { isActive: true, isVerified: true },
+      where: {
+        isActive: true,
+        isVerified: true,
+        ...(announcement.audience === AnnouncementAudience.TEST ? { isTestUser: true } : {}),
+      },
       select: { tgUserId: true },
     });
 

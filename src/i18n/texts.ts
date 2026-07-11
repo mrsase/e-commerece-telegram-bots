@@ -216,6 +216,7 @@ export const ManagerTexts = {
   announcementAskDiscountPercent: () => "درصد تخفیف را با عددی بین ۱ تا ۱۰۰ وارد کنید:",
   announcementAskDiscountAmount: () => "مبلغ تخفیف را به تومان و فقط با عدد وارد کنید:",
   announcementInvalidDiscount: () => "❌ مقدار تخفیف معتبر نیست.",
+  announcementChooseAudience: () => "این اطلاعیه برای چه کسانی فعال شود؟\n\n«گروه آزمایشی» فقط حساب‌هایی را شامل می‌شود که مدیر به‌عنوان آزمایشی مشخص کرده است.",
   announcementChooseDuration: (preview: string) => `پیش‌نمایش اطلاعیه:\n\n${preview}\n\nمدت فعال بودن اطلاعیه را انتخاب کنید:`,
   announcementAskCustomDuration: () => "تعداد روزهای فعال بودن اطلاعیه را وارد کنید (۱ تا ۳۶۵):",
   announcementInvalidDuration: () => "❌ مدت اطلاعیه باید عددی بین ۱ تا ۳۶۵ روز باشد.",
@@ -241,8 +242,10 @@ export const ManagerTexts = {
   usersMenuTitle: () => "👥 *مدیریت کاربران*",
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
-  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountLabel: string, maxReferralCodes?: number) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز ساخت کد معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n🔢 سقف ساخت کد: ${maxReferralCodes ?? 3}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (تنظیم‌شده توسط مدیر)' : ''}\n🎯 تخفیف کاربر: ${discountLabel}\nتعداد سفارش: ${orderCount}`,
+  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountLabel: string, maxReferralCodes?: number, isTestUser = false) =>
+    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nگروه آزمایشی: ${isTestUser ? '🧪 عضو است' : '— عضو نیست'}\nمجوز ساخت کد معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n🔢 سقف ساخت کد: ${maxReferralCodes ?? 3}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (تنظیم‌شده توسط مدیر)' : ''}\n🎯 تخفیف کاربر: ${discountLabel}\nتعداد سفارش: ${orderCount}`,
+  userAddedToTestGroup: () => "🧪 کاربر به گروه آزمایشی اضافه شد.",
+  userRemovedFromTestGroup: () => "کاربر از گروه آزمایشی خارج شد.",
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,
   userUnblocked: (username: string | null) => `✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,
   userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی برای ${username || 'کاربر'} فعال شد.`,

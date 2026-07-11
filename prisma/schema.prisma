@@ -24,6 +24,7 @@ model User {
   referrals       User[]           @relation("UserReferrals")
   isActive        Boolean          @default(true)
   isVerified      Boolean          @default(false)  // Has entered a valid referral code
+  isTestUser      Boolean          @default(false)  // Receives test-only client features
   canCreateReferral Boolean        @default(false)  // Manager must grant this permission
   maxReferralCodes  Int            @default(3)       // Max referral codes this user can create
   loyaltyScore    Int              @default(0)       // Score assigned by parent or manager (0-10)
@@ -168,9 +169,15 @@ enum AnnouncementType {
   CLOSURE
 }
 
+enum AnnouncementAudience {
+  ALL
+  TEST
+}
+
 model Announcement {
   id                 Int              @id @default(autoincrement())
   type               AnnouncementType
+  audience           AnnouncementAudience @default(ALL)
   title              String           @default("اطلاعیه فروشگاه ایرانی")
   message            String           @default("")
   discountType       DiscountType?

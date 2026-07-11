@@ -182,4 +182,21 @@ describe("DiscountService", () => {
     const result = await service.calculateDiscounts(makeCart(2, 1000));
     expect(result.totalDiscount).toBe(0);
   });
+
+  it("applies a test-only campaign only to test accounts", async () => {
+    await prisma.announcement.create({
+      data: {
+        type: "GENERAL",
+        audience: "TEST",
+        title: "تست تخفیف",
+        discountType: "PERCENT",
+        discountValue: 20,
+      },
+    });
+
+    expect((await service.calculateDiscounts(makeCart(1))).totalDiscount).toBe(0);
+    await prisma.user.update({ where: { id: userId }, data: { isTestUser: true } });
+    expect((await service.calculateDiscounts(makeCart(1))).totalDiscount).toBe(200);
+    await prisma.user.update({ where: { id: userId }, data: { isTestUser: false } });
+  });
 });

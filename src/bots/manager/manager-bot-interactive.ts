@@ -5,7 +5,7 @@ function safeId(value: string | undefined, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 import type { PrismaClient, Manager } from "@prisma/client";
-import { AnnouncementType, DiscountType, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
+import { AnnouncementAudience, AnnouncementType, DiscountType, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 import { formatPrice } from "../../utils/format-price.js";
@@ -47,6 +47,7 @@ type SessionState =
   | "announcement:message"
   | "announcement:discount"
   | "announcement:discountvalue"
+  | "announcement:audience"
   | "announcement:duration"
   | "announcement:customduration";
 
@@ -276,10 +277,10 @@ async function renderManagerUserView(ctx: Context, prisma: PrismaClient, userId:
   const discountLabel = userDiscountLabel(user);
 
   await safeRender(ctx,
-    ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, discountLabel, user.maxReferralCodes),
+    ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, discountLabel, user.maxReferralCodes, user.isTestUser),
     {
       parse_mode: "Markdown",
-      reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, discountLabel, user.maxReferralCodes),
+      reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, discountLabel, user.maxReferralCodes, user.isTestUser),
     }
   );
   return true;
@@ -635,10 +636,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     message: string,
     discountType: DiscountType | null,
     discountValue: number | null,
+    audience: AnnouncementAudience,
     durationDays: number | null,
   ): Promise<void> => {
     const announcement = await announcementService.create({
-      type, title, message, discountType, discountValue, managerId, durationDays,
+      type, title, message, discountType, discountValue, audience, managerId, durationDays,
     });
     const result = await announcementService.broadcast(announcement, clientBot);
     managerSessions.delete(ctx.from!.id);
@@ -647,16 +649,28 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     });
   };
 
+  const showAnnouncementAudience = async (ctx: Context, session: ManagerSession): Promise<void> => {
+    session.state = "announcement:audience";
+    managerSessions.set(ctx.from!.id, session);
+    await safeRender(ctx, ManagerTexts.announcementChooseAudience(), {
+      reply_markup: ManagerKeyboards.announcementAudience(),
+    });
+  };
+
   const showAnnouncementDuration = async (ctx: Context, session: ManagerSession): Promise<void> => {
     session.state = "announcement:duration";
     managerSessions.set(ctx.from!.id, session);
-    await safeRender(ctx, ManagerTexts.announcementChooseDuration(formatAnnouncement({
+    const preview = formatAnnouncement({
       type: session.data?.type as AnnouncementType,
       title: String(session.data?.title ?? ""),
       message: String(session.data?.message ?? ""),
       discountType: (session.data?.discountType as DiscountType | null) ?? null,
       discountValue: Number(session.data?.discountValue ?? 0) || null,
-    })), { reply_markup: ManagerKeyboards.announcementDuration() });
+    });
+    const audienceLabel = session.data?.audience === AnnouncementAudience.TEST ? "گروه آزمایشی" : "همه کاربران";
+    await safeRender(ctx, ManagerTexts.announcementChooseDuration(`${preview}\n\nمخاطب: ${audienceLabel}`), {
+      reply_markup: ManagerKeyboards.announcementDuration(),
+    });
   };
 
   const continueAfterAnnouncementMessage = async (ctx: Context, session: ManagerSession): Promise<void> => {
@@ -668,7 +682,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       return;
     }
-    await showAnnouncementDuration(ctx, session);
+    await showAnnouncementAudience(ctx, session);
   };
 
   // Global error handler to prevent crashes
@@ -740,7 +754,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
       session.data = { ...session.data, discountValue: value };
-      await showAnnouncementDuration(ctx, session);
+      await showAnnouncementAudience(ctx, session);
       return;
     }
 
@@ -758,6 +772,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         String(session.data?.message ?? ""),
         (session.data?.discountType as DiscountType | null) ?? null,
         Number(session.data?.discountValue ?? 0) || null,
+        (session.data?.audience as AnnouncementAudience) ?? AnnouncementAudience.ALL,
         durationDays,
       );
       return;
@@ -1378,7 +1393,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const choice = parts[3];
       if (choice === "none") {
         session.data = { ...session.data, discountType: null, discountValue: null };
-        await showAnnouncementDuration(ctx, session);
+        await showAnnouncementAudience(ctx, session);
         return;
       }
       if (choice !== DiscountType.PERCENT && choice !== DiscountType.FIXED) {
@@ -1393,6 +1408,22 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         : ManagerTexts.announcementAskDiscountAmount(), {
         reply_markup: new InlineKeyboard().text("❌ انصراف", "mgr:announcements"),
       });
+      return;
+    }
+
+    if (data.startsWith("mgr:announcement:audience:")) {
+      const session = managerSessions.get(ctx.from.id);
+      if (!session || session.state !== "announcement:audience") {
+        await answerCallback({ text: "فرآیند ساخت اطلاعیه فعال نیست.", show_alert: true });
+        return;
+      }
+      const audience = parts[3];
+      if (audience !== AnnouncementAudience.ALL && audience !== AnnouncementAudience.TEST) {
+        await answerCallback({ text: "گروه دریافت‌کننده معتبر نیست.", show_alert: true });
+        return;
+      }
+      session.data = { ...session.data, audience };
+      await showAnnouncementDuration(ctx, session);
       return;
     }
 
@@ -1427,13 +1458,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         String(session.data?.message ?? ""),
         (session.data?.discountType as DiscountType | null) ?? null,
         Number(session.data?.discountValue ?? 0) || null,
+        (session.data?.audience as AnnouncementAudience) ?? AnnouncementAudience.ALL,
         durationDays,
       );
       return;
     }
 
     if (data === "mgr:announcements:active") {
-      const announcements = await announcementService.getActive();
+      const announcements = await announcementService.getActive(true);
       if (announcements.length === 0) {
         await safeRender(ctx, ManagerTexts.noActiveAnnouncements(), {
           reply_markup: ManagerKeyboards.announcementManagement(),
@@ -1443,7 +1475,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const text = announcements.map((announcement) => {
         const end = announcement.endsAt ? announcement.endsAt.toLocaleDateString("fa-IR") : "بدون تاریخ پایان";
-        return `#${announcement.id} · ${announcementTypeLabel(announcement.type)} · تا ${end}\n${formatAnnouncement(announcement)}`;
+        const audience = announcement.audience === AnnouncementAudience.TEST ? "گروه آزمایشی" : "همه کاربران";
+        return `#${announcement.id} · ${announcementTypeLabel(announcement.type)} · ${audience} · تا ${end}\n${formatAnnouncement(announcement)}`;
       }).join("\n\n──────────\n\n");
 
       await safeRender(ctx, text, {
@@ -2549,7 +2582,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (data.startsWith("mgr:user:") && !["toggle", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "discount", "setmaxcodes", "message", "location"].includes(parts[2])) {
+    if (data.startsWith("mgr:user:") && !["toggle", "toggletest", "toggleref", "orders", "referrals", "contact", "delete", "setscore", "setdiscount", "discount", "setmaxcodes", "message", "location"].includes(parts[2])) {
       const userId = safeId(parts[2]);
       await renderManagerUserView(ctx, prisma, userId);
       return;
@@ -2586,12 +2619,28 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const hasOvr = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr, userDiscountLabel(updated), updated.maxReferralCodes),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
         }
       );
+      return;
+    }
+
+    if (data.startsWith("mgr:user:toggletest:")) {
+      const userId = safeId(parts[3]);
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        await answerCallback({ text: "کاربر یافت نشد", show_alert: true });
+        return;
+      }
+      await prisma.user.update({ where: { id: userId }, data: { isTestUser: !user.isTestUser } });
+      await answerCallback({
+        text: user.isTestUser ? ManagerTexts.userRemovedFromTestGroup() : ManagerTexts.userAddedToTestGroup(),
+        show_alert: true,
+      });
+      await renderManagerUserView(ctx, prisma, userId);
       return;
     }
 
@@ -2626,10 +2675,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const hasOvr2 = updated.loyaltyScoreOverride != null;
 
       await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2, userDiscountLabel(updated), updated.maxReferralCodes),
+        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes),
+          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
         }
       );
       return;
@@ -2649,7 +2698,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ManagerTexts.userContactInfo(user.phone, user.address, user.locationLat, user.locationLng, user.locationText),
         {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, userDiscountLabel(user), user.maxReferralCodes),
+          reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, userDiscountLabel(user), user.maxReferralCodes, user.isTestUser),
         }
       );
       return;

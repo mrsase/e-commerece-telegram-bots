@@ -266,7 +266,7 @@ async function processCheckout(
   const discountService = new (await import("../../services/discount-service.js")).DiscountService(prisma);
 
   try {
-    const closure = await new AnnouncementService(prisma).getActiveClosure();
+    const closure = await new AnnouncementService(prisma).getActiveClosure(user.isTestUser);
     if (closure) {
       userSessions.delete(ctx.from!.id);
       await safeRender(ctx, ClientTexts.checkoutClosed(formatAnnouncement(closure)), {
@@ -435,7 +435,10 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   const announcementService = new AnnouncementService(prisma);
 
   const sendActiveAnnouncements = async (ctx: Context): Promise<void> => {
-    const announcements = await announcementService.getActive();
+    const user = ctx.from
+      ? await prisma.user.findUnique({ where: { tgUserId: BigInt(ctx.from.id) }, select: { isTestUser: true } })
+      : null;
+    const announcements = await announcementService.getActive(user?.isTestUser ?? false);
     for (const announcement of announcements) {
       await ctx.reply(formatAnnouncement(announcement));
     }
@@ -1558,7 +1561,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // ANNOUNCEMENTS
     if (data === "client:announcements") {
-      const announcements = await announcementService.getActive();
+      const announcements = await announcementService.getActive(user.isTestUser);
       if (announcements.length === 0) {
         await safeRender(ctx, ClientTexts.noActiveAnnouncements(), {
           reply_markup: ClientKeyboards.backToMenu(),
