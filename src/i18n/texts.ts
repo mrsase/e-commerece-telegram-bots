@@ -46,6 +46,7 @@ export const ClientTexts = {
 
   // Products
   noProductsAvailable: () => "فعلاً محصولی برای نمایش وجود ندارد.",
+  productUnavailable: () => "این محصول فعلاً موجود نیست و امکان افزودن آن به سبد خرید وجود ندارد.",
   productsHeader: () => "محصولات موجود:",
   productLine: (title: string, price: number, currency?: string) =>
     `${title} - ${formatPrice(price)}${currency && currency !== "IRR" ? ` ${currency}` : ""}`,
@@ -72,7 +73,7 @@ export const ClientTexts = {
     `✅ سفارش شما ثبت شد.\nشماره سفارش: ${orderId}\nمبلغ قابل پرداخت: ${formatPrice(grandTotal)}\n\nاطلاعات پرداخت در پیام بعدی ارسال می‌شود. لطفاً پس از پرداخت، عکس رسید را همین‌جا ارسال کنید.\n\n🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`,
   orderSubmittedWithDiscount: (orderId: number, grandTotal: number, subtotal: number, discount: number) =>
     `✅ سفارش شما ثبت شد.\nشماره سفارش: ${orderId}\n\n💰 مبلغ قبل از تخفیف: ${formatPrice(subtotal)}\n🎁 تخفیف اختصاصی شما: ${formatPrice(discount)}\n💳 مبلغ قابل پرداخت: ${formatPrice(grandTotal)}\n\nاطلاعات پرداخت در پیام بعدی ارسال می‌شود. لطفاً پس از پرداخت، عکس رسید را همین‌جا ارسال کنید.\n\n🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`,
-  outOfStock: () => "متأسفانه برخی اقلام موجود نیستند. لطفاً سبد خرید را اصلاح کنید.",
+  outOfStock: () => "متأسفانه موجودی یک یا چند قلم کافی نیست. لطفاً تعداد یا اقلام سبد خرید را اصلاح کنید.",
   checkoutError: () => "ثبت سفارش با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید.",
 
   // Errors
@@ -160,6 +161,9 @@ export const ClientTexts = {
 
 برای ارتباط با پشتیبانی، از دکمه «پشتیبانی» استفاده کنید.
 `.trim(),
+
+  noActiveAnnouncements: () => "در حال حاضر اطلاعیه فعالی وجود ندارد.",
+  checkoutClosed: (message: string) => `⛔ ثبت سفارش موقتاً متوقف است.\n\n${message}\n\nپس از پایان این بازه دوباره می‌توانید سفارش خود را ثبت کنید.`,
 };
 
 // ===========================================
@@ -204,6 +208,15 @@ export const ManagerTexts = {
 
   // UI Messages
   mainMenuTitle: () => "👔 *داشبورد مدیریت*\n\nکارهای روزانه از «رسیدها» و «سفارش‌ها» شروع می‌شود.",
+
+  announcementsMenuTitle: () => "📣 *اطلاع‌رسانی فروشگاه*\n\nنوع پیام را انتخاب کنید. اطلاعیه تعطیلی در بازه فعال، ثبت سفارش را متوقف می‌کند.",
+  announcementAskMessage: () => "متن اطلاعیه را ارسال کنید. این متن برای همه کاربران فعال فرستاده می‌شود.\n\nبرای لغو، /cancel را ارسال کنید.",
+  announcementChooseDuration: (preview: string) => `پیش‌نمایش اطلاعیه:\n\n${preview}\n\nمدت فعال بودن اطلاعیه را انتخاب کنید:`,
+  announcementAskCustomDuration: () => "تعداد روزهای فعال بودن اطلاعیه را وارد کنید (۱ تا ۳۶۵):",
+  announcementInvalidDuration: () => "❌ مدت اطلاعیه باید عددی بین ۱ تا ۳۶۵ روز باشد.",
+  announcementPublished: (sent: number, failed: number) => `✅ اطلاعیه فعال شد و برای ${sent} کاربر ارسال شد.${failed > 0 ? `\nارسال ناموفق: ${failed}` : ""}`,
+  noActiveAnnouncements: () => "در حال حاضر اطلاعیه فعالی وجود ندارد.",
+  announcementDeactivated: () => "✅ اطلاعیه متوقف شد.",
   
   // Products Management
   productsMenuTitle: () => "📦 *مدیریت محصولات*",

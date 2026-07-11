@@ -38,6 +38,8 @@ This project implements three Telegram bots for an e-commerce platform:
 - **Invite Links**: Auto-generate Telegram channel invite links for approved orders
 - **Receipt Upload**: Customers can upload payment receipts
 - **Referral System**: One-time referral access codes for first login
+- **Store Announcements**: Broadcast general notices, limited-time promotions, or temporary closures to all active customers
+- **Stock Safety**: Zero-stock products are hidden and rejected at cart and checkout boundaries
 
 ---
 

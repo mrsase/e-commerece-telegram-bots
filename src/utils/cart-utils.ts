@@ -1,6 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 import { CartState } from "@prisma/client";
 
+export class ProductUnavailableForCartError extends Error {
+  constructor(message = "Product is unavailable or does not have enough stock") {
+    super(message);
+    this.name = "ProductUnavailableForCartError";
+  }
+}
+
 export function safeParseInt(value: string | undefined, fallback = 0): number {
   const n = parseInt(value ?? "", 10);
   return Number.isFinite(n) ? n : fallback;
@@ -24,6 +31,10 @@ export async function addItemToCart(
   productId: number,
   qty: number,
 ): Promise<void> {
+  if (!Number.isInteger(qty) || qty <= 0) {
+    throw new ProductUnavailableForCartError("Quantity must be a positive integer");
+  }
+
   await prisma.$transaction(async (tx) => {
     let cart = await tx.cart.findFirst({
       where: { userId, state: CartState.ACTIVE },
@@ -35,13 +46,18 @@ export async function addItemToCart(
     }
 
     const product = await tx.product.findUnique({ where: { id: productId } });
-    if (!product) {
-      throw new Error(`Product ${productId} not found`);
+    if (!product || !product.isActive) {
+      throw new ProductUnavailableForCartError(`Product ${productId} is unavailable`);
     }
 
     const existingItem = await tx.cartItem.findFirst({
       where: { cartId: cart.id, productId },
     });
+
+    const requestedTotal = (existingItem?.qty ?? 0) + qty;
+    if (product.stock != null && product.stock < requestedTotal) {
+      throw new ProductUnavailableForCartError(`Product ${productId} does not have enough stock`);
+    }
 
     if (existingItem) {
       await tx.cartItem.update({

@@ -5,7 +5,7 @@ function safeId(value: string | undefined, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 import type { PrismaClient, Manager } from "@prisma/client";
-import { DiscountType, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
+import { AnnouncementType, DiscountType, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 import { formatPrice } from "../../utils/format-price.js";
@@ -42,7 +42,10 @@ type SessionState =
   | "user:setscore"
   | "user:discount"
   | "user:setmaxcodes"
-  | "support:reply:preview";
+  | "support:reply:preview"
+  | "announcement:message"
+  | "announcement:duration"
+  | "announcement:customduration";
 
 interface ManagerSession {
   state: SessionState;
@@ -73,6 +76,7 @@ import { safeRender } from "../../utils/safe-reply.js";
 import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
+import { AnnouncementService, announcementTypeLabel, formatAnnouncement } from "../../services/announcement-service.js";
 
 /**
  * Check if user is an authorized manager
@@ -228,11 +232,19 @@ export async function moveProduct(prisma: PrismaClient, productId: number, direc
 }
 
 async function buildManagerDashboardText(prisma: PrismaClient): Promise<string> {
-  const [pendingReceiptsCount, awaitingReceiptCount, paidOrdersCount, openSupportCount] = await Promise.all([
+  const now = new Date();
+  const [pendingReceiptsCount, awaitingReceiptCount, paidOrdersCount, openSupportCount, activeAnnouncementsCount] = await Promise.all([
     prisma.receipt.count({ where: { reviewStatus: ReceiptReviewStatus.PENDING } }),
     prisma.order.count({ where: { status: OrderStatus.AWAITING_RECEIPT } }),
     prisma.order.count({ where: { status: OrderStatus.PAID } }),
     prisma.supportConversation.count({ where: { status: SupportConversationStatus.OPEN } }),
+    prisma.announcement.count({
+      where: {
+        isActive: true,
+        startsAt: { lte: now },
+        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+      },
+    }),
   ]);
 
   return [
@@ -242,6 +254,7 @@ async function buildManagerDashboardText(prisma: PrismaClient): Promise<string> 
     `📸 سفارش‌های منتظر رسید مشتری: ${awaitingReceiptCount}`,
     `💰 سفارش‌های پرداخت‌شده و آماده پیگیری: ${paidOrdersCount}`,
     `💬 گفتگوهای باز پشتیبانی: ${openSupportCount}`,
+    `📣 اطلاعیه‌های فعال: ${activeAnnouncementsCount}`,
   ].join("\n");
 }
 
@@ -609,6 +622,22 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
   const { prisma, clientBot, courierBot, checkoutImageFileId, clientBotUsername } = deps;
   const notificationService = new NotificationService({ prisma, clientBot, courierBot });
   const settingsService = new BotSettingsService(prisma);
+  const announcementService = new AnnouncementService(prisma);
+
+  const publishAnnouncement = async (
+    ctx: Context,
+    managerId: number,
+    type: AnnouncementType,
+    message: string,
+    durationDays: number | null,
+  ): Promise<void> => {
+    const announcement = await announcementService.create({ type, message, managerId, durationDays });
+    const result = await announcementService.broadcast(announcement, clientBot);
+    managerSessions.delete(ctx.from!.id);
+    await safeRender(ctx, ManagerTexts.announcementPublished(result.sent, result.failed), {
+      reply_markup: ManagerKeyboards.announcementManagement(),
+    });
+  };
 
   // Global error handler to prevent crashes
   bot.catch((err) => {
@@ -651,6 +680,34 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await ctx.reply(ManagerTexts.actionCancelled(), {
         reply_markup: ManagerKeyboards.backToMenu(),
       });
+      return;
+    }
+
+    if (session.state === "announcement:message") {
+      if (!text) return;
+      const type = session.data?.type as AnnouncementType;
+      session.state = "announcement:duration";
+      session.data = { type, message: text };
+      managerSessions.set(ctx.from.id, session);
+      await ctx.reply(ManagerTexts.announcementChooseDuration(formatAnnouncement({ type, message: text })), {
+        reply_markup: ManagerKeyboards.announcementDuration(),
+      });
+      return;
+    }
+
+    if (session.state === "announcement:customduration") {
+      const durationDays = parseInt(text, 10);
+      if (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > 365) {
+        await ctx.reply(ManagerTexts.announcementInvalidDuration());
+        return;
+      }
+      await publishAnnouncement(
+        ctx,
+        manager.id,
+        session.data?.type as AnnouncementType,
+        String(session.data?.message ?? ""),
+        durationDays,
+      );
       return;
     }
 
@@ -1218,6 +1275,115 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           reply_markup: ManagerKeyboards.mainMenu(),
         }
       );
+      return;
+    }
+
+    if (data === "mgr:announcements") {
+      managerSessions.delete(ctx.from.id);
+      await safeRender(ctx, ManagerTexts.announcementsMenuTitle(), {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.announcementManagement(),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:announcement:create:")) {
+      const rawType = parts[3];
+      const type = Object.values(AnnouncementType).includes(rawType as AnnouncementType)
+        ? rawType as AnnouncementType
+        : null;
+      if (!type) {
+        await answerCallback({ text: "نوع اطلاعیه معتبر نیست.", show_alert: true });
+        return;
+      }
+
+      managerSessions.set(ctx.from.id, { state: "announcement:message", data: { type } });
+      await safeRender(ctx, ManagerTexts.announcementAskMessage(), {
+        reply_markup: new InlineKeyboard()
+          .text("❌ انصراف", "mgr:announcements")
+          .text("« منو", "mgr:menu"),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:announcement:duration:")) {
+      const session = managerSessions.get(ctx.from.id);
+      if (!session || !["announcement:duration", "announcement:customduration"].includes(session.state)) {
+        await answerCallback({ text: "فرآیند ساخت اطلاعیه فعال نیست.", show_alert: true });
+        return;
+      }
+
+      const choice = parts[3];
+      if (choice === "custom") {
+        session.state = "announcement:customduration";
+        managerSessions.set(ctx.from.id, session);
+        await safeRender(ctx, ManagerTexts.announcementAskCustomDuration(), {
+          reply_markup: ManagerKeyboards.announcementDuration(),
+        });
+        return;
+      }
+
+      const durationDays = choice === "none" ? null : parseInt(choice, 10);
+      if (durationDays !== null && (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > 365)) {
+        await answerCallback({ text: ManagerTexts.announcementInvalidDuration(), show_alert: true });
+        return;
+      }
+
+      await publishAnnouncement(
+        ctx,
+        manager.id,
+        session.data?.type as AnnouncementType,
+        String(session.data?.message ?? ""),
+        durationDays,
+      );
+      return;
+    }
+
+    if (data === "mgr:announcements:active") {
+      const announcements = await announcementService.getActive();
+      if (announcements.length === 0) {
+        await safeRender(ctx, ManagerTexts.noActiveAnnouncements(), {
+          reply_markup: ManagerKeyboards.announcementManagement(),
+        });
+        return;
+      }
+
+      const text = announcements.map((announcement) => {
+        const end = announcement.endsAt ? announcement.endsAt.toLocaleDateString("fa-IR") : "بدون تاریخ پایان";
+        return `#${announcement.id} · ${announcementTypeLabel(announcement.type)} · تا ${end}\n${announcement.message}`;
+      }).join("\n\n──────────\n\n");
+
+      await safeRender(ctx, text, {
+        reply_markup: ManagerKeyboards.announcementList(announcements.map((announcement) => ({
+          id: announcement.id,
+          typeLabel: announcementTypeLabel(announcement.type),
+        }))),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:announcement:deactivate:confirm:")) {
+      const announcementId = safeId(parts[4]);
+      await prisma.announcement.update({ where: { id: announcementId }, data: { isActive: false } });
+      await safeRender(ctx, ManagerTexts.announcementDeactivated(), {
+        reply_markup: ManagerKeyboards.announcementManagement(),
+      });
+      return;
+    }
+
+    if (data.startsWith("mgr:announcement:deactivate:")) {
+      const announcementId = safeId(parts[3]);
+      const announcement = await prisma.announcement.findUnique({ where: { id: announcementId } });
+      if (!announcement) {
+        await answerCallback({ text: "اطلاعیه یافت نشد.", show_alert: true });
+        return;
+      }
+      await safeRender(ctx, `آیا از توقف «${announcementTypeLabel(announcement.type)}» مطمئن هستید؟`, {
+        reply_markup: new InlineKeyboard()
+          .text("✅ بله، متوقف شود", `mgr:announcement:deactivate:confirm:${announcementId}`)
+          .row()
+          .text("❌ انصراف", "mgr:announcements:active"),
+      });
       return;
     }
 

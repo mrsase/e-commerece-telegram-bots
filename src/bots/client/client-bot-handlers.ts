@@ -5,7 +5,7 @@ import {
   InsufficientStockError,
 } from "../../services/order-service.js";
 import { ClientTexts } from "../../i18n/index.js";
-import { addItemToCart, PerUserMutex } from "../../utils/cart-utils.js";
+import { addItemToCart, PerUserMutex, ProductUnavailableForCartError } from "../../utils/cart-utils.js";
 import { formatPrice } from "../../utils/format-price.js";
 
 const cartMutex = new PerUserMutex();
@@ -87,8 +87,8 @@ export function registerClientBotHandlers(
     await ensureUser(ctx, prisma);
 
     const products = await prisma.product.findMany({
-      where: { isActive: true },
-      orderBy: { id: "desc" },
+      where: { isActive: true, OR: [{ stock: null }, { stock: { gt: 0 } }] },
+      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
       take: 10,
     });
 
@@ -129,7 +129,7 @@ export function registerClientBotHandlers(
       }
 
       const product = await prisma.product.findFirst({
-        where: { id: productId, isActive: true },
+        where: { id: productId, isActive: true, OR: [{ stock: null }, { stock: { gt: 0 } }] },
       });
 
       if (!product) {
@@ -137,7 +137,15 @@ export function registerClientBotHandlers(
         return;
       }
 
-      await addItemToCart(prisma, user.id, product.id, qty);
+      try {
+        await addItemToCart(prisma, user.id, product.id, qty);
+      } catch (error) {
+        if (error instanceof ProductUnavailableForCartError) {
+          await ctx.reply(ClientTexts.productUnavailable());
+          return;
+        }
+        throw error;
+      }
 
       await ctx.reply(ClientTexts.addedToCart(product.title, qty));
     } finally {

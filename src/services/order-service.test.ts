@@ -141,6 +141,21 @@ describe("OrderService", () => {
     expect(orderCount).toBe(0);
   });
 
+  it("never creates an order for a product with zero stock", async () => {
+    await prisma.product.update({
+      where: { id: productId },
+      data: { stock: 0 },
+    });
+    const cart = await createCartWithQty(1);
+
+    await expect(
+      service.createOrderFromCart({ userId, cartId: cart.id, appliedDiscounts: [] }),
+    ).rejects.toBeInstanceOf(InsufficientStockError);
+
+    expect(await prisma.order.count({ where: { userId } })).toBe(0);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(0);
+  });
+
   it("creates discount usages and stores discount totals", async () => {
     const discount = await prisma.discount.create({
       data: {

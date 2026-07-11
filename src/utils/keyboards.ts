@@ -22,6 +22,8 @@ export const ClientKeyboards = {
       .text("👤 حساب من", "client:profile")
       .text("🎟️ دعوت‌نامه‌ها", "client:referrals")
       .row()
+      .text("📣 اطلاعیه‌ها", "client:announcements")
+      .row()
       .text("❓ راهنما", "client:help");
   },
 
@@ -67,6 +69,13 @@ export const ClientKeyboards = {
       .row()
       .text("✅ خرید همین محصول", `client:addandcheckout:${productId}:${currentQty}`)
       .row()
+      .text("« بازگشت به محصولات", "client:products")
+      .row()
+      .text("💬 پشتیبانی", "client:support");
+  },
+
+  productUnavailable: () => {
+    return new InlineKeyboard()
       .text("« بازگشت به محصولات", "client:products")
       .row()
       .text("💬 پشتیبانی", "client:support");
@@ -136,6 +145,8 @@ export const ManagerKeyboards = {
       .row()
       .text("🚚 پیک‌ها", "mgr:couriers")
       .text("💬 پشتیبانی", "mgr:support")
+      .row()
+      .text("📣 اطلاع‌رسانی", "mgr:announcements")
       .row()
       .text("🎟️ دعوت‌نامه‌ها", "mgr:referrals")
       .text("📊 گزارش‌ها", "mgr:analytics")
@@ -416,6 +427,42 @@ export const ManagerKeyboards = {
       .row()
       .text("✏️ ویرایش", `mgr:settings:${kind}`)
       .text("❌ انصراف", "mgr:settings");
+  },
+
+  announcementManagement: () => {
+    return new InlineKeyboard()
+      .text("⛔ اعلام تعطیلی", "mgr:announcement:create:CLOSURE")
+      .row()
+      .text("🎁 پیشنهاد ویژه", "mgr:announcement:create:PROMOTION")
+      .row()
+      .text("📣 اطلاعیه عمومی", "mgr:announcement:create:GENERAL")
+      .row()
+      .text("📋 اطلاعیه‌های فعال", "mgr:announcements:active")
+      .row()
+      .text("« بازگشت به منو", "mgr:menu");
+  },
+
+  announcementDuration: () => {
+    return new InlineKeyboard()
+      .text("۱ روز", "mgr:announcement:duration:1")
+      .text("۳ روز", "mgr:announcement:duration:3")
+      .text("۷ روز", "mgr:announcement:duration:7")
+      .row()
+      .text("۳۰ روز", "mgr:announcement:duration:30")
+      .text("بدون تاریخ پایان", "mgr:announcement:duration:none")
+      .row()
+      .text("مدت دلخواه", "mgr:announcement:duration:custom")
+      .row()
+      .text("❌ انصراف", "mgr:announcements");
+  },
+
+  announcementList: (announcements: { id: number; typeLabel: string }[]) => {
+    const kb = new InlineKeyboard();
+    announcements.forEach((announcement) => {
+      kb.text(`🛑 توقف ${announcement.typeLabel}`, `mgr:announcement:deactivate:${announcement.id}`).row();
+    });
+    kb.text("« اطلاع‌رسانی", "mgr:announcements").text("« منو", "mgr:menu");
+    return kb;
   },
 
   supportReplyPreview: (conversationId: number) => {

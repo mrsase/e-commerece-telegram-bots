@@ -55,6 +55,7 @@ model Manager {
   createdReferralCodes ReferralCode[] @relation("ReferralCodeByManager")
 
   supportMessages SupportMessage[] @relation("SupportMessageManager")
+  announcements Announcement[]
 }
 
 model Courier {
@@ -160,6 +161,27 @@ enum DeliveryStatus {
   OUT_FOR_DELIVERY
   DELIVERED
   FAILED
+}
+
+enum AnnouncementType {
+  GENERAL
+  PROMOTION
+  CLOSURE
+}
+
+model Announcement {
+  id                 Int              @id @default(autoincrement())
+  type               AnnouncementType
+  message            String
+  startsAt           DateTime         @default(now())
+  endsAt             DateTime?
+  isActive           Boolean          @default(true)
+  broadcastAt        DateTime?
+  createdAt          DateTime         @default(now())
+  createdByManagerId Int?
+  createdByManager   Manager?         @relation(fields: [createdByManagerId], references: [id], onDelete: SetNull)
+
+  @@index([isActive, startsAt, endsAt])
 }
 
 model Order {

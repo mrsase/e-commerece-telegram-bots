@@ -45,6 +45,8 @@ import { safeRender } from "../../utils/safe-reply.js";
 import { crossBotFile } from "../../utils/cross-bot-file.js";
 import { BotSettingsService } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
+import { addItemToCart, ProductUnavailableForCartError } from "../../utils/cart-utils.js";
+import { AnnouncementService, formatAnnouncement } from "../../services/announcement-service.js";
 
 export function referralCodeFromStartMessage(text: string): string | undefined {
   const match = text.trim().match(/^\/start(?:\s+([A-Za-z0-9_-]+))?$/i);
@@ -264,6 +266,15 @@ async function processCheckout(
   const discountService = new (await import("../../services/discount-service.js")).DiscountService(prisma);
 
   try {
+    const closure = await new AnnouncementService(prisma).getActiveClosure();
+    if (closure) {
+      userSessions.delete(ctx.from!.id);
+      await safeRender(ctx, ClientTexts.checkoutClosed(closure.message), {
+        reply_markup: ClientKeyboards.mainMenu(),
+      });
+      return;
+    }
+
     const cart = await prisma.cart.findUnique({
       where: { id: cartId },
       include: { items: { include: { product: true } } },
@@ -421,6 +432,14 @@ async function showProfile(
 export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): void {
   const { prisma, managerBot, checkoutImageFileId, clientBotUsername } = deps;
   const notificationService = new NotificationService({ prisma, managerBot });
+  const announcementService = new AnnouncementService(prisma);
+
+  const sendActiveAnnouncements = async (ctx: Context): Promise<void> => {
+    const announcements = await announcementService.getActive();
+    for (const announcement of announcements) {
+      await ctx.reply(formatAnnouncement(announcement));
+    }
+  };
 
   // Global error handler to prevent crashes
   bot.catch((err) => {
@@ -446,6 +465,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           await ctx.reply(ClientTexts.referralCodeAccepted(), {
             reply_markup: ClientKeyboards.mainMenu(),
           });
+          await sendActiveAnnouncements(ctx);
           return;
         }
         await ctx.reply(ClientTexts.invalidReferralCode());
@@ -462,6 +482,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       reply_markup: ClientKeyboards.mainMenu(),
       parse_mode: "Markdown",
     });
+    await sendActiveAnnouncements(ctx);
   });
 
   // ===========================================
@@ -505,6 +526,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       await ctx.reply(ClientTexts.referralCodeAccepted(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
+      await sendActiveAnnouncements(ctx);
       return;
     }
 
@@ -881,12 +903,12 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       const [products, total] = await Promise.all([
         prisma.product.findMany({
-          where: { isActive: true },
+          where: { isActive: true, OR: [{ stock: null }, { stock: { gt: 0 } }] },
           orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
           skip: page * pageSize,
           take: pageSize,
         }),
-        prisma.product.count({ where: { isActive: true } }),
+        prisma.product.count({ where: { isActive: true, OR: [{ stock: null }, { stock: { gt: 0 } }] } }),
       ]);
 
       if (products.length === 0) {
@@ -908,23 +930,26 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const productId = parseInt(parts[2]);
       const product = await prisma.product.findUnique({ where: { id: productId } });
 
-      if (!product) {
+      if (!product || !product.isActive) {
         await safeRender(ctx, ClientTexts.productNotFound(), {
           reply_markup: ClientKeyboards.backToMenu(),
         });
         return;
       }
 
+      const unavailable = product.stock != null && product.stock <= 0;
+
       // Initialize quantity to 1
       userSessions.set(ctx.from.id, { state: "viewing_product", selectedQty: 1 });
 
-      const text = ClientTexts.productDetails(
+      let text = ClientTexts.productDetails(
         product.title,
         product.description,
         product.price,
         product.currency,
         product.stock
       );
+      if (unavailable) text += `\n\n${ClientTexts.productUnavailable()}`;
 
       // If product has image, convert from manager bot and send photo
       if (product.photoFileId && managerBot) {
@@ -936,20 +961,20 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           await ctx.replyWithPhoto(imageInput, {
             caption: text,
             parse_mode: "Markdown",
-            reply_markup: ClientKeyboards.productView(productId, 1),
+            reply_markup: unavailable ? ClientKeyboards.productUnavailable() : ClientKeyboards.productView(productId, 1),
           });
         } catch (err) {
           console.error(`[CLIENT] Failed to convert product image for product #${productId}:`, err);
           // Fallback: text only
           await ctx.reply(text, {
             parse_mode: "Markdown",
-            reply_markup: ClientKeyboards.productView(productId, 1),
+            reply_markup: unavailable ? ClientKeyboards.productUnavailable() : ClientKeyboards.productView(productId, 1),
           });
         }
       } else {
         await safeRender(ctx, text, {
           parse_mode: "Markdown",
-          reply_markup: ClientKeyboards.productView(productId, 1),
+          reply_markup: unavailable ? ClientKeyboards.productUnavailable() : ClientKeyboards.productView(productId, 1),
         });
       }
       return;
@@ -984,44 +1009,19 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const qty = parseInt(parts[3]);
 
       const product = await prisma.product.findUnique({ where: { id: productId } });
-      if (!product) {
+      if (!product || !product.isActive) {
         await answerCallback({ text: ClientTexts.productNotFound() });
         return;
       }
 
-      // Get or create cart
-      let cart = await prisma.cart.findFirst({
-        where: { userId: user.id, state: CartState.ACTIVE },
-      });
-
-      if (!cart) {
-        cart = await prisma.cart.create({
-          data: { userId: user.id, state: CartState.ACTIVE },
-        });
-      }
-
-      // Check if item exists in cart
-      const existingItem = await prisma.cartItem.findFirst({
-        where: { cartId: cart.id, productId },
-      });
-
-      if (existingItem) {
-        await prisma.cartItem.update({
-          where: { id: existingItem.id },
-          data: { 
-            qty: existingItem.qty + qty,
-            unitPriceSnapshot: product.price,
-          },
-        });
-      } else {
-        await prisma.cartItem.create({
-          data: {
-            cartId: cart.id,
-            productId,
-            qty,
-            unitPriceSnapshot: product.price,
-          },
-        });
+      try {
+        await addItemToCart(prisma, user.id, productId, qty);
+      } catch (error) {
+        if (error instanceof ProductUnavailableForCartError) {
+          await answerCallback({ text: ClientTexts.productUnavailable(), show_alert: true });
+          return;
+        }
+        throw error;
       }
 
       await answerCallback({ 
@@ -1031,11 +1031,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       // Navigate back to products list
       const products = await prisma.product.findMany({
-        where: { isActive: true },
+        where: { isActive: true, OR: [{ stock: null }, { stock: { gt: 0 } }] },
         orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         take: 5,
       });
-      const total = await prisma.product.count({ where: { isActive: true } });
+      const total = await prisma.product.count({ where: { isActive: true, OR: [{ stock: null }, { stock: { gt: 0 } }] } });
       const totalPages = Math.ceil(total / 5);
 
       await safeRender(ctx, ClientTexts.productsHeader(), {
@@ -1050,44 +1050,19 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const qty = parseInt(parts[3]);
 
       const product = await prisma.product.findUnique({ where: { id: productId } });
-      if (!product) {
+      if (!product || !product.isActive) {
         await answerCallback({ text: ClientTexts.productNotFound() });
         return;
       }
 
-      // Get or create cart
-      let cart = await prisma.cart.findFirst({
-        where: { userId: user.id, state: CartState.ACTIVE },
-      });
-
-      if (!cart) {
-        cart = await prisma.cart.create({
-          data: { userId: user.id, state: CartState.ACTIVE },
-        });
-      }
-
-      // Check if item exists in cart
-      const existingItem = await prisma.cartItem.findFirst({
-        where: { cartId: cart.id, productId },
-      });
-
-      if (existingItem) {
-        await prisma.cartItem.update({
-          where: { id: existingItem.id },
-          data: { 
-            qty: existingItem.qty + qty,
-            unitPriceSnapshot: product.price,
-          },
-        });
-      } else {
-        await prisma.cartItem.create({
-          data: {
-            cartId: cart.id,
-            productId,
-            qty,
-            unitPriceSnapshot: product.price,
-          },
-        });
+      try {
+        await addItemToCart(prisma, user.id, productId, qty);
+      } catch (error) {
+        if (error instanceof ProductUnavailableForCartError) {
+          await answerCallback({ text: ClientTexts.productUnavailable(), show_alert: true });
+          return;
+        }
+        throw error;
       }
 
       await answerCallback({ 
@@ -1577,6 +1552,22 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       userSessions.set(ctx.from.id, { state: "referral_score" });
       await safeRender(ctx, ClientTexts.enterReferralScore(), {
         parse_mode: "Markdown",
+      });
+      return;
+    }
+
+    // ANNOUNCEMENTS
+    if (data === "client:announcements") {
+      const announcements = await announcementService.getActive();
+      if (announcements.length === 0) {
+        await safeRender(ctx, ClientTexts.noActiveAnnouncements(), {
+          reply_markup: ClientKeyboards.backToMenu(),
+        });
+        return;
+      }
+
+      await safeRender(ctx, announcements.map(formatAnnouncement).join("\n\n──────────\n\n"), {
+        reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
     }
