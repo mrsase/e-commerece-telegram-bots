@@ -27,6 +27,7 @@ describe("AnnouncementService", () => {
     const service = new AnnouncementService(prisma, () => now);
     const announcement = await service.create({
       type: AnnouncementType.CLOSURE,
+      title: "تعطیلی فروشگاه",
       message: "فروشگاه به مناسبت تعطیلات بسته است.",
       managerId,
       durationDays: 2,
@@ -38,16 +39,19 @@ describe("AnnouncementService", () => {
     expect(await service.getActiveClosure()).toBeNull();
   });
 
-  it("does not treat a promotion as a closure", async () => {
+  it("formats a general announcement with an optional store-wide discount", async () => {
     const service = new AnnouncementService(prisma, () => now);
     const announcement = await service.create({
-      type: AnnouncementType.PROMOTION,
-      message: "پیشنهاد ویژه امروز",
+      type: AnnouncementType.GENERAL,
+      title: "جشنواره تابستانی",
+      discountType: "PERCENT",
+      discountValue: 15,
       managerId,
       durationDays: 1,
     });
 
     expect(await service.getActiveClosure()).toBeNull();
-    expect(formatAnnouncement(announcement)).toContain("🎁 پیشنهاد ویژه");
+    expect(formatAnnouncement(announcement)).toContain("📣 جشنواره تابستانی");
+    expect(formatAnnouncement(announcement)).toContain("تخفیف عمومی: 15٪");
   });
 });

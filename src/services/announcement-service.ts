@@ -1,17 +1,25 @@
-import { AnnouncementType, type Announcement, type PrismaClient } from "@prisma/client";
+import { AnnouncementType, DiscountType, type Announcement, type PrismaClient } from "@prisma/client";
 import type { Bot } from "grammy";
+import { formatPrice } from "../utils/format-price.js";
 
 export function announcementTypeLabel(type: AnnouncementType): string {
   if (type === AnnouncementType.CLOSURE) return "اطلاعیه تعطیلی";
-  if (type === AnnouncementType.PROMOTION) return "پیشنهاد ویژه";
   return "اطلاعیه فروشگاه ایرانی";
 }
 
-export function formatAnnouncement(announcement: Pick<Announcement, "type" | "message">): string {
-  const icon = announcement.type === AnnouncementType.CLOSURE ? "⛔"
-    : announcement.type === AnnouncementType.PROMOTION ? "🎁"
-      : "📣";
-  return `${icon} ${announcementTypeLabel(announcement.type)}\n\n${announcement.message}`;
+export function formatAnnouncement(
+  announcement: Pick<Announcement, "type" | "title" | "message" | "discountType" | "discountValue">,
+): string {
+  const icon = announcement.type === AnnouncementType.CLOSURE ? "⛔" : "📣";
+  const lines = [`${icon} ${announcement.title}`];
+  if (announcement.message.trim()) lines.push(announcement.message.trim());
+  if (announcement.discountType && announcement.discountValue) {
+    const discount = announcement.discountType === DiscountType.PERCENT
+      ? `${announcement.discountValue}٪`
+      : formatPrice(announcement.discountValue);
+    lines.push(`🎁 تخفیف عمومی: ${discount}`);
+  }
+  return lines.join("\n\n");
 }
 
 export class AnnouncementService {
@@ -42,7 +50,15 @@ export class AnnouncementService {
     });
   }
 
-  async create(args: { type: AnnouncementType; message: string; managerId: number; durationDays: number | null }): Promise<Announcement> {
+  async create(args: {
+    type: AnnouncementType;
+    title: string;
+    message?: string;
+    discountType?: DiscountType | null;
+    discountValue?: number | null;
+    managerId: number;
+    durationDays: number | null;
+  }): Promise<Announcement> {
     const startsAt = this.now();
     const endsAt = args.durationDays == null
       ? null
@@ -51,7 +67,10 @@ export class AnnouncementService {
     return this.prisma.announcement.create({
       data: {
         type: args.type,
-        message: args.message,
+        title: args.title,
+        message: args.message ?? "",
+        discountType: args.type === AnnouncementType.GENERAL ? args.discountType : null,
+        discountValue: args.type === AnnouncementType.GENERAL ? args.discountValue : null,
         startsAt,
         endsAt,
         createdByManagerId: args.managerId,

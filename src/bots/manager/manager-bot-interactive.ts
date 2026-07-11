@@ -43,7 +43,10 @@ type SessionState =
   | "user:discount"
   | "user:setmaxcodes"
   | "support:reply:preview"
+  | "announcement:title"
   | "announcement:message"
+  | "announcement:discount"
+  | "announcement:discountvalue"
   | "announcement:duration"
   | "announcement:customduration";
 
@@ -628,15 +631,44 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     ctx: Context,
     managerId: number,
     type: AnnouncementType,
+    title: string,
     message: string,
+    discountType: DiscountType | null,
+    discountValue: number | null,
     durationDays: number | null,
   ): Promise<void> => {
-    const announcement = await announcementService.create({ type, message, managerId, durationDays });
+    const announcement = await announcementService.create({
+      type, title, message, discountType, discountValue, managerId, durationDays,
+    });
     const result = await announcementService.broadcast(announcement, clientBot);
     managerSessions.delete(ctx.from!.id);
     await safeRender(ctx, ManagerTexts.announcementPublished(result.sent, result.failed), {
       reply_markup: ManagerKeyboards.announcementManagement(),
     });
+  };
+
+  const showAnnouncementDuration = async (ctx: Context, session: ManagerSession): Promise<void> => {
+    session.state = "announcement:duration";
+    managerSessions.set(ctx.from!.id, session);
+    await safeRender(ctx, ManagerTexts.announcementChooseDuration(formatAnnouncement({
+      type: session.data?.type as AnnouncementType,
+      title: String(session.data?.title ?? ""),
+      message: String(session.data?.message ?? ""),
+      discountType: (session.data?.discountType as DiscountType | null) ?? null,
+      discountValue: Number(session.data?.discountValue ?? 0) || null,
+    })), { reply_markup: ManagerKeyboards.announcementDuration() });
+  };
+
+  const continueAfterAnnouncementMessage = async (ctx: Context, session: ManagerSession): Promise<void> => {
+    if (session.data?.type === AnnouncementType.GENERAL) {
+      session.state = "announcement:discount";
+      managerSessions.set(ctx.from!.id, session);
+      await safeRender(ctx, ManagerTexts.announcementChooseDiscount(), {
+        reply_markup: ManagerKeyboards.announcementDiscount(),
+      });
+      return;
+    }
+    await showAnnouncementDuration(ctx, session);
   };
 
   // Global error handler to prevent crashes
@@ -683,15 +715,32 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (session.state === "announcement:message") {
+    if (session.state === "announcement:title") {
       if (!text) return;
-      const type = session.data?.type as AnnouncementType;
-      session.state = "announcement:duration";
-      session.data = { type, message: text };
+      session.state = "announcement:message";
+      session.data = { ...session.data, title: text };
       managerSessions.set(ctx.from.id, session);
-      await ctx.reply(ManagerTexts.announcementChooseDuration(formatAnnouncement({ type, message: text })), {
-        reply_markup: ManagerKeyboards.announcementDuration(),
+      await ctx.reply(ManagerTexts.announcementAskMessage(), {
+        reply_markup: ManagerKeyboards.announcementOptionalMessage(),
       });
+      return;
+    }
+
+    if (session.state === "announcement:message") {
+      session.data = { ...session.data, message: text };
+      await continueAfterAnnouncementMessage(ctx, session);
+      return;
+    }
+
+    if (session.state === "announcement:discountvalue") {
+      const discountType = session.data?.discountType as DiscountType;
+      const value = parseInt(text.replace(/[,٬،\s]/g, ""), 10);
+      if (!Number.isFinite(value) || value <= 0 || (discountType === DiscountType.PERCENT && value > 100)) {
+        await ctx.reply(ManagerTexts.announcementInvalidDiscount());
+        return;
+      }
+      session.data = { ...session.data, discountValue: value };
+      await showAnnouncementDuration(ctx, session);
       return;
     }
 
@@ -705,7 +754,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ctx,
         manager.id,
         session.data?.type as AnnouncementType,
+        String(session.data?.title ?? ""),
         String(session.data?.message ?? ""),
+        (session.data?.discountType as DiscountType | null) ?? null,
+        Number(session.data?.discountValue ?? 0) || null,
         durationDays,
       );
       return;
@@ -1297,11 +1349,49 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      managerSessions.set(ctx.from.id, { state: "announcement:message", data: { type } });
-      await safeRender(ctx, ManagerTexts.announcementAskMessage(), {
+      managerSessions.set(ctx.from.id, { state: "announcement:title", data: { type } });
+      await safeRender(ctx, ManagerTexts.announcementAskTitle(), {
         reply_markup: new InlineKeyboard()
           .text("❌ انصراف", "mgr:announcements")
           .text("« منو", "mgr:menu"),
+      });
+      return;
+    }
+
+    if (data === "mgr:announcement:message:skip") {
+      const session = managerSessions.get(ctx.from.id);
+      if (!session || session.state !== "announcement:message") {
+        await answerCallback({ text: "فرآیند ساخت اطلاعیه فعال نیست.", show_alert: true });
+        return;
+      }
+      session.data = { ...session.data, message: "" };
+      await continueAfterAnnouncementMessage(ctx, session);
+      return;
+    }
+
+    if (data.startsWith("mgr:announcement:discount:")) {
+      const session = managerSessions.get(ctx.from.id);
+      if (!session || session.state !== "announcement:discount") {
+        await answerCallback({ text: "فرآیند ساخت اطلاعیه فعال نیست.", show_alert: true });
+        return;
+      }
+      const choice = parts[3];
+      if (choice === "none") {
+        session.data = { ...session.data, discountType: null, discountValue: null };
+        await showAnnouncementDuration(ctx, session);
+        return;
+      }
+      if (choice !== DiscountType.PERCENT && choice !== DiscountType.FIXED) {
+        await answerCallback({ text: ManagerTexts.announcementInvalidDiscount(), show_alert: true });
+        return;
+      }
+      session.state = "announcement:discountvalue";
+      session.data = { ...session.data, discountType: choice };
+      managerSessions.set(ctx.from.id, session);
+      await safeRender(ctx, choice === DiscountType.PERCENT
+        ? ManagerTexts.announcementAskDiscountPercent()
+        : ManagerTexts.announcementAskDiscountAmount(), {
+        reply_markup: new InlineKeyboard().text("❌ انصراف", "mgr:announcements"),
       });
       return;
     }
@@ -1333,7 +1423,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         ctx,
         manager.id,
         session.data?.type as AnnouncementType,
+        String(session.data?.title ?? ""),
         String(session.data?.message ?? ""),
+        (session.data?.discountType as DiscountType | null) ?? null,
+        Number(session.data?.discountValue ?? 0) || null,
         durationDays,
       );
       return;
@@ -1350,7 +1443,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const text = announcements.map((announcement) => {
         const end = announcement.endsAt ? announcement.endsAt.toLocaleDateString("fa-IR") : "بدون تاریخ پایان";
-        return `#${announcement.id} · ${announcementTypeLabel(announcement.type)} · تا ${end}\n${announcement.message}`;
+        return `#${announcement.id} · ${announcementTypeLabel(announcement.type)} · تا ${end}\n${formatAnnouncement(announcement)}`;
       }).join("\n\n──────────\n\n");
 
       await safeRender(ctx, text, {
@@ -1378,7 +1471,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         await answerCallback({ text: "اطلاعیه یافت نشد.", show_alert: true });
         return;
       }
-      await safeRender(ctx, `آیا از توقف «${announcementTypeLabel(announcement.type)}» مطمئن هستید؟`, {
+      await safeRender(ctx, `آیا از توقف «${announcement.title}» مطمئن هستید؟`, {
         reply_markup: new InlineKeyboard()
           .text("✅ بله، متوقف شود", `mgr:announcement:deactivate:confirm:${announcementId}`)
           .row()

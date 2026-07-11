@@ -1,4 +1,4 @@
-import { DiscountType, type PrismaClient } from "@prisma/client";
+import { AnnouncementType, DiscountType, type PrismaClient } from "@prisma/client";
 
 export interface CartItemInput {
   productId: number;
@@ -39,42 +39,63 @@ export class DiscountService {
       return { subtotal, totalDiscount: 0, grandTotal: subtotal, appliedDiscounts: [] };
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: cart.userId },
-      select: {
-        discountPercent: true,
-        discountType: true,
-        discountValue: true,
-      },
-    });
+    const now = new Date();
+    const [user, campaign] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: cart.userId },
+        select: { discountPercent: true, discountType: true, discountValue: true },
+      }),
+      this.prisma.announcement.findFirst({
+        where: {
+          type: AnnouncementType.GENERAL,
+          isActive: true,
+          startsAt: { lte: now },
+          OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+          discountType: { not: null },
+          discountValue: { gt: 0 },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, title: true, discountType: true, discountValue: true },
+      }),
+    ]);
 
     const discountType = user?.discountType ?? (user?.discountPercent != null ? DiscountType.PERCENT : null);
     const discountValue = user?.discountValue ?? user?.discountPercent ?? 0;
 
-    if (!discountType || discountValue <= 0) {
-      return { subtotal, totalDiscount: 0, grandTotal: subtotal, appliedDiscounts: [] };
+    const appliedDiscounts: AppliedDiscount[] = [];
+    const addDiscount = (type: DiscountType, value: number, description: string, code: string | null): void => {
+      const remaining = subtotal - appliedDiscounts.reduce((sum, item) => sum + item.amount, 0);
+      const rawAmount = type === DiscountType.PERCENT ? Math.floor((subtotal * value) / 100) : value;
+      const amount = Math.min(Math.max(rawAmount, 0), remaining);
+      if (amount > 0) appliedDiscounts.push({ discountId: 0, code, amount, description });
+    };
+
+    if (campaign?.discountType && campaign.discountValue) {
+      addDiscount(
+        campaign.discountType,
+        campaign.discountValue,
+        `تخفیف عمومی «${campaign.title}»`,
+        `ANNOUNCEMENT_${campaign.id}`,
+      );
+    }
+    if (discountType && discountValue > 0) {
+      addDiscount(
+        discountType,
+        discountValue,
+        discountType === DiscountType.PERCENT
+          ? `${discountValue}% تخفیف`
+          : `${discountValue.toLocaleString("en-US")} تومان تخفیف`,
+        null,
+      );
     }
 
-    const rawAmount = discountType === DiscountType.PERCENT
-      ? Math.floor((subtotal * discountValue) / 100)
-      : discountValue;
-    const amount = Math.min(Math.max(rawAmount, 0), subtotal);
-    if (amount <= 0) {
-      return { subtotal, totalDiscount: 0, grandTotal: subtotal, appliedDiscounts: [] };
-    }
+    const totalDiscount = appliedDiscounts.reduce((sum, item) => sum + item.amount, 0);
 
     return {
       subtotal,
-      totalDiscount: amount,
-      grandTotal: subtotal - amount,
-      appliedDiscounts: [{
-        discountId: 0,
-        code: null,
-        amount,
-        description: discountType === DiscountType.PERCENT
-          ? `${discountValue}% تخفیف`
-          : `${discountValue.toLocaleString("en-US")} تومان تخفیف`,
-      }],
+      totalDiscount,
+      grandTotal: subtotal - totalDiscount,
+      appliedDiscounts,
     };
   }
 }

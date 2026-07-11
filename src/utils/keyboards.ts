@@ -433,14 +433,25 @@ export const ManagerKeyboards = {
     return new InlineKeyboard()
       .text("⛔ اعلام تعطیلی", "mgr:announcement:create:CLOSURE")
       .row()
-      .text("🎁 پیشنهاد ویژه", "mgr:announcement:create:PROMOTION")
-      .row()
-      .text("📣 اطلاعیه عمومی", "mgr:announcement:create:GENERAL")
+      .text("📣 اطلاعیه", "mgr:announcement:create:GENERAL")
       .row()
       .text("📋 اطلاعیه‌های فعال", "mgr:announcements:active")
       .row()
       .text("« بازگشت به منو", "mgr:menu");
   },
+
+  announcementOptionalMessage: () => new InlineKeyboard()
+    .text("بدون توضیح", "mgr:announcement:message:skip")
+    .row()
+    .text("❌ انصراف", "mgr:announcements"),
+
+  announcementDiscount: () => new InlineKeyboard()
+    .text("بدون تخفیف", "mgr:announcement:discount:none")
+    .row()
+    .text("درصدی", "mgr:announcement:discount:PERCENT")
+    .text("مبلغ ثابت", "mgr:announcement:discount:FIXED")
+    .row()
+    .text("❌ انصراف", "mgr:announcements"),
 
   announcementDuration: () => {
     return new InlineKeyboard()

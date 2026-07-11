@@ -165,14 +165,16 @@ enum DeliveryStatus {
 
 enum AnnouncementType {
   GENERAL
-  PROMOTION
   CLOSURE
 }
 
 model Announcement {
   id                 Int              @id @default(autoincrement())
   type               AnnouncementType
-  message            String
+  title              String           @default("اطلاعیه فروشگاه ایرانی")
+  message            String           @default("")
+  discountType       DiscountType?
+  discountValue      Int?
   startsAt           DateTime         @default(now())
   endsAt             DateTime?
   isActive           Boolean          @default(true)

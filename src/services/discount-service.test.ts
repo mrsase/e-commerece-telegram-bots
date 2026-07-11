@@ -27,6 +27,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await prisma.announcement.deleteMany({});
   await prisma.discountUsage.deleteMany({ where: { userId } });
   await prisma.discount.deleteMany({});
   await prisma.orderItem.deleteMany({ where: { order: { userId } } });
@@ -130,5 +131,55 @@ describe("DiscountService", () => {
     const result = await service.calculateDiscounts(makeCart(2, 1000));
     expect(result.totalDiscount).toBe(400);
     expect(result.grandTotal).toBe(1600);
+  });
+
+  it("applies an active general percentage discount to every user", async () => {
+    await prisma.announcement.create({
+      data: {
+        type: "GENERAL",
+        title: "فروش ویژه",
+        discountType: "PERCENT",
+        discountValue: 25,
+      },
+    });
+
+    const result = await service.calculateDiscounts(makeCart(2, 1000));
+    expect(result.totalDiscount).toBe(500);
+    expect(result.appliedDiscounts[0].description).toContain("فروش ویژه");
+  });
+
+  it("stacks general and personal discounts without exceeding the subtotal", async () => {
+    await prisma.announcement.create({
+      data: {
+        type: "GENERAL",
+        title: "تخفیف همگانی",
+        discountType: "FIXED",
+        discountValue: 1800,
+      },
+    });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { discountType: "PERCENT", discountValue: 50 },
+    });
+
+    const result = await service.calculateDiscounts(makeCart(2, 1000));
+    expect(result.totalDiscount).toBe(2000);
+    expect(result.grandTotal).toBe(0);
+    expect(result.appliedDiscounts).toHaveLength(2);
+  });
+
+  it("ignores an expired general discount", async () => {
+    await prisma.announcement.create({
+      data: {
+        type: "GENERAL",
+        title: "تخفیف تمام‌شده",
+        discountType: "PERCENT",
+        discountValue: 50,
+        endsAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    const result = await service.calculateDiscounts(makeCart(2, 1000));
+    expect(result.totalDiscount).toBe(0);
   });
 });

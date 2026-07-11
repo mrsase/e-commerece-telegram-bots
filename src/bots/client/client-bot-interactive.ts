@@ -269,7 +269,7 @@ async function processCheckout(
     const closure = await new AnnouncementService(prisma).getActiveClosure();
     if (closure) {
       userSessions.delete(ctx.from!.id);
-      await safeRender(ctx, ClientTexts.checkoutClosed(closure.message), {
+      await safeRender(ctx, ClientTexts.checkoutClosed(formatAnnouncement(closure)), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
       return;

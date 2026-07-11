@@ -163,7 +163,7 @@ export const ClientTexts = {
 `.trim(),
 
   noActiveAnnouncements: () => "در حال حاضر اطلاعیه فعالی وجود ندارد.",
-  checkoutClosed: (message: string) => `⛔ ثبت سفارش موقتاً متوقف است.\n\n${message}\n\nپس از پایان این بازه دوباره می‌توانید سفارش خود را ثبت کنید.`,
+  checkoutClosed: (message: string) => `ثبت سفارش موقتاً متوقف است.\n\n${message}\n\nپس از پایان این بازه دوباره می‌توانید سفارش خود را ثبت کنید.`,
 };
 
 // ===========================================
@@ -209,8 +209,13 @@ export const ManagerTexts = {
   // UI Messages
   mainMenuTitle: () => "👔 *داشبورد مدیریت*\n\nکارهای روزانه از «رسیدها» و «سفارش‌ها» شروع می‌شود.",
 
-  announcementsMenuTitle: () => "📣 *اطلاع‌رسانی فروشگاه*\n\nنوع پیام را انتخاب کنید. اطلاعیه تعطیلی در بازه فعال، ثبت سفارش را متوقف می‌کند.",
-  announcementAskMessage: () => "متن اطلاعیه را ارسال کنید. این متن برای همه کاربران فعال فرستاده می‌شود.\n\nبرای لغو، /cancel را ارسال کنید.",
+  announcementsMenuTitle: () => "📣 *اطلاع‌رسانی فروشگاه*\n\n«اعلام تعطیلی» ثبت سفارش را در بازه انتخابی متوقف می‌کند. «اطلاعیه» می‌تواند همراه تخفیف عمومی باشد.",
+  announcementAskTitle: () => "عنوان اطلاعیه را وارد کنید. عنوان برای کاربران نمایش داده می‌شود.",
+  announcementAskMessage: () => "توضیحات اطلاعیه را وارد کنید یا «بدون توضیح» را بزنید.",
+  announcementChooseDiscount: () => "آیا این اطلاعیه تخفیف عمومی دارد؟ این تخفیف روی قیمت کل همه سفارش‌ها اعمال می‌شود.",
+  announcementAskDiscountPercent: () => "درصد تخفیف را با عددی بین ۱ تا ۱۰۰ وارد کنید:",
+  announcementAskDiscountAmount: () => "مبلغ تخفیف را به تومان و فقط با عدد وارد کنید:",
+  announcementInvalidDiscount: () => "❌ مقدار تخفیف معتبر نیست.",
   announcementChooseDuration: (preview: string) => `پیش‌نمایش اطلاعیه:\n\n${preview}\n\nمدت فعال بودن اطلاعیه را انتخاب کنید:`,
   announcementAskCustomDuration: () => "تعداد روزهای فعال بودن اطلاعیه را وارد کنید (۱ تا ۳۶۵):",
   announcementInvalidDuration: () => "❌ مدت اطلاعیه باید عددی بین ۱ تا ۳۶۵ روز باشد.",
