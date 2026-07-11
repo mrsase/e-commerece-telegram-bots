@@ -91,6 +91,7 @@ enum ManagerRole {
 
 model Product {
   id           Int         @id @default(autoincrement())
+  sortOrder    Int         @default(0)
   title        String
   description  String?
   price        Int

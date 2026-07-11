@@ -90,6 +90,9 @@ async function seedProducts(): Promise<void> {
     },
   ];
 
+  const latest = await prisma.product.aggregate({ _max: { sortOrder: true } });
+  let nextSortOrder = (latest._max.sortOrder ?? 0) + 1;
+
   for (const product of products) {
     const existing = await prisma.product.findFirst({
       where: { title: product.title },
@@ -100,7 +103,7 @@ async function seedProducts(): Promise<void> {
       continue;
     }
 
-    await prisma.product.create({ data: product });
+    await prisma.product.create({ data: { ...product, sortOrder: nextSortOrder++ } });
     console.log(`✓ Created product: ${product.title}`);
   }
 }

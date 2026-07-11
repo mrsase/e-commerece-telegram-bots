@@ -79,12 +79,12 @@ export const ClientTexts = {
   unableToIdentify: () => "امکان شناسایی شما وجود ندارد.",
 
   // Referrals
-  myReferralCode: (code: string) => `🔗 کد معرفی یک‌بارمصرف شما: \`${code}\``,
-  noReferralCode: () => "شما هنوز کد معرفی یک‌بارمصرف ایجاد نکرده‌اید.",
-  referralCodeGenerated: (code: string) => `✅ کد معرفی یک‌بارمصرف شما ساخته شد:\n\`${code}\`\n\nاین کد را فقط برای یک نفر ارسال کنید؛ بعد از اولین ورود، منقضی می‌شود.`,
+  myReferralCode: (code: string) => `🔗 کد معرفی شما: \`${code}\``,
+  noReferralCode: () => "شما هنوز کد معرفی ایجاد نکرده‌اید.",
+  referralCodeGenerated: (code: string) => `✅ کد معرفی شما ساخته شد:\n\`${code}\`\n\nاین کد را برای یک نفر ارسال کنید؛ بعد از اولین ورود، اعتبارش را از دست می‌دهد.`,
   referralStats: (count: number) => `📊 تعداد کدهای استفاده‌شده شما: ${count}`,
-  referralNoPermission: () => "فعلاً مجوز ساخت کد معرفی یک‌بارمصرف برای شما فعال نیست. برای پیگیری با پشتیبانی تماس بگیرید.",
-  referralMaxCodesReached: (max: number) => `شما حداکثر می‌توانید ${max} کد معرفی یک‌بارمصرف بسازید.`,
+  referralNoPermission: () => "فعلاً مجوز ساخت کد معرفی برای شما فعال نیست. برای پیگیری با پشتیبانی تماس بگیرید.",
+  referralMaxCodesReached: (max: number) => `شما حداکثر می‌توانید ${max} کد معرفی بسازید.`,
   enterReferralScore: () => "⭐ امتیاز وفاداری (۰ تا ۱۰) را برای کاربری که این دعوت‌نامه را استفاده می‌کند وارد کنید.\nبرای رد شدن /skip بزنید.\nبرای لغو، /cancel را ارسال کنید:",
   invalidReferralScore: () => "❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد. دوباره وارد کنید:",
   
@@ -224,11 +224,11 @@ export const ManagerTexts = {
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
   userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountLabel: string, maxReferralCodes?: number) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز ساخت کد یک‌بارمصرف: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n🔢 سقف ساخت کد: ${maxReferralCodes ?? 3}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (تنظیم‌شده توسط مدیر)' : ''}\n🎯 تخفیف کاربر: ${discountLabel}\nتعداد سفارش: ${orderCount}`,
+    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nمجوز ساخت کد معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n🔢 سقف ساخت کد: ${maxReferralCodes ?? 3}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (تنظیم‌شده توسط مدیر)' : ''}\n🎯 تخفیف کاربر: ${discountLabel}\nتعداد سفارش: ${orderCount}`,
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,
   userUnblocked: (username: string | null) => `✅ کاربر ${username || 'نامشخص'} رفع مسدود شد.`,
-  userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی یک‌بارمصرف برای ${username || 'کاربر'} فعال شد.`,
-  userReferralRevoked: (username: string | null) => `🔒 مجوز ساخت کد معرفی یک‌بارمصرف از ${username || 'کاربر'} گرفته شد.`,
+  userReferralGranted: (username: string | null) => `🔑 مجوز ساخت کد معرفی برای ${username || 'کاربر'} فعال شد.`,
+  userReferralRevoked: (username: string | null) => `🔒 مجوز ساخت کد معرفی از ${username || 'کاربر'} گرفته شد.`,
   userDeleted: (username: string | null) => `🗑️ کاربر ${username || 'نامشخص'} حذف شد.`,
   userDeleteConfirm: (username: string | null) => `⚠️ آیا از حذف کاربر ${username || 'نامشخص'} مطمئن هستید؟ این عمل غیرقابل بازگشت است.`,
   enterSearchQuery: () => "نام کاربری یا شناسه تلگرام را وارد کنید:\n\nبرای لغو، /cancel را ارسال کنید.",
@@ -236,7 +236,7 @@ export const ManagerTexts = {
   userScoreUpdated: (score: number) => `⭐ امتیاز کاربر به ${score} تغییر یافت.`,
 
   // Loyalty Score
-  enterReferralScore: () => "⭐ امتیاز وفاداری کاربری را انتخاب کنید که این دعوت‌نامه یک‌بارمصرف را استفاده می‌کند.\n\nهر دعوت‌نامه فقط برای یک ورود معتبر است و بعد از استفاده منقضی می‌شود.",
+  enterReferralScore: () => "⭐ امتیاز وفاداری کاربری را انتخاب کنید که این دعوت‌نامه را استفاده می‌کند.\n\nهر دعوت‌نامه برای یک ورود معتبر است و بعد از استفاده منقضی می‌شود.",
   invalidScore: () => "❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد.",
 
   // User Discount
@@ -251,9 +251,9 @@ export const ManagerTexts = {
   userDiscountRemoved: () => "✅ تخفیف کاربر حذف شد.",
 
   // User Max Referral Codes
-  enterMaxReferralCodes: (current: number) => `🔢 سقف تعداد کدهای معرفی یک‌بارمصرف این کاربر را وارد کنید (۰ تا ۱۰۰).\nمقدار فعلی: ${current}\n\nبرای لغو، /cancel را ارسال کنید.`,
+  enterMaxReferralCodes: (current: number) => `🔢 سقف تعداد کدهای معرفی این کاربر را وارد کنید (۰ تا ۱۰۰).\nمقدار فعلی: ${current}\n\nبرای لغو، /cancel را ارسال کنید.`,
   invalidMaxReferralCodes: () => "❌ لطفاً عددی بین ۰ تا ۱۰۰ وارد کنید.",
-  userMaxCodesUpdated: (max: number) => `✅ سقف ساخت کدهای معرفی یک‌بارمصرف به ${max} تنظیم شد.`,
+  userMaxCodesUpdated: (max: number) => `✅ سقف ساخت کدهای معرفی به ${max} تنظیم شد.`,
 
   // Courier Management
   couriersMenuTitle: () => "🚚 *مدیریت پیک‌ها*",
@@ -271,9 +271,9 @@ export const ManagerTexts = {
 
   // Referral Management
   referralsMenuTitle: () => "🔗 *مدیریت کدهای معرفی*",
-  referralListTitle: () => "🔗 *کدهای معرفی یک‌بارمصرف*",
+  referralListTitle: () => "🔗 *کدهای معرفی*",
   noReferralCodes: () => "هیچ کد معرفی یافت نشد.",
-  referralCodeCreated: (code: string) => `✅ کد معرفی یک‌بارمصرف ایجاد شد: \`${code}\``,
+  referralCodeCreated: (code: string) => `✅ کد معرفی ایجاد شد: \`${code}\``,
   referralCodeDeactivated: () => "✅ کد معرفی منقضی شد و دیگر قابل استفاده نیست.",
   enterReferralMaxUses: () => "کدهای معرفی فقط یک بار قابل استفاده هستند.",
 

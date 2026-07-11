@@ -263,6 +263,9 @@ export const ManagerKeyboards = {
     }
     
     kb.row()
+      .text("⬆️ بالاتر", `mgr:product:move:${productId}:up`)
+      .text("⬇️ پایین‌تر", `mgr:product:move:${productId}:down`)
+      .row()
       .text("🔄 تغییر وضعیت", `mgr:product:toggle:${productId}`)
       .row()
       .text("« بازگشت به محصولات", "mgr:products:list");

@@ -56,6 +56,7 @@ interface ManagerBotDeps {
   clientBot?: Bot;
   courierBot?: Bot;
   checkoutImageFileId?: string;
+  clientBotUsername?: string;
 }
 
 type UserDiscountFields = {
@@ -71,6 +72,7 @@ import { ReferralAnalyticsService, formatReferralTree } from "../../services/ref
 import { safeRender } from "../../utils/safe-reply.js";
 import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
+import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
 
 /**
  * Check if user is an authorized manager
@@ -181,6 +183,50 @@ async function showProductDraftPreview(ctx: Context, session: ManagerSession): P
   });
 }
 
+async function renderProductEditView(ctx: Context, prisma: PrismaClient, productId: number): Promise<boolean> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) {
+    await safeRender(ctx, "محصول یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
+    return false;
+  }
+
+  const text = `*ویرایش محصول: ${escapeMarkdown(product.title)}*\n\n` +
+    `📝 عنوان: ${escapeMarkdown(product.title)}\n` +
+    `📄 توضیحات: ${product.description ? escapeMarkdown(product.description) : "—"}\n` +
+    `💰 قیمت: ${formatPrice(product.price)}\n` +
+    `📦 موجودی: ${product.stock ?? "نامحدود"}\n` +
+    `↕️ جایگاه در فهرست: ${product.sortOrder}\n` +
+    `🖼️ تصویر: ${product.photoFileId ? "دارد" : "ندارد"}\n` +
+    `وضعیت: ${product.isActive ? "✅ فعال" : "❌ غیرفعال"}`;
+
+  await safeRender(ctx, text, {
+    parse_mode: "Markdown",
+    reply_markup: ManagerKeyboards.productEdit(productId, !!product.photoFileId),
+  });
+  return true;
+}
+
+export async function moveProduct(prisma: PrismaClient, productId: number, direction: "up" | "down"): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const product = await tx.product.findUnique({ where: { id: productId } });
+    if (!product) return false;
+
+    const adjacent = await tx.product.findFirst({
+      where: direction === "up"
+        ? { sortOrder: { lt: product.sortOrder } }
+        : { sortOrder: { gt: product.sortOrder } },
+      orderBy: direction === "up"
+        ? [{ sortOrder: "desc" }, { id: "desc" }]
+        : [{ sortOrder: "asc" }, { id: "asc" }],
+    });
+    if (!adjacent) return false;
+
+    await tx.product.update({ where: { id: product.id }, data: { sortOrder: adjacent.sortOrder } });
+    await tx.product.update({ where: { id: adjacent.id }, data: { sortOrder: product.sortOrder } });
+    return true;
+  });
+}
+
 async function buildManagerDashboardText(prisma: PrismaClient): Promise<string> {
   const [pendingReceiptsCount, awaitingReceiptCount, paidOrdersCount, openSupportCount] = await Promise.all([
     prisma.receipt.count({ where: { reviewStatus: ReceiptReviewStatus.PENDING } }),
@@ -228,6 +274,8 @@ async function createManagerReferralCode(
   prisma: PrismaClient,
   managerId: number,
   score: number,
+  clientBot: Bot | undefined,
+  clientBotUsername?: string,
 ): Promise<void> {
   const code = await createReferralCodeWithRetry(prisma, {
     createdByManagerId: managerId,
@@ -238,8 +286,8 @@ async function createManagerReferralCode(
   });
 
   managerSessions.delete(ctx.from!.id);
-  await safeRender(ctx, ManagerTexts.referralCodeCreated(code), {
-    parse_mode: "Markdown",
+  const botUsername = await resolveClientBotUsername(clientBot, clientBotUsername);
+  await safeRender(ctx, referralShareMessage(code, botUsername), {
     reply_markup: new InlineKeyboard()
       .text("➕ ساخت دعوت‌نامه دیگر", "mgr:referrals:create")
       .text("📋 لیست دعوت‌نامه‌ها", "mgr:referrals:list")
@@ -556,7 +604,7 @@ function buildOrderDetailText(order: {
  * Register all interactive handlers for manager bot
  */
 export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): void {
-  const { prisma, clientBot, courierBot, checkoutImageFileId } = deps;
+  const { prisma, clientBot, courierBot, checkoutImageFileId, clientBotUsername } = deps;
   const notificationService = new NotificationService({ prisma, clientBot, courierBot });
   const settingsService = new BotSettingsService(prisma);
 
@@ -767,7 +815,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      await createManagerReferralCode(ctx, prisma, manager.id, score);
+      await createManagerReferralCode(ctx, prisma, manager.id, score, clientBot, clientBotUsername);
       return;
     }
 
@@ -1861,7 +1909,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         select: { id: true, username: true, firstName: true },
       });
 
-      let text = `🔗 *کدهای معرفی یک‌بارمصرف ${escapeMarkdown(label)}*\n\n`;
+      let text = `🔗 *کدهای معرفی ${escapeMarkdown(label)}*\n\n`;
 
       if (referralCodes.length > 0) {
         text += "*کدها:*\n";
@@ -1900,7 +1948,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const [products, total] = await Promise.all([
         prisma.product.findMany({
-          orderBy: { id: "desc" },
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
           skip: page * pageSize,
           take: pageSize,
         }),
@@ -2032,16 +2080,20 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           return;
         }
 
-        const product = await prisma.product.create({
-          data: {
-            title: data.title as string,
-            description: data.description as string | null,
-            price: data.price as number,
-            stock: data.stock as number | null,
-            currency: "IRR",
-            isActive: true,
-            photoFileId: (data.photoFileId as string | null | undefined) ?? null,
-          },
+        const product = await prisma.$transaction(async (tx) => {
+          const latest = await tx.product.aggregate({ _max: { sortOrder: true } });
+          return tx.product.create({
+            data: {
+              title: data.title as string,
+              description: data.description as string | null,
+              price: data.price as number,
+              stock: data.stock as number | null,
+              currency: "IRR",
+              isActive: true,
+              photoFileId: (data.photoFileId as string | null | undefined) ?? null,
+              sortOrder: (latest._max.sortOrder ?? 0) + 1,
+            },
+          });
         });
 
         managerSessions.delete(ctx.from.id);
@@ -2058,25 +2110,26 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data.startsWith("mgr:product:edit:") && parts.length === 4) {
       managerSessions.delete(ctx.from.id);
       const productId = safeId(parts[3]);
-      const product = await prisma.product.findUnique({ where: { id: productId } });
+      await renderProductEditView(ctx, prisma, productId);
+      return;
+    }
 
-      if (!product) {
-        await answerCallback({ text: "محصول یافت نشد" });
+    if (data.startsWith("mgr:product:move:")) {
+      const productId = safeId(parts[3]);
+      const direction = parts[4] === "up" ? "up" : parts[4] === "down" ? "down" : null;
+      if (!direction) {
+        await answerCallback({ text: "جهت جابه‌جایی معتبر نیست.", show_alert: true });
         return;
       }
 
-      const text = `*ویرایش محصول: ${escapeMarkdown(product.title)}*\n\n` +
-        `📝 عنوان: ${escapeMarkdown(product.title)}\n` +
-        `📄 توضیحات: ${product.description ? escapeMarkdown(product.description) : '—'}\n` +
-        `💰 قیمت: ${formatPrice(product.price)}\n` +
-        `📦 موجودی: ${product.stock ?? 'نامحدود'}\n` +
-        `🖼️ تصویر: ${product.photoFileId ? 'دارد' : 'ندارد'}\n` +
-        `وضعیت: ${product.isActive ? '✅ فعال' : '❌ غیرفعال'}`;
+      const moved = await moveProduct(prisma, productId, direction);
+      if (!moved) {
+        await answerCallback({ text: direction === "up" ? "این محصول در ابتدای فهرست است." : "این محصول در انتهای فهرست است.", show_alert: true });
+        return;
+      }
 
-      await safeRender(ctx, text, {
-        parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.productEdit(productId, !!product.photoFileId),
-      });
+      await answerCallback({ text: "جایگاه محصول به‌روزرسانی شد." });
+      await renderProductEditView(ctx, prisma, productId);
       return;
     }
 
@@ -2719,7 +2772,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         await answerCallback({ text: ManagerTexts.invalidScore(), show_alert: true });
         return;
       }
-      await createManagerReferralCode(ctx, prisma, manager.id, score);
+      await createManagerReferralCode(ctx, prisma, manager.id, score, clientBot, clientBotUsername);
       return;
     }
 

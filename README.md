@@ -105,6 +105,8 @@ DATABASE_URL=file:./prisma/dev.db
 
 # Bot Tokens (get from @BotFather on Telegram)
 CLIENT_BOT_TOKEN=your_client_bot_token
+# Public username without @, used in referral invitation links
+CLIENT_BOT_USERNAME=your_client_bot_username
 MANAGER_BOT_TOKEN=your_manager_bot_token
 COURIER_BOT_TOKEN=your_courier_bot_token
 
@@ -156,6 +158,7 @@ npm run dev
 |----------|----------|---------|-------------|
 | `DATABASE_URL` | Yes | - | Prisma connection string |
 | `CLIENT_BOT_TOKEN` | Yes | - | Telegram bot token for client bot |
+| `CLIENT_BOT_USERNAME` | Recommended | - | Public client-bot username used to generate referral links |
 | `MANAGER_BOT_TOKEN` | Yes | - | Telegram bot token for manager bot |
 | `COURIER_BOT_TOKEN` | Yes | - | Telegram bot token for courier bot |
 | `ADMIN_TG_USER_ID` | Yes | - | Telegram user ID for the admin manager (seed) |

@@ -23,6 +23,7 @@ describe("loadAppConfigFromEnv", () => {
       PORT: "4000",
       DATABASE_URL: "file:./dev.db",
       CLIENT_BOT_TOKEN: "TEST_CLIENT_TOKEN",
+      CLIENT_BOT_USERNAME: "@IranianShopBot",
       MANAGER_BOT_TOKEN: "TEST_MANAGER_TOKEN",
       COURIER_BOT_TOKEN: "TEST_COURIER_TOKEN",
     });
@@ -33,6 +34,7 @@ describe("loadAppConfigFromEnv", () => {
     expect(config.port).toBe(4000);
     expect(config.databaseUrl).toBe("file:./dev.db");
     expect(config.clientBotToken).toBe("TEST_CLIENT_TOKEN");
+    expect(config.clientBotUsername).toBe("IranianShopBot");
     expect(config.managerBotToken).toBe("TEST_MANAGER_TOKEN");
     expect(config.courierBotToken).toBe("TEST_COURIER_TOKEN");
     expect(config.updatesMode).toBe("polling");

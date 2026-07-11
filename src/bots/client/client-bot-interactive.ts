@@ -34,6 +34,7 @@ interface ClientBotDeps {
   prisma: PrismaClient;
   managerBot?: Bot;
   checkoutImageFileId?: string;
+  clientBotUsername?: string;
 }
 
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
@@ -43,6 +44,12 @@ import { orderStatusLabel } from "../../utils/order-status.js";
 import { safeRender } from "../../utils/safe-reply.js";
 import { crossBotFile } from "../../utils/cross-bot-file.js";
 import { BotSettingsService } from "../../services/bot-settings-service.js";
+import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
+
+export function referralCodeFromStartMessage(text: string): string | undefined {
+  const match = text.trim().match(/^\/start(?:\s+([A-Za-z0-9_-]+))?$/i);
+  return match?.[1]?.toUpperCase();
+}
 
 /**
  * Get or create user, checking referral status
@@ -412,7 +419,7 @@ async function showProfile(
  * Register all interactive handlers for client bot
  */
 export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): void {
-  const { prisma, managerBot, checkoutImageFileId } = deps;
+  const { prisma, managerBot, checkoutImageFileId, clientBotUsername } = deps;
   const notificationService = new NotificationService({ prisma, managerBot });
 
   // Global error handler to prevent crashes
@@ -432,6 +439,19 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     }
 
     if (needsReferral) {
+      const referralCode = referralCodeFromStartMessage(ctx.message?.text ?? "/start");
+      if (referralCode) {
+        const valid = await validateAndUseReferralCode(user.id, referralCode, prisma);
+        if (valid) {
+          await ctx.reply(ClientTexts.referralCodeAccepted(), {
+            reply_markup: ClientKeyboards.mainMenu(),
+          });
+          return;
+        }
+        await ctx.reply(ClientTexts.invalidReferralCode());
+        return;
+      }
+
       userSessions.set(ctx.from!.id, { state: "awaiting_referral" });
       await ctx.reply(ClientTexts.welcomeNewUser());
       return;
@@ -597,8 +617,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       });
 
       userSessions.delete(ctx.from.id);
-      await ctx.reply(ClientTexts.referralCodeGenerated(code), {
-        parse_mode: "Markdown",
+      const botUsername = await resolveClientBotUsername(bot, clientBotUsername);
+      await ctx.reply(referralShareMessage(code, botUsername), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
@@ -860,7 +880,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const [products, total] = await Promise.all([
         prisma.product.findMany({
           where: { isActive: true },
-          orderBy: { id: "desc" },
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
           skip: page * pageSize,
           take: pageSize,
         }),
@@ -1010,7 +1030,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       // Navigate back to products list
       const products = await prisma.product.findMany({
         where: { isActive: true },
-        orderBy: { id: "desc" },
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         take: 5,
       });
       const total = await prisma.product.count({ where: { isActive: true } });
@@ -1470,7 +1490,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       const canCreate = freshUser?.canCreateReferral ?? false;
       const maxCodes = freshUser?.maxReferralCodes ?? 3;
 
-      let text = "🔗 *کدهای معرفی یک‌بارمصرف من*\n\n";
+      let text = "🔗 *کدهای معرفی من*\n\n";
       
       if (referralCodes.length > 0) {
         text += "کدهای شما:\n";
@@ -1478,7 +1498,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           text += `\`${c.code}\` - ${c.usedCount > 0 ? "استفاده‌شده" : "قابل استفاده"}\n`;
         });
       } else {
-        text += "هنوز هیچ کد معرفی یک‌بارمصرفی نساخته‌اید.\n";
+        text += "هنوز هیچ کد معرفی نساخته‌اید.\n";
       }
 
       text += `\n${ClientTexts.referralStats(totalReferred)}`;
@@ -1510,7 +1530,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       text += `کاربران معرفی‌شده: ${referredUsers.length}\n`;
 
       if (referredUsers.length > 0) {
-        text += "\nکاربرانی که با کد یک‌بارمصرف شما وارد شده‌اند:\n";
+        text += "\nکاربرانی که با کد معرفی شما وارد شده‌اند:\n";
         referredUsers.forEach((u) => {
           const name = u.username || u.firstName || "ناشناس";
           const date = u.createdAt.toISOString().split("T")[0];

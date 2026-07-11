@@ -147,13 +147,13 @@
     "group": "ClientTexts",
     "name": "noReferralCode",
     "params": [],
-    "text": "شما هنوز کد معرفی یک‌بارمصرف ایجاد نکرده‌اید."
+    "text": "شما هنوز کد معرفی ایجاد نکرده‌اید."
   },
   {
     "group": "ClientTexts",
     "name": "referralCodeGenerated",
     "params": ["code"],
-    "text": "✅ کد معرفی یک‌بارمصرف شما ساخته شد:\n`{code}`\n\nاین کد را فقط برای یک نفر ارسال کنید؛ بعد از اولین ورود، منقضی می‌شود."
+    "text": "✅ کد معرفی شما ساخته شد:\n`{code}`\n\nاین کد را برای یک نفر ارسال کنید؛ بعد از اولین ورود، اعتبارش را از دست می‌دهد."
   },
   {
     "group": "ClientTexts",
@@ -675,7 +675,7 @@
     "group": "ManagerTexts",
     "name": "referralListTitle",
     "params": [],
-    "text": "🔗 *کدهای معرفی یک‌بارمصرف*"
+    "text": "🔗 *کدهای معرفی*"
   },
   {
     "group": "ManagerTexts",

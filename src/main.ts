@@ -50,6 +50,7 @@ async function main(): Promise<void> {
     prisma, 
     managerBot,
     checkoutImageFileId: config.checkoutImageFileId,
+    clientBotUsername: config.clientBotUsername,
   });
   registerInteractiveCourierBot(courierBot, { prisma, clientBot, managerBot });
   registerInteractiveManagerBot(managerBot, { 
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
     clientBot,
     courierBot,
     checkoutImageFileId: config.checkoutImageFileId,
+    clientBotUsername: config.clientBotUsername,
   });
 
   // Register bot command menus with Telegram

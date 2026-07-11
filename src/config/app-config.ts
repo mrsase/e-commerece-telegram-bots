@@ -6,6 +6,7 @@ export interface AppConfig {
   port: number;
   databaseUrl: string;
   clientBotToken: string;
+  clientBotUsername?: string;
   managerBotToken: string;
   courierBotToken: string;
   updatesMode: "webhook" | "polling";
@@ -20,6 +21,7 @@ const EnvSchema = z.object({
   PORT: z.string().optional().default("3000"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   CLIENT_BOT_TOKEN: z.string().min(1, "CLIENT_BOT_TOKEN is required"),
+  CLIENT_BOT_USERNAME: z.string().trim().min(1).optional(),
   MANAGER_BOT_TOKEN: z.string().min(1, "MANAGER_BOT_TOKEN is required"),
   COURIER_BOT_TOKEN: z.string().min(1, "COURIER_BOT_TOKEN is required"),
   UPDATES_MODE: z.enum(["auto", "webhook", "polling"]).optional().default("polling"),
@@ -60,6 +62,7 @@ export function loadAppConfigFromEnv(): AppConfig {
     port,
     databaseUrl: env.DATABASE_URL,
     clientBotToken: env.CLIENT_BOT_TOKEN,
+    clientBotUsername: env.CLIENT_BOT_USERNAME?.replace(/^@/, ""),
     managerBotToken: env.MANAGER_BOT_TOKEN,
     courierBotToken: env.COURIER_BOT_TOKEN,
     updatesMode,
