@@ -20,12 +20,15 @@ export async function resolveClientBotUsername(bot: Bot | undefined, configuredU
 export function referralShareMessage(code: string, botUsername?: string): string {
   const username = normalizeBotUsername(botUsername);
   const link = username ? `https://t.me/${username}?start=${encodeURIComponent(code)}` : undefined;
+  const linkLabel = link?.replace(/_/g, "\\_");
 
   return [
-    "سلام! برای ورود به فروشگاه ایرانی از این لینک استفاده کن:",
-    link ?? "لینک ربات هنوز تنظیم نشده است.",
+    "لینک اختصاصی دعوت به فروشگاه ایرانی :",
     "",
-    `کد معرفی: ${code}`,
-    "اگر لینک باز نشد، این کد را در ربات وارد کن.",
+    link && linkLabel ? `[${linkLabel}](${link})` : "لینک ربات هنوز تنظیم نشده است.",
+    "",
+    `کد معرفی شما در صورت نیاز و وارد نشدن از طریق لینک بالا : \`${code}\``,
+    "",
+    "این لینک قابل استفاده‌ برای یک نفر می‌باشد.",
   ].join("\n");
 }

@@ -622,7 +622,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.backToMenu(),
       });
-      await ctx.reply(referralShareMessage(code, botUsername));
+      await ctx.reply(referralShareMessage(code, botUsername), { parse_mode: "Markdown" });
       return;
     }
 

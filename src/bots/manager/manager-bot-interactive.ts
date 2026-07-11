@@ -295,7 +295,7 @@ async function createManagerReferralCode(
       .row()
       .text("« منو", "mgr:menu"),
   });
-  await ctx.reply(referralShareMessage(code, botUsername));
+  await ctx.reply(referralShareMessage(code, botUsername), { parse_mode: "Markdown" });
 }
 
 async function rejectReceipt(
