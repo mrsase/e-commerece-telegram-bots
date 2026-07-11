@@ -22,14 +22,10 @@ export function referralShareMessage(code: string, botUsername?: string): string
   const link = username ? `https://t.me/${username}?start=${encodeURIComponent(code)}` : undefined;
 
   return [
-    "✅ کد معرفی ساخته شد",
-    `کد: ${code}`,
-    "",
-    "متن آماده برای ارسال به کاربر جدید:",
     "سلام! برای ورود به فروشگاه ایرانی از این لینک استفاده کن:",
     link ?? "لینک ربات هنوز تنظیم نشده است.",
     "",
-    `اگر لینک باز نشد، در ربات کد ${code} را وارد کن.`,
-    "این کد پس از اولین ورود اعتبارش را از دست می‌دهد.",
+    `کد معرفی: ${code}`,
+    "اگر لینک باز نشد، این کد را در ربات وارد کن.",
   ].join("\n");
 }

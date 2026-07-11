@@ -287,13 +287,15 @@ async function createManagerReferralCode(
 
   managerSessions.delete(ctx.from!.id);
   const botUsername = await resolveClientBotUsername(clientBot, clientBotUsername);
-  await safeRender(ctx, referralShareMessage(code, botUsername), {
+  await safeRender(ctx, ManagerTexts.referralCodeCreated(code), {
+    parse_mode: "Markdown",
     reply_markup: new InlineKeyboard()
       .text("➕ ساخت دعوت‌نامه دیگر", "mgr:referrals:create")
       .text("📋 لیست دعوت‌نامه‌ها", "mgr:referrals:list")
       .row()
       .text("« منو", "mgr:menu"),
   });
+  await ctx.reply(referralShareMessage(code, botUsername));
 }
 
 async function rejectReceipt(

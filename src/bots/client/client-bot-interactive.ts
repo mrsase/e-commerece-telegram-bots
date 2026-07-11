@@ -618,9 +618,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       userSessions.delete(ctx.from.id);
       const botUsername = await resolveClientBotUsername(bot, clientBotUsername);
-      await ctx.reply(referralShareMessage(code, botUsername), {
+      await ctx.reply(ClientTexts.referralCodeGenerated(code), {
+        parse_mode: "Markdown",
         reply_markup: ClientKeyboards.backToMenu(),
       });
+      await ctx.reply(referralShareMessage(code, botUsername));
       return;
     }
 

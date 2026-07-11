@@ -7,6 +7,8 @@ describe("referralShareMessage", () => {
 
     expect(message).toContain("MGR_ABC123");
     expect(message).toContain("https://t.me/IranianShopBot?start=MGR_ABC123");
+    expect(message).not.toContain("ساخته شد");
+    expect(message).not.toContain("اعتبارش را از دست");
   });
 
   it("keeps the code visible when the bot username is unavailable", () => {

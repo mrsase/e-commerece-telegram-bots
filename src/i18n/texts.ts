@@ -36,7 +36,7 @@ export function escapeMarkdownV2(text: string | null | undefined): string {
 export const ClientTexts = {
   // Referral Gate
   welcomeNewUser: () => "برای ورود به فروشگاه ایرانی، لطفاً کد معرفی خود را وارد کنید:",
-  invalidReferralCode: () => "❌ کد معرفی نامعتبر است یا قبلاً استفاده شده. لطفاً کد دیگری وارد کنید:",
+  invalidReferralCode: () => "❌ کد معرفی نامعتبر یا غیرقابل استفاده است. لطفاً کد دیگری وارد کنید:",
   referralCodeAccepted: () => "✅ کد معرفی تأیید شد. به فروشگاه ایرانی خوش آمدید.",
   userBlocked: () => "🚫 حساب شما مسدود شده است. لطفاً با پشتیبانی تماس بگیرید.",
 
@@ -81,7 +81,7 @@ export const ClientTexts = {
   // Referrals
   myReferralCode: (code: string) => `🔗 کد معرفی شما: \`${code}\``,
   noReferralCode: () => "شما هنوز کد معرفی ایجاد نکرده‌اید.",
-  referralCodeGenerated: (code: string) => `✅ کد معرفی شما ساخته شد:\n\`${code}\`\n\nاین کد را برای یک نفر ارسال کنید؛ بعد از اولین ورود، اعتبارش را از دست می‌دهد.`,
+  referralCodeGenerated: (code: string) => `✅ کد معرفی شما ساخته شد:\n\`${code}\``,
   referralStats: (count: number) => `📊 تعداد کدهای استفاده‌شده شما: ${count}`,
   referralNoPermission: () => "فعلاً مجوز ساخت کد معرفی برای شما فعال نیست. برای پیگیری با پشتیبانی تماس بگیرید.",
   referralMaxCodesReached: (max: number) => `شما حداکثر می‌توانید ${max} کد معرفی بسازید.`,
@@ -236,7 +236,7 @@ export const ManagerTexts = {
   userScoreUpdated: (score: number) => `⭐ امتیاز کاربر به ${score} تغییر یافت.`,
 
   // Loyalty Score
-  enterReferralScore: () => "⭐ امتیاز وفاداری کاربری را انتخاب کنید که این دعوت‌نامه را استفاده می‌کند.\n\nهر دعوت‌نامه برای یک ورود معتبر است و بعد از استفاده منقضی می‌شود.",
+  enterReferralScore: () => "⭐ امتیاز وفاداری کاربری را انتخاب کنید که این دعوت‌نامه را استفاده می‌کند.",
   invalidScore: () => "❌ امتیاز باید عددی بین ۰ تا ۱۰ باشد.",
 
   // User Discount
@@ -274,7 +274,7 @@ export const ManagerTexts = {
   referralListTitle: () => "🔗 *کدهای معرفی*",
   noReferralCodes: () => "هیچ کد معرفی یافت نشد.",
   referralCodeCreated: (code: string) => `✅ کد معرفی ایجاد شد: \`${code}\``,
-  referralCodeDeactivated: () => "✅ کد معرفی منقضی شد و دیگر قابل استفاده نیست.",
+  referralCodeDeactivated: () => "✅ کد معرفی غیرفعال شد.",
   enterReferralMaxUses: () => "کدهای معرفی فقط یک بار قابل استفاده هستند.",
 
   // Analytics
