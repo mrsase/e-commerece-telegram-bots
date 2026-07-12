@@ -41,7 +41,7 @@ import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
 import { buildCartDisplay } from "../../utils/cart-display.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel } from "../../utils/order-status.js";
-import { safeRender } from "../../utils/safe-reply.js";
+import { safeDeleteChatMessage, safeRender } from "../../utils/safe-reply.js";
 import { crossBotFile } from "../../utils/cross-bot-file.js";
 import { BotSettingsService } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
@@ -241,7 +241,7 @@ async function sendPaymentDetailsForOrder(
     const deleteDelayMs = effectiveExpiryMin * 60 * 1000;
     setTimeout(async () => {
       try {
-        await clientBot.api.deleteMessage(userTgId, directMessageId);
+        await safeDeleteChatMessage(clientBot.api, userTgId, directMessageId);
       } catch (err) {
         console.error(`[AUTO-DELETE] Failed to delete message ${directMessageId}:`, err);
       }

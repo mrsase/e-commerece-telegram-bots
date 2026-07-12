@@ -9,19 +9,40 @@ import type { InlineKeyboard } from "grammy";
  * are caught gracefully instead of crashing the handler.
  */
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? (err.message?.toLowerCase() ?? "") : String(err).toLowerCase();
+}
+
 function isIgnorableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  const msg = err.message?.toLowerCase() ?? "";
+  const msg = errorMessage(err);
   return (
     msg.includes("message is not modified") ||
     msg.includes("message to edit not found") ||
     msg.includes("message can't be edited") ||
+    msg.includes("message to delete not found") ||
     msg.includes("query is too old") ||
     msg.includes("bot was blocked by the user") ||
     msg.includes("user is deactivated") ||
     msg.includes("chat not found") ||
     msg.includes("have no rights to send a message")
   );
+}
+
+function isMessageNotModified(err: unknown): boolean {
+  return errorMessage(err).includes("message is not modified");
+}
+
+function isExpectedEditFallback(err: unknown): boolean {
+  const msg = errorMessage(err);
+  return msg.includes("there is no text in the message to edit") ||
+    msg.includes("message to edit not found") ||
+    msg.includes("message can't be edited");
+}
+
+function isEntityParseError(err: unknown): boolean {
+  const msg = errorMessage(err);
+  return msg.includes("can't parse entities") || msg.includes("can't find end of the entity");
 }
 
 export async function safeEditMessageText(
@@ -70,6 +91,20 @@ export async function safeDeleteMessage(ctx: Context): Promise<boolean> {
   }
 }
 
+export async function safeDeleteChatMessage(
+  api: { deleteMessage: (chatId: string | number, messageId: number) => Promise<unknown> },
+  chatId: string | number,
+  messageId: number,
+): Promise<boolean> {
+  try {
+    await api.deleteMessage(chatId, messageId);
+    return true;
+  } catch (err) {
+    if (isIgnorableError(err)) return false;
+    throw err;
+  }
+}
+
 export async function safeAnswerCallbackQuery(
   ctx: Context,
   options?: { text?: string; show_alert?: boolean },
@@ -98,33 +133,55 @@ export async function safeRender(
     reply_markup?: InlineKeyboard;
   },
 ): Promise<void> {
-  // First try to edit the existing message in place
+  let editError: unknown;
+  let replyOptions = options;
   try {
     await ctx.editMessageText(text, options);
     return;
-  } catch (editErr) {
-    console.warn("safeRender: editMessageText failed, falling back to delete+reply:", editErr instanceof Error ? editErr.message : editErr);
+  } catch (err) {
+    if (isMessageNotModified(err)) return;
+    editError = err;
   }
 
-  // Delete the old message (photo or stale), then send a new one
+  // User-provided text can contain incomplete Markdown. Preserve the message and
+  // retry as plain text before considering delete + reply.
+  if (options?.parse_mode && isEntityParseError(editError)) {
+    const plainOptions = options.reply_markup ? { reply_markup: options.reply_markup } : {};
+    replyOptions = plainOptions;
+    try {
+      await ctx.editMessageText(text, plainOptions);
+      return;
+    } catch (plainEditError) {
+      if (isMessageNotModified(plainEditError)) return;
+      editError = plainEditError;
+    }
+  }
+
+  if (!isExpectedEditFallback(editError) && !isIgnorableError(editError)) {
+    console.warn("safeRender: editMessageText failed, falling back to delete+reply:", errorMessage(editError));
+  }
+
   try {
     await ctx.deleteMessage();
   } catch (deleteErr) {
-    console.warn("safeRender: deleteMessage failed:", deleteErr instanceof Error ? deleteErr.message : deleteErr);
+    if (!isIgnorableError(deleteErr)) {
+      console.warn("safeRender: deleteMessage failed:", errorMessage(deleteErr));
+    }
   }
 
   try {
-    await ctx.reply(text, options);
+    await ctx.reply(text, replyOptions);
   } catch (firstErr) {
-    // If Markdown fails, retry without parse_mode as a last resort
-    const { parse_mode, ...rest } = options ?? {};
+    const { parse_mode, ...rest } = replyOptions ?? {};
     if (parse_mode) {
       try {
         await ctx.reply(text, rest);
-      } catch {
-        // Both attempts failed — log and give up
-        console.warn("safeRender: both editMessageText and reply failed:", firstErr instanceof Error ? firstErr.message : firstErr);
+        return;
+      } catch (secondErr) {
+        console.warn("safeRender: reply failed:", errorMessage(secondErr));
       }
+    } else {
+      console.warn("safeRender: reply failed:", errorMessage(firstErr));
     }
   }
 }

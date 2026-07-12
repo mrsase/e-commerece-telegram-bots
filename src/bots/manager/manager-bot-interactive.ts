@@ -76,7 +76,7 @@ import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel, eventTypeLabel, receiptStatusLabel, deliveryStatusLabel } from "../../utils/order-status.js";
 import { ReferralAnalyticsService, formatReferralTree } from "../../services/referral-analytics-service.js";
-import { safeRender } from "../../utils/safe-reply.js";
+import { safeDeleteChatMessage, safeRender } from "../../utils/safe-reply.js";
 import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
@@ -457,7 +457,8 @@ async function approveReceipt(
 
   if (clientBot && receipt.order.channelMessageId) {
     try {
-      await clientBot.api.deleteMessage(
+      await safeDeleteChatMessage(
+        clientBot.api,
         receipt.order.user.tgUserId.toString(),
         receipt.order.channelMessageId,
       );
@@ -1672,8 +1673,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           const deleteDelayMs = effectiveExpiryMin * 60 * 1000;
           setTimeout(async () => {
             try {
-              await clientBot!.api.deleteMessage(userTgId, directMessageId!);
-              console.log(`[AUTO-DELETE] Deleted payment message ${directMessageId} for order #${orderId}`);
+              const deleted = await safeDeleteChatMessage(clientBot!.api, userTgId, directMessageId!);
+              if (deleted) console.log(`[AUTO-DELETE] Deleted payment message ${directMessageId} for order #${orderId}`);
             } catch (err) {
               console.error(`[AUTO-DELETE] Failed to delete message ${directMessageId}:`, err);
             }
