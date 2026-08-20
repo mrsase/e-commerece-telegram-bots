@@ -1,4 +1,5 @@
 import { formatPrice } from "../utils/format-price.js";
+import { formatPhoneForDisplay } from "../utils/phone.js";
 
 /**
  * Centralized text management for فروشگاه ایرانی Telegram Bots
@@ -112,7 +113,9 @@ export const ClientTexts = {
   askPhoneManualPrompt: () => "📱 لطفاً شماره تلفن خود را به صورت کامل وارد کنید (مثلاً: 09123456789):",
   phoneReceived: () => "✅ شماره تماس ثبت شد.",
   invalidPhone: () => "❌ شماره تلفن نامعتبر است. لطفاً یک شماره معتبر با فرمت 09123456789 وارد کنید:",
-  askLocation: () => "📍 اگر می‌خواهید ارسال دقیق‌تر انجام شود، موقعیت مکانی تحویل را ارسال کنید.\n\nمی‌توانید موقعیت فعلی خود را بفرستید یا از منوی پیوست تلگرام نقطه مورد نظر را روی نقشه انتخاب کنید.",
+  askLocation: () => "📍 لطفاً موقعیت مکانی تحویل را ارسال کنید.\n\nمی‌توانید موقعیت فعلی خود را بفرستید یا از منوی پیوست تلگرام نقطه مورد نظر را روی نقشه انتخاب کنید.",
+  locationRequiredForNewUser: () => "📍 برای تکمیل عضویت، ثبت موقعیت مکانی الزامی است.\n\nاز دکمه زیر موقعیت فعلی را بفرستید یا از منوی پیوست تلگرام (📎) یک نقطه روی نقشه انتخاب و ارسال کنید.",
+  locationRequiredForCheckout: () => "📍 برای ثبت سفارش، موقعیت مکانی تحویل الزامی است.\n\nاز دکمه زیر موقعیت فعلی را بفرستید یا از منوی پیوست تلگرام (📎) یک نقطه روی نقشه انتخاب و ارسال کنید.",
   askLocationButton: () => "📍 ارسال موقعیت فعلی",
   locationReceived: () => "✅ موقعیت مکانی ثبت شد.",
   invalidLocation: () => "❌ مکان باید به صورت موقعیت مکانی (Location) ارسال شود.\n\nاز دکمه «📍 ارسال موقعیت فعلی» استفاده کنید یا از منوی پیوست (📎) یک نقطه روی نقشه انتخاب کنید.",
@@ -210,8 +213,12 @@ export const ManagerTexts = {
   mainMenuTitle: () => "👔 *داشبورد مدیریت*\n\nکارهای روزانه از «رسیدها» و «سفارش‌ها» شروع می‌شود.",
 
   announcementsMenuTitle: () => "📣 *اطلاع‌رسانی فروشگاه*\n\n«اعلام تعطیلی» ثبت سفارش را در بازه انتخابی متوقف می‌کند. «اطلاعیه» می‌تواند همراه تخفیف عمومی باشد.",
-  announcementAskTitle: () => "عنوان اطلاعیه را وارد کنید. عنوان برای کاربران نمایش داده می‌شود.",
-  announcementAskMessage: () => "توضیحات اطلاعیه را وارد کنید یا «بدون توضیح» را بزنید.",
+  announcementAskTitle: () => "عنوان اطلاعیه را وارد کنید؛ یا تصویر/ویدیو را همین‌جا با کپشن یا بدون کپشن ارسال کنید.\n\nرسانه را می‌توانید در مرحله توضیحات هم ارسال کنید.\nحداکثر حجم فایل ۲۰ مگابایت است.",
+  announcementMediaTooLarge: () => "❌ حجم فایل بیشتر از ۲۰ مگابایت است. لطفاً فایل کوچک‌تری ارسال کنید.",
+  announcementMediaWrongStep: () => "❌ در این مرحله نمی‌توانید تصویر یا ویدیو ارسال کنید.\n\nرسانه (تصویر یا ویدیو، با کپشن دلخواه) فقط در مراحل «عنوان» و «توضیحات» ساخت اطلاعیه پذیرفته می‌شود.",
+  announcementMediaNotImageOrVideo: () => "❌ برای اطلاعیه فقط تصویر یا ویدیو قابل ارسال است. لطفاً یکی از این دو را ارسال کنید.",
+  announcementAskMessage: () => "توضیحات اطلاعیه را وارد کنید (یا تصویر/ویدیو با کپشن دلخواه ارسال کنید) یا «بدون توضیح» را بزنید.",
+  announcementDeactivateConfirm: (label: string) => `آیا از توقف «${label}» مطمئن هستید؟ این اطلاعیه دیگر برای کاربران ارسال نمی‌شود.`,
   announcementChooseDiscount: () => "آیا این اطلاعیه تخفیف عمومی دارد؟ این تخفیف روی قیمت کل همه سفارش‌ها اعمال می‌شود.",
   announcementAskDiscountPercent: () => "درصد تخفیف را با عددی بین ۱ تا ۱۰۰ وارد کنید:",
   announcementAskDiscountAmount: () => "مبلغ تخفیف را به تومان و فقط با عدد وارد کنید:",
@@ -386,6 +393,10 @@ export const ManagerTexts = {
   supportAskReply: () => "✍️ متن پاسخ را بنویسید.\n\nقبل از ارسال به مشتری، پیش‌نمایش و دکمه تأیید نمایش داده می‌شود.",
   supportReplySent: () => "✅ پاسخ ارسال شد.",
   supportConversationClosed: () => "✅ گفتگو بسته شد.",
+  supportConversationNotFound: () => "گفتگو پیدا نشد.",
+  supportConversationClosedChoice: () => "🚫 این گفتگو قبلاً بسته شده است؛ پیامی در آن ارسال نمی‌شود.\n\nبرای ارسال همین پاسخ، گفتگو را دوباره باز کنید یا ارسال را لغو کنید.",
+  supportSendFailed: () => "❌ ارسال پاسخ با خطا مواجه شد. دوباره تلاش کنید.",
+  supportOpenError: () => "❌ باز کردن گفتگوی پشتیبانی با خطا مواجه شد. دوباره تلاش کنید.",
   supportNewMessageNotification: (conversationId: number, fromLabel: string) =>
     `📩 پیام جدید پشتیبانی\nگفتگو #${conversationId}\nاز: ${fromLabel}`,
   productNotFound: () => "محصول پیدا نشد.",
@@ -395,7 +406,10 @@ export const ManagerTexts = {
   
   // User Info Display
   userContactInfo: (phone: string | null, address: string | null, lat: number | null, lng: number | null, locationText?: string | null) =>
-    `📋 *اطلاعات مشتری:*\nتلفن: ${escapeMarkdown(phone) || '—'}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : locationText ? `\n📍 موقعیت: ${escapeMarkdown(locationText)}` : ''}`,
+    `📋 *اطلاعات مشتری:*\nتلفن:\n${formatPhoneForDisplay(phone)}\nآدرس: ${escapeMarkdown(address) || '—'}${lat != null && lng != null ? `\n📍 موقعیت: ${lat.toFixed(6)}, ${lng.toFixed(6)}` : locationText ? `\n📍 موقعیت: ${escapeMarkdown(locationText)}` : ''}`,
+
+  // Order Contact
+  orderContactNoPhone: () => "شماره تماس معتبری برای این مشتری ثبت نشده است.",
 
   // Settings
   settingsMenuTitle: (imageStatus: string, cardStatus?: string, deliveryMsgStatus?: string) =>
@@ -439,7 +453,8 @@ export const CourierTexts = {
       `📌 وضعیت: ${params.status}`,
       ``,
       `👤 مشتری: ${params.customerName}`,
-      `📱 تلفن: ${params.phone}`,
+      `📱 تلفن:`,
+      formatPhoneForDisplay(params.phone, "-"),
       `🏠 آدرس: ${params.address}`,
     ];
     if (params.locationLat != null && params.locationLng != null) {
@@ -457,6 +472,7 @@ export const CourierTexts = {
   invalidDelivery: () => "این ارسال معتبر نیست.",
   notFound: () => "موردی پیدا نشد.",
   updated: () => "✅ ثبت شد.",
+  noValidContactPhone: () => "شماره تماس معتبری برای این مشتری ثبت نشده است.",
   askFailureReasonEmpty: () => "لطفاً علت تحویل ناموفق را ارسال کنید.",
   statusAssigned: () => "اختصاص داده‌شده",
   statusPickedUp: () => "تحویل گرفته شد",

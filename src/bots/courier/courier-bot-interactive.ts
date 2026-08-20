@@ -7,6 +7,7 @@ import { CourierKeyboards } from "../../utils/keyboards.js";
 import { SessionStore } from "../../utils/session-store.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { BotSettingsService } from "../../services/bot-settings-service.js";
+import { normalizeIranianPhone } from "../../utils/phone.js";
 
 type SessionState = "delivery:fail:reason";
 
@@ -16,6 +17,18 @@ interface CourierSession {
 }
 
 const courierSessions = new SessionStore<CourierSession>();
+
+/**
+ * Parse the numeric delivery id embedded in a courier callback payload such as
+ * `courier:location:12` or `courier:contact:12`. Returns null (never NaN, never
+ * a non-positive or fractional value) so every handler can reject malformed or
+ * stale callback data the same way instead of querying the DB with a garbage id.
+ */
+export function courierDeliveryIdFromData(data: string, prefix: string): number | null {
+  if (!data.startsWith(prefix)) return null;
+  const id = Number(data.slice(prefix.length));
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
 
 interface CourierBotDeps {
   prisma: PrismaClient;
@@ -307,13 +320,17 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
         locationLng: user.locationLng,
         locationText: user.locationText,
       });
-      await render(ctx, details, CourierKeyboards.deliveryActions(deliveryId, status));
+      await render(ctx, details, CourierKeyboards.deliveryActions(deliveryId, status, user.phone));
       return;
     }
 
     // ── SEND LOCATION — sends location pin to courier ──
     if (data.startsWith("courier:location:")) {
-      const deliveryId = Number(data.split(":")[2]);
+      const deliveryId = courierDeliveryIdFromData(data, "courier:location:");
+      if (deliveryId === null) {
+        await answerCallback(ctx, CourierTexts.invalidDelivery());
+        return;
+      }
       const delivery = await prisma.delivery.findUnique({
         where: { id: deliveryId },
         include: { order: { include: { user: true } } },
@@ -334,6 +351,35 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       } else {
         await answerCallback(ctx, "موقعیت مشتری ثبت نشده است.");
       }
+      return;
+    }
+
+    // ── SEND CONTACT — native Telegram contact card is reliably tappable/callable ──
+    if (data.startsWith("courier:contact:")) {
+      const deliveryId = courierDeliveryIdFromData(data, "courier:contact:");
+      if (deliveryId === null) {
+        await answerCallback(ctx, CourierTexts.invalidDelivery());
+        return;
+      }
+      const delivery = await prisma.delivery.findUnique({
+        where: { id: deliveryId },
+        include: { order: { include: { user: true } } },
+      });
+
+      if (!delivery || delivery.assignedCourierId !== courier.id) {
+        await answerCallback(ctx, CourierTexts.notFound());
+        return;
+      }
+
+      const phone = normalizeIranianPhone(delivery.order.user.phone);
+      if (!phone) {
+        await answerCallback(ctx, CourierTexts.noValidContactPhone());
+        return;
+      }
+
+      await answerCallback(ctx);
+      const user = delivery.order.user;
+      await ctx.replyWithContact(phone, user.firstName || user.username || "مشتری");
       return;
     }
 
@@ -368,7 +414,7 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
       });
 
       await answerCallback(ctx);
-      await render(ctx, details, CourierKeyboards.deliveryActions(delivery.id, delivery.status));
+      await render(ctx, details, CourierKeyboards.deliveryActions(delivery.id, delivery.status, user.phone));
       return;
     }
 

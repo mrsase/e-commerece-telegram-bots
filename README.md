@@ -103,7 +103,10 @@ Create a `.env` file:
 
 ```env
 # Database
-DATABASE_URL=file:./prisma/dev.db
+# Relative file: paths resolve against prisma/schema.prisma, so ./dev.db
+# means prisma/dev.db (NOT ./prisma/dev.db -- that would point at a
+# prisma/prisma/ subdirectory).
+DATABASE_URL=file:./dev.db
 
 # Bot Tokens (get from @BotFather on Telegram)
 CLIENT_BOT_TOKEN=your_client_bot_token
@@ -542,10 +545,63 @@ export const ClientTexts = {
 
 ## Deployment
 
+> **Stop the application before migrating.** SQLite allows only one writer at
+> a time; a running bot can hold a write lock or be mid-transaction. Use
+> `pm2 stop amoosh-telegram-bots` (or stop the service) before deploying and
+> start it again afterwards. The deploy script also refuses to run when the
+> database file is missing, so it can never accidentally create a fresh empty
+> production database next to the real one.
+
+Production deploy for this release (adds announcement media columns):
+
+```bash
+pm2 stop amoosh-telegram-bots      # stop the app FIRST (maintenance window)
+npm run db:migrate                 # backup -> verify -> status gate -> deploy
+pm2 start amoosh-telegram-bots     # start the app ONLY after it succeeds
+```
+
+`npm run db:migrate` (`scripts/safe-prisma-deploy.sh`) performs, in order:
+
+1. **Location + integrity checks**: resolves the real SQLite file from
+   `DATABASE_URL` (refuses a missing file, never mints a fresh DB), verifies
+   `PRAGMA integrity_check`, and checks the `_prisma_migrations` ledger for
+   failed/in-progress rows and tampered or deleted migration files.
+2. **Expected-migration guard**: compares local `prisma/migrations/*` directory
+   names against the applied rows in the target database and requires the ONLY
+   pending migration to be exactly `20260819090000_add_announcement_media`
+   (this release). It aborts if any historical migration is missing/unapplied,
+   any applied migration file is missing locally, or any extra pending
+   migration exists. If the release migration is already applied (nothing
+   pending), it aborts unless you re-run with `ALLOW_NOOP=1`; future releases
+   override the expectation with `EXPECTED_PENDING_MIGRATIONS` (space-
+   separated list of migration names).
+3. **Verified backup first**: creates a crash-consistent backup via the SQLite
+   online backup API and verifies it (integrity + per-table fingerprint
+   against the source). `prisma migrate status` gates the deploy only after
+   the backup is verified, so a failure never leaves you without a recovery
+   artifact. The run prints the backup's absolute path and SHA-256.
+4. **Deploy + post-checks**: snapshots per-table row counts before/after
+   `prisma migrate deploy`, aborts if any pre-existing table's row count
+   changes, then re-checks integrity, migration status, and that the expected
+   migration is recorded as applied.
+
+Backup only (needs no Prisma CLI — works even if the CLI is broken):
+
+```bash
+npm run db:backup                  # integrity/ledger checks + backup + verify + exit
+```
+
 ### Production Checklist
 
 1. ✅ Set `NODE_ENV=production`
-2. ✅ Run `npx prisma generate` and `npx prisma migrate deploy`
+2. ✅ Use the safe deploy script: stop the app, then run `npm run db:migrate`,
+   which verifies integrity and the migration ledger, requires the only
+   pending migration to be `20260819090000_add_announcement_media` (aborting
+   otherwise; override with `EXPECTED_PENDING_MIGRATIONS`, clean no-op only
+   with `ALLOW_NOOP=1`), creates and verifies a backup BEFORE `prisma migrate
+   status` gates the deploy, refuses a missing database file, and aborts if a
+   migration changes any existing table's row counts (backup only:
+   `npm run db:backup`)
 3. ✅ Set `UPDATES_MODE=polling`
 4. ✅ Run a single app instance per bot token while using polling
 5. ✅ Set up Redis if using background jobs
@@ -616,7 +672,10 @@ pm2 save
 
 ### Database Errors
 
-1. **Run migrations**: `npx prisma generate && npx prisma migrate deploy`
+1. **Run migrations**: stop the app, then `npm run db:migrate` (safe script:
+   backup + expected-migration guard + status gate + deploy). Fast paths only
+   when the safe script is unusable:
+   `npx prisma generate && npx prisma migrate deploy`
 2. **Check connection**: Verify `DATABASE_URL` is correct
 3. **Generate client**: `npx prisma generate`
 

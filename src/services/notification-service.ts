@@ -5,6 +5,7 @@ import { safeSendMessage } from "../utils/safe-reply.js";
 import { ClientTexts } from "../i18n/index.js";
 import { formatPrice } from "../utils/format-price.js";
 import { escapeMarkdown } from "../utils/escape-markdown.js";
+import { formatPhoneForDisplay, normalizeIranianPhone } from "../utils/phone.js";
 
 export interface NotificationServiceDeps {
   prisma: PrismaClient;
@@ -50,7 +51,7 @@ export class NotificationService {
     let text = `🔔 *سفارش جدید #${orderId}*\n`;
     text += `━━━━━━━━━━━━━━━\n`;
     text += `👤 مشتری: ${esc(userName)}\n`;
-    text += `📱 تلفن: ${phone ? esc(phone) : '—'}\n`;
+    text += `📱 تلفن:\n${formatPhoneForDisplay(phone)}\n`;
     text += `🏠 آدرس: ${address ? esc(address) : '—'}\n\n`;
     text += `*اقلام:*\n`;
     for (const item of items) {
@@ -61,7 +62,12 @@ export class NotificationService {
     text += `*نهایی: ${formatPrice(grandTotal)}*\n`;
 
     const keyboard = new InlineKeyboard()
-      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
+      .row()
+      .text("💬 پشتیبانی مشتری", `mgr:support:order:${orderId}`);
+    if (normalizeIranianPhone(phone)) {
+      keyboard.text("📞 تماس", `mgr:order:contact:${orderId}`);
+    }
 
     for (const mgr of managers) {
       try {
@@ -260,7 +266,7 @@ export const NotificationServiceTexts = {
     `📦 به‌روزرسانی ارسال سفارش #${orderId}\n\nوضعیت: ${statusLabel}${extraText ? `\n\n${extraText}` : ''}`,
 
   newDeliveryForCourier: (orderId: number, customerName: string, phone: string, address: string) =>
-    `🚚 ارسال جدید\n\nسفارش #${orderId}\nمشتری: ${customerName}\nتلفن: ${phone}\nآدرس: ${address}\n\nبرای تغییر وضعیت ارسال، از دکمه‌های همین ربات استفاده کنید.`,
+    `🚚 ارسال جدید\n\nسفارش #${orderId}\nمشتری: ${customerName}\nتلفن:\n${formatPhoneForDisplay(phone, "-")}\nآدرس: ${address}\n\nبرای تغییر وضعیت ارسال، از دکمه‌های همین ربات استفاده کنید.`, 
 
   deliveryFailedForManager: (orderId: number, reason: string) =>
     `⚠️ تحویل ناموفق\n\nسفارش #${orderId}\nعلت: ${reason}`,

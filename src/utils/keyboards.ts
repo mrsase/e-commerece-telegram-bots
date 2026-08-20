@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import { formatPrice } from "./format-price.js";
+import { normalizeIranianPhone } from "./phone.js";
 
 /**
  * Keyboard utilities for Telegram bot UI
@@ -493,6 +494,14 @@ export const ManagerKeyboards = {
       .text("❌ انصراف", `mgr:support:conv:${conversationId}`);
   },
 
+  /** Chooser shown when the manager confirms a reply to a CLOSED conversation: deliberately reopen it (and send) or abandon the send. */
+  supportReplyReopen: (conversationId: number) => {
+    return new InlineKeyboard()
+      .text("🔄 بازگشایی و ارسال", `mgr:support:reopensend:${conversationId}`)
+      .row()
+      .text("❌ انصراف", `mgr:support:cancelsend:${conversationId}`);
+  },
+
   /** Courier management menu */
   courierManagement: () => {
     return new InlineKeyboard()
@@ -667,7 +676,7 @@ export const CourierKeyboards = {
     kb.text("« بازگشت", "courier:menu");
     return kb;
   },
-  deliveryActions: (deliveryId: number, currentStatus?: string) => {
+  deliveryActions: (deliveryId: number, currentStatus?: string, phone?: string | null) => {
     const kb = new InlineKeyboard();
 
     // Show only the logical next status transitions
@@ -684,6 +693,11 @@ export const CourierKeyboards = {
 
     // Location button
     kb.text("📍 آدرس روی نقشه", `courier:location:${deliveryId}`).row();
+
+    // Native Telegram contact card — reliably tappable/callable, immune to RTL rendering
+    if (normalizeIranianPhone(phone)) {
+      kb.text("📞 تماس با مشتری", `courier:contact:${deliveryId}`).row();
+    }
 
     kb.text("« بازگشت", "courier:deliveries");
     return kb;

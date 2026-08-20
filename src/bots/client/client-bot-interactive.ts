@@ -1,5 +1,5 @@
 import { Bot, Context, Keyboard } from "grammy";
-import type { PrismaClient, User } from "@prisma/client";
+import type { PrismaClient, SupportConversation, User } from "@prisma/client";
 import { CartState, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ClientKeyboards } from "../../utils/keyboards.js";
@@ -19,13 +19,81 @@ type SessionState =
   | "referral_score"
   | "support_message";
 
-interface ClientSession {
+export interface ClientSession {
   state: SessionState;
   data?: Record<string, unknown>;
   selectedQty?: number;
   orderId?: number;
   supportConversationId?: number;
   fromProfile?: boolean;
+  /** Marks the user as being inside the mandatory onboarding location gate. */
+  afterLocation?: "onboarding";
+}
+
+/**
+ * True while the user is inside the mandatory onboarding location gate.
+ * Deriving this from the session (not from a missing DB location) preserves
+ * existing users: only users currently mid-onboarding are gated; everyone else
+ * is asked for their location at checkout instead.
+ */
+export function isInMandatoryOnboarding(session: ClientSession | undefined): boolean {
+  return session?.afterLocation === "onboarding";
+}
+
+/**
+ * Callback actions that remain available while a user is inside mandatory
+ * onboarding. Everything else (products, cart, checkout, profile, …) must be
+ * blocked so stale inline buttons cannot bypass the location gate. Support and
+ * help stay reachable on purpose.
+ */
+export function isAllowedDuringOnboarding(data: string): boolean {
+  return (
+    data === "noop" ||
+    data === "client:support" ||
+    data === "client:help" ||
+    data.startsWith("client:support:close:") ||
+    data.startsWith("client:support:reply:")
+  );
+}
+
+/**
+ * Resolve the support conversation a client may write into.
+ *
+ * Security/UX rules:
+ * - Ownership: a conversation may only be used by its owner (userId match), so
+ *   a guessed/stale conversation id can never touch another user's chat.
+ * - Closed conversations: writes into a CLOSED conversation would orphan the
+ *   user's message (managers only watch open conversations). Instead the
+ *   conversation is deliberately reopened so the message stays visible.
+ * - Stale ids fall back to the user's own most recent open conversation,
+ *   creating a fresh one when none exists, so the message is never dropped.
+ */
+export async function resolveSupportConversationForUser(
+  prisma: PrismaClient,
+  userId: number,
+  preferredConversationId?: number,
+): Promise<SupportConversation | null> {
+  if (preferredConversationId != null) {
+    const conversation = await prisma.supportConversation.findUnique({
+      where: { id: preferredConversationId },
+    });
+    if (conversation && conversation.userId === userId) {
+      if (conversation.status === SupportConversationStatus.CLOSED) {
+        return prisma.supportConversation.update({
+          where: { id: conversation.id },
+          data: { status: SupportConversationStatus.OPEN, lastMessageAt: new Date() },
+        });
+      }
+      return conversation;
+    }
+  }
+
+  const open = await prisma.supportConversation.findFirst({
+    where: { userId, status: SupportConversationStatus.OPEN },
+    orderBy: { createdAt: "desc" },
+  });
+  if (open) return open;
+  return prisma.supportConversation.create({ data: { userId } });
 }
 
 const userSessions = new SessionStore<ClientSession>();
@@ -47,6 +115,7 @@ import { BotSettingsService } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
 import { addItemToCart, ProductUnavailableForCartError } from "../../utils/cart-utils.js";
 import { AnnouncementService, formatAnnouncement } from "../../services/announcement-service.js";
+import { formatPhoneForDisplay, normalizeIranianPhone } from "../../utils/phone.js";
 
 export function referralCodeFromStartMessage(text: string): string | undefined {
   const match = text.trim().match(/^\/start(?:\s+([A-Za-z0-9_-]+))?$/i);
@@ -266,6 +335,27 @@ async function processCheckout(
   const discountService = new (await import("../../services/discount-service.js")).DiscountService(prisma);
 
   try {
+    // Repair any legacy/un-normalized stored phone to the +98 international
+    // format so every order carries a consistent, linkable phone number.
+    const normalizedPhone = normalizeIranianPhone(user.phone);
+    if (normalizedPhone && normalizedPhone !== user.phone) {
+      user.phone = normalizedPhone;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { phone: normalizedPhone },
+      });
+    }
+
+    if (user.locationLat == null || user.locationLng == null) {
+      userSessions.set(ctx.from!.id, { state: "checkout_location" });
+      const keyboard = new Keyboard()
+        .requestLocation(ClientTexts.askLocationButton())
+        .resized()
+        .oneTime();
+      await ctx.reply(ClientTexts.locationRequiredForCheckout(), { reply_markup: keyboard });
+      return;
+    }
+
     const closure = await new AnnouncementService(prisma).getActiveClosure(user.isTestUser);
     if (closure) {
       userSessions.delete(ctx.from!.id);
@@ -373,7 +463,18 @@ async function continueCheckoutFlow(
   const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
   if (!updatedUser) return;
 
+  const needsLocation = updatedUser.locationLat == null || updatedUser.locationLng == null;
   const needsAddress = !updatedUser.address;
+
+  if (needsLocation) {
+    userSessions.set(ctx.from!.id, { state: "checkout_location" });
+    const keyboard = new Keyboard()
+      .requestLocation(ClientTexts.askLocationButton())
+      .resized()
+      .oneTime();
+    await ctx.reply(ClientTexts.locationRequiredForCheckout(), { reply_markup: keyboard });
+    return;
+  }
 
   if (needsAddress) {
     userSessions.set(ctx.from!.id, { state: "checkout_address" });
@@ -407,7 +508,7 @@ async function showProfile(
   let profileText = "👤 *پروفایل من*\n\n";
   profileText += `نام: ${user.firstName ?? "-"} ${user.lastName ?? ""}\n`;
   profileText += `نام کاربری: ${user.username ? "@" + user.username : "-"}\n`;
-  profileText += `تلفن: ${user.phone ?? "ثبت نشده"}\n`;
+  profileText += `تلفن:\n${formatPhoneForDisplay(user.phone, "ثبت نشده")}\n`;
   profileText += `آدرس: ${user.address ?? "ثبت نشده"}\n`;
   profileText += `موقعیت: ${user.locationLat != null ? "✅ ثبت شده" : "ثبت نشده"}\n`;
   const effectiveScore = user.loyaltyScoreOverride ?? user.loyaltyScore;
@@ -440,8 +541,24 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       : null;
     const announcements = await announcementService.getActive(user?.isTestUser ?? false);
     for (const announcement of announcements) {
-      await ctx.reply(formatAnnouncement(announcement));
+      try {
+        await announcementService.sendToChat(announcement, bot, ctx.chat!.id, managerBot);
+      } catch (error) {
+        // One broken announcement must not block the rest or crash the handler.
+        console.error("[CLIENT] Failed to send active announcement:", error);
+      }
     }
+  };
+
+  const requestMandatoryLocation = async (ctx: Context, afterLocation?: "onboarding"): Promise<void> => {
+    userSessions.set(ctx.from!.id, { state: "checkout_location", afterLocation });
+    const keyboard = new Keyboard()
+      .requestLocation(ClientTexts.askLocationButton())
+      .resized()
+      .oneTime();
+    await ctx.reply(afterLocation ? ClientTexts.locationRequiredForNewUser() : ClientTexts.locationRequiredForCheckout(), {
+      reply_markup: keyboard,
+    });
   };
 
   // Global error handler to prevent crashes
@@ -465,10 +582,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       if (referralCode) {
         const valid = await validateAndUseReferralCode(user.id, referralCode, prisma);
         if (valid) {
-          await ctx.reply(ClientTexts.referralCodeAccepted(), {
-            reply_markup: ClientKeyboards.mainMenu(),
-          });
-          await sendActiveAnnouncements(ctx);
+          await ctx.reply(ClientTexts.referralCodeAccepted());
+          await requestMandatoryLocation(ctx, "onboarding");
           return;
         }
         await ctx.reply(ClientTexts.invalidReferralCode());
@@ -477,6 +592,16 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       userSessions.set(ctx.from!.id, { state: "awaiting_referral" });
       await ctx.reply(ClientTexts.welcomeNewUser());
+      return;
+    }
+
+    // A user currently mid-onboarding (session-derived) must not bypass the
+    // mandatory location gate by re-entering via /start. Existing verified
+    // users without a saved location are NOT gated globally — they are asked
+    // for their location at checkout instead (see processCheckout).
+    const currentSession = userSessions.get(ctx.from!.id);
+    if (isInMandatoryOnboarding(currentSession)) {
+      await requestMandatoryLocation(ctx, "onboarding");
       return;
     }
 
@@ -496,6 +621,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     const incomingText = ctx.message.text.trim();
 
     if (session && session.state !== "awaiting_referral" && (incomingText === "/cancel" || incomingText === "انصراف")) {
+      // The mandatory onboarding location gate cannot be cancelled — re-prompt it.
+      if (isInMandatoryOnboarding(session)) {
+        await requestMandatoryLocation(ctx, "onboarding");
+        return;
+      }
       userSessions.delete(ctx.from.id);
       await ctx.reply(ClientTexts.actionCancelled(), {
         reply_markup: { remove_keyboard: true },
@@ -526,10 +656,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       }
 
       userSessions.delete(ctx.from.id);
-      await ctx.reply(ClientTexts.referralCodeAccepted(), {
-        reply_markup: ClientKeyboards.mainMenu(),
-      });
-      await sendActiveAnnouncements(ctx);
+      await ctx.reply(ClientTexts.referralCodeAccepted());
+      await requestMandatoryLocation(ctx, "onboarding");
       return;
     }
 
@@ -543,21 +671,10 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      // Validate as phone number (Iranian format: 09xxxxxxxxx or +989xxxxxxxxx)
-      const digitsOnly = text.replace(/\D/g, "");
-      const isValid = /^(\+98|0)?9\d{9}$/.test(text) || digitsOnly.length >= 10;
-
-      if (!isValid) {
+      const phone = normalizeIranianPhone(text);
+      if (!phone) {
         await ctx.reply(ClientTexts.invalidPhone());
         return;
-      }
-
-      // Normalize the phone number
-      let phone = text;
-      if (phone.startsWith("0") && !phone.startsWith("+98")) {
-        phone = "+98" + phone.slice(1);
-      } else if (!phone.startsWith("+98") && !phone.startsWith("0")) {
-        phone = "0" + phone;
       }
 
       const user = await prisma.user.findUnique({
@@ -664,27 +781,50 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
+      // Enforce conversation ownership and never write into a CLOSED
+      // conversation (which would orphan the message). A stale/foreign/closed
+      // conversation is deliberately reopened — or replaced with the user's own
+      // open conversation — so the message is always delivered to support.
+      const resolved = await resolveSupportConversationForUser(
+        prisma,
+        user.id,
+        session.supportConversationId,
+      );
+      if (!resolved) {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply(ClientTexts.supportClosed());
+        return;
+      }
+
+      if (resolved.id !== session.supportConversationId) {
+        userSessions.set(ctx.from!.id, {
+          state: "support_message",
+          supportConversationId: resolved.id,
+          afterLocation: isInMandatoryOnboarding(session) ? "onboarding" : undefined,
+        });
+      }
+
       await prisma.$transaction([
         prisma.supportMessage.create({
           data: {
-            conversationId: session.supportConversationId,
+            conversationId: resolved.id,
             senderType: SupportSenderType.USER,
             text: messageText,
           },
         }),
         prisma.supportConversation.update({
-          where: { id: session.supportConversationId },
+          where: { id: resolved.id },
           data: { lastMessageAt: new Date() },
         }),
       ]);
 
       await ctx.reply(ClientTexts.supportMessageSent(), {
-        reply_markup: ClientKeyboards.supportActions(session.supportConversationId),
+        reply_markup: ClientKeyboards.supportActions(resolved.id),
       });
 
       // Notify managers
       const userLabel = user.username || user.firstName || `#${user.id}`;
-      await notificationService.notifyManagersNewSupportMessage(session.supportConversationId, userLabel, messageText);
+      await notificationService.notifyManagersNewSupportMessage(resolved.id, userLabel, messageText);
       return;
     }
 
@@ -709,9 +849,15 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
+      const phone = normalizeIranianPhone(contact.phone_number);
+      if (!phone) {
+        await ctx.reply(ClientTexts.invalidPhone());
+        return;
+      }
+
       await prisma.user.update({
         where: { id: user.id },
-        data: { phone: contact.phone_number },
+        data: { phone },
       });
 
       userSessions.delete(ctx.from.id);
@@ -727,42 +873,51 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   });
 
   // ===========================================
-  // LOCATION MESSAGE HANDLER - For GPS location
+  // LOCATION MESSAGE HANDLERS - Current location, map pin, or venue
   // ===========================================
-  bot.on("message:location", async (ctx) => {
+  const saveSharedLocation = async (ctx: Context, latitude: number, longitude: number): Promise<void> => {
+    if (!ctx.from) return;
     const session = userSessions.get(ctx.from.id);
-    
-    if (session?.state === "checkout_location") {
-      const location = ctx.message.location;
-      
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
+    if (session?.state !== "checkout_location") return;
 
-      if (!user) {
-        await ctx.reply(ClientTexts.unableToIdentify());
-        return;
-      }
+    const user = await prisma.user.findUnique({
+      where: { tgUserId: BigInt(ctx.from.id) },
+    });
 
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { 
-          locationLat: location.latitude,
-          locationLng: location.longitude,
-          locationText: null,
-        },
-      });
-
-      userSessions.delete(ctx.from.id);
-      await ctx.reply(ClientTexts.locationReceived(), { reply_markup: { remove_keyboard: true } });
-
-      if (session.fromProfile) {
-        const updated = await prisma.user.findUnique({ where: { id: user.id } });
-        if (updated) await showProfile(ctx, updated);
-      } else {
-        await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
-      }
+    if (!user) {
+      await ctx.reply(ClientTexts.unableToIdentify());
+      return;
     }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        locationLat: latitude,
+        locationLng: longitude,
+        locationText: null,
+      },
+    });
+
+    userSessions.delete(ctx.from.id);
+    await ctx.reply(ClientTexts.locationReceived(), { reply_markup: { remove_keyboard: true } });
+
+    if (session.afterLocation === "onboarding") {
+      await ctx.reply(ClientTexts.welcome(), { reply_markup: ClientKeyboards.mainMenu() });
+      await sendActiveAnnouncements(ctx);
+    } else if (session.fromProfile) {
+      const updated = await prisma.user.findUnique({ where: { id: user.id } });
+      if (updated) await showProfile(ctx, updated);
+    } else {
+      await continueCheckoutFlow(ctx, user, prisma, notificationService, bot, managerBot, checkoutImageFileId);
+    }
+  };
+
+  bot.on("message:location", async (ctx) => {
+    await saveSharedLocation(ctx, ctx.message.location.latitude, ctx.message.location.longitude);
+  });
+
+  bot.on("message:venue", async (ctx) => {
+    await saveSharedLocation(ctx, ctx.message.venue.location.latitude, ctx.message.venue.location.longitude);
   });
 
   // ===========================================
@@ -885,6 +1040,15 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     if (needsReferral && !data.startsWith("noop")) {
       userSessions.set(ctx.from.id, { state: "awaiting_referral" });
       await safeRender(ctx, ClientTexts.welcomeNewUser());
+      return;
+    }
+
+    // Mandatory onboarding location gate: stale inline callbacks must not
+    // bypass it. Only support/help (and inert "noop" buttons) stay available
+    // while the user is in onboarding; everything else re-prompts the location.
+    const currentSession = userSessions.get(ctx.from.id);
+    if (isInMandatoryOnboarding(currentSession) && !isAllowedDuringOnboarding(data)) {
+      await requestMandatoryLocation(ctx, "onboarding");
       return;
     }
 
@@ -1207,10 +1371,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       }
 
       // Check if we need to gather info
-      const needsPhone = !user.phone;
+      const needsPhone = !normalizeIranianPhone(user.phone);
+      const needsLocation = user.locationLat == null || user.locationLng == null;
       const needsAddress = !user.address;
 
-      if (needsPhone || needsAddress) {
+      if (needsPhone || needsLocation || needsAddress) {
         // Delete the inline message to avoid stacking
         try { await ctx.deleteMessage(); } catch { /* ignore */ }
         
@@ -1225,6 +1390,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           return;
         }
         
+        if (needsLocation) {
+          await requestMandatoryLocation(ctx);
+          return;
+        }
+
         if (needsAddress) {
           userSessions.set(ctx.from.id, { state: "checkout_address" });
           await ctx.reply(ClientTexts.askAddress());
@@ -1569,7 +1739,16 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      await safeRender(ctx, announcements.map(formatAnnouncement).join("\n\n──────────\n\n"), {
+      try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      for (const announcement of announcements) {
+        try {
+          await announcementService.sendToChat(announcement, bot, ctx.chat!.id, managerBot);
+        } catch (error) {
+          // One broken announcement must not block the rest or crash the handler.
+          console.error("[CLIENT] Failed to send announcement:", error);
+        }
+      }
+      await ctx.reply("پایان اطلاعیه‌های فعال.", {
         reply_markup: ClientKeyboards.backToMenu(),
       });
       return;
@@ -1620,6 +1799,9 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       userSessions.set(ctx.from.id, {
         state: "support_message",
         supportConversationId: conversation.id,
+        // Keep the onboarding marker alive while talking to support so the
+        // location gate stays non-bypassable afterwards.
+        afterLocation: isInMandatoryOnboarding(currentSession) ? "onboarding" : undefined,
       });
 
       await safeRender(ctx, supportText, {
@@ -1631,13 +1813,33 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // CLOSE SUPPORT CONVERSATION
     if (data.startsWith("client:support:close:")) {
-      const convId = parseInt(parts[3]);
-      await prisma.supportConversation.update({
+      const convId = parseInt(parts[3], 10);
+      const conversation = await prisma.supportConversation.findUnique({
         where: { id: convId },
-        data: { status: SupportConversationStatus.CLOSED },
       });
 
+      // Ownership: only the conversation owner may close it.
+      if (!conversation || conversation.userId !== user.id) {
+        await answerCallback({ text: "گفتگو یافت نشد.", show_alert: true });
+        return;
+      }
+
+      if (conversation.status !== SupportConversationStatus.CLOSED) {
+        await prisma.supportConversation.update({
+          where: { id: conversation.id },
+          data: { status: SupportConversationStatus.CLOSED },
+        });
+      }
+
+      const wasInOnboarding = isInMandatoryOnboarding(currentSession);
       userSessions.delete(ctx.from.id);
+
+      if (wasInOnboarding) {
+        // Closing support does not cancel mandatory onboarding — re-prompt location.
+        await requestMandatoryLocation(ctx, "onboarding");
+        return;
+      }
+
       await safeRender(ctx, ClientTexts.supportClosed(), {
         reply_markup: ClientKeyboards.backToMenu(),
       });
@@ -1646,19 +1848,30 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
     // REPLY TO SUPPORT FROM NOTIFICATION
     if (data.startsWith("client:support:reply:")) {
-      const convId = parseInt(parts[3]);
+      const convId = parseInt(parts[3], 10);
       const conversation = await prisma.supportConversation.findUnique({
         where: { id: convId },
       });
 
-      if (!conversation || conversation.status === SupportConversationStatus.CLOSED) {
-        await ctx.answerCallbackQuery({ text: "این گفتگو بسته شده است.", show_alert: true });
+      // Ownership: only the conversation owner may reply into it.
+      if (!conversation || conversation.userId !== user.id) {
+        await ctx.answerCallbackQuery({ text: "گفتگو یافت نشد.", show_alert: true });
         return;
+      }
+
+      // Deliberately reopen a closed conversation so the user's upcoming
+      // messages are never written into (and orphaned in) a CLOSED conversation.
+      if (conversation.status === SupportConversationStatus.CLOSED) {
+        await prisma.supportConversation.update({
+          where: { id: conversation.id },
+          data: { status: SupportConversationStatus.OPEN, lastMessageAt: new Date() },
+        });
       }
 
       userSessions.set(ctx.from.id, {
         state: "support_message",
         supportConversationId: conversation.id,
+        afterLocation: isInMandatoryOnboarding(currentSession) ? "onboarding" : undefined,
       });
 
       await answerCallback();

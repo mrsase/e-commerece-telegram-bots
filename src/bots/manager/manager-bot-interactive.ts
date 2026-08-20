@@ -5,7 +5,7 @@ function safeId(value: string | undefined, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 import type { PrismaClient, Manager } from "@prisma/client";
-import { AnnouncementAudience, AnnouncementType, DiscountType, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
+import { AnnouncementAudience, AnnouncementMediaType, AnnouncementType, DiscountType, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ManagerTexts, ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ManagerKeyboards } from "../../utils/keyboards.js";
 import { formatPrice } from "../../utils/format-price.js";
@@ -58,6 +58,82 @@ interface ManagerSession {
 
 const managerSessions = new SessionStore<ManagerSession>();
 
+/**
+ * Telegram's getFile endpoint — the mechanism `crossBotFile` uses to relay a
+ * file from one bot to another — cannot download files larger than 20 MiB.
+ * Every media file accepted for an announcement must stay under this cap or
+ * the broadcast would fail for every recipient.
+ */
+const MAX_CROSS_BOT_MEDIA_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Serialize per-user conversation resolution so two managers clicking
+ * support for the same customer at the same moment cannot both observe
+ * "no open conversation" and create a duplicate. In-process only — a
+ * multi-instance deployment would need a DB constraint (schema change) to
+ * close the remaining gap.
+ */
+const supportConversationLocks = new Map<number, Promise<unknown>>();
+
+function withConversationUserLock<T>(userId: number, fn: () => Promise<T>): Promise<T> {
+  const previous = supportConversationLocks.get(userId) ?? Promise.resolve();
+  // Run `fn` on both settle paths so a failed attempt never wedges the chain.
+  const next = previous.then(fn, fn);
+  const tracked = next.then(
+    (value) => {
+      supportConversationLocks.delete(userId);
+      return value;
+    },
+    (error) => {
+      supportConversationLocks.delete(userId);
+      throw error;
+    },
+  );
+  supportConversationLocks.set(userId, tracked);
+  return tracked;
+}
+
+/**
+ * Decide what a support-reply confirmation may do for the given conversation.
+ *
+ * - Missing conversation or a missing/foreign reply draft → `missing-draft`.
+ * - Closed conversation → `reopen-required`: the reply must NOT be written or
+ *   sent; the manager gets a deliberate reopen-vs-cancel chooser instead.
+ * - Open conversation with a draft → `send`.
+ */
+export type SupportReplyGate =
+  | { kind: "send" }
+  | { kind: "reopen-required" }
+  | { kind: "missing-draft" };
+
+export function gateSupportReply(
+  conversation: { status: SupportConversationStatus } | null,
+  session: { state?: string; data?: Record<string, unknown> } | undefined,
+  conversationId: number,
+): SupportReplyGate {
+  if (!conversation) return { kind: "missing-draft" };
+  if (extractReplyDraft(session, conversationId) === null) return { kind: "missing-draft" };
+  if (conversation.status === SupportConversationStatus.CLOSED) return { kind: "reopen-required" };
+  return { kind: "send" };
+}
+
+/**
+ * The draft typed by the manager in the reply → preview flow, but only when
+ * the session is currently previewing exactly this conversation. A draft from
+ * any other conversation is rejected so a stale preview button cannot send the
+ * wrong text into the wrong chat.
+ */
+export function extractReplyDraft(
+  session: { state?: string; data?: Record<string, unknown> } | undefined,
+  conversationId: number,
+): string | null {
+  if (session?.state !== "support:reply:preview") return null;
+  if (session.data?.conversationId !== conversationId) return null;
+  const replyText = session.data.replyText;
+  if (typeof replyText !== "string" || !replyText.trim()) return null;
+  return replyText;
+}
+
 interface ManagerBotDeps {
   prisma: PrismaClient;
   clientBot?: Bot;
@@ -81,6 +157,7 @@ import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
 import { AnnouncementService, announcementTypeLabel, formatAnnouncement } from "../../services/announcement-service.js";
+import { formatPhoneForDisplay, normalizeIranianPhone } from "../../utils/phone.js";
 
 /**
  * Check if user is an authorized manager
@@ -517,6 +594,20 @@ async function showSettingsMenu(
   });
 }
 
+/**
+ * Write a manager reply into a conversation and notify the client.
+ *
+ * Guards:
+ * - A CLOSED conversation is never written to or notified. The caller either
+ *   first reopens it deliberately (`reopenIfClosed`) or must route the manager
+ *   through the reopen-vs-cancel chooser (``kind: "reopen-required"`` from
+ *   {@link gateSupportReply}).
+ * - Database/notification failures surface as a visible alert instead of a
+ *   silent half-send.
+ *
+ * Return values: `"sent"`, `"closed"` (nothing written/sent), `"missing"`
+ * (conversation gone), `"failed"` (write or notify errored).
+ */
 async function sendManagerSupportReply(
   ctx: Context,
   prisma: PrismaClient,
@@ -524,7 +615,8 @@ async function sendManagerSupportReply(
   notificationService: NotificationService,
   conversationId: number,
   replyText: string,
-): Promise<void> {
+  options?: { reopenIfClosed?: boolean },
+): Promise<"sent" | "closed" | "missing" | "failed"> {
   const conversation = await prisma.supportConversation.findUnique({
     where: { id: conversationId },
     include: { user: true },
@@ -532,26 +624,52 @@ async function sendManagerSupportReply(
 
   if (!conversation) {
     managerSessions.delete(ctx.from!.id);
-    await safeRender(ctx, "گفتگو یافت نشد.", { reply_markup: ManagerKeyboards.backToMenu() });
-    return;
+    await safeRender(ctx, ManagerTexts.supportConversationNotFound(), { reply_markup: ManagerKeyboards.backToMenu() });
+    return "missing";
   }
 
-  await prisma.$transaction([
-    prisma.supportMessage.create({
-      data: {
-        conversationId,
-        senderType: SupportSenderType.MANAGER,
-        senderManagerId: manager.id,
-        text: replyText,
-      },
-    }),
-    prisma.supportConversation.update({
+  if (conversation.status === SupportConversationStatus.CLOSED) {
+    if (!options?.reopenIfClosed) return "closed"; // nothing written, nothing sent
+    await prisma.supportConversation.update({
       where: { id: conversationId },
-      data: { lastMessageAt: new Date() },
-    }),
-  ]);
+      data: { status: SupportConversationStatus.OPEN, lastMessageAt: new Date() },
+    });
+  }
 
-  await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText, conversation.id);
+  try {
+    await prisma.$transaction([
+      prisma.supportMessage.create({
+        data: {
+          conversationId,
+          senderType: SupportSenderType.MANAGER,
+          senderManagerId: manager.id,
+          text: replyText,
+        },
+      }),
+      prisma.supportConversation.update({
+        where: { id: conversationId },
+        data: { lastMessageAt: new Date() },
+      }),
+    ]);
+  } catch (error) {
+    console.error("[MGR] Failed to persist support reply:", error);
+    return "failed";
+  }
+
+  try {
+    await notificationService.notifyClientSupportReply(conversation.user.tgUserId, replyText, conversation.id);
+  } catch (error) {
+    console.error("[MGR] Failed to notify client about support reply:", error);
+    // Persisted but not delivered to the chat: still report success so the
+    // manager is not forced to resend (which would duplicate the message row).
+    managerSessions.delete(ctx.from!.id);
+    await safeRender(ctx, ManagerTexts.supportReplySent(), {
+      reply_markup: new InlineKeyboard()
+        .text("💬 مشاهده گفتگو", `mgr:support:conv:${conversationId}`)
+        .text("« صندوق", "mgr:support"),
+    });
+    return "sent";
+  }
 
   managerSessions.delete(ctx.from!.id);
   await safeRender(ctx, ManagerTexts.supportReplySent(), {
@@ -559,6 +677,84 @@ async function sendManagerSupportReply(
       .text("💬 مشاهده گفتگو", `mgr:support:conv:${conversationId}`)
       .text("« صندوق", "mgr:support"),
   });
+  return "sent";
+}
+
+/**
+ * Locked resolve-or-create of the customer's open support conversation, without
+ * any order link. Used by the user-message shortcut from the user list.
+ */
+async function resolveOrCreateOpenConversation(prisma: PrismaClient, userId: number) {
+  return withConversationUserLock(userId, async () => {
+    const existing = await prisma.supportConversation.findFirst({
+      where: { userId, status: SupportConversationStatus.OPEN },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existing) return existing;
+
+    return prisma.supportConversation.create({
+      data: { userId },
+    });
+  });
+}
+
+/**
+ * Resolve the support conversation for an order's customer, entering the
+ * reply → preview → confirm flow.
+ *
+ * - No open conversation → a fresh one is created and tied to the order.
+ * - An open conversation already exists → it is reused (clients and managers
+ *   must never have two live chats with the same customer at once), and its
+ *   orderId is updated to the clicked order so the shortcut stays truly
+ *   order-linked instead of pointing at an old order.
+ * - Closed conversations are never reused; a new open one is created.
+ *
+ * Resolution is serialized per user (see {@link withConversationUserLock}) to
+ * shrink the duplicate-open race between concurrent manager clicks.
+ */
+export async function openOrderSupportConversation(prisma: PrismaClient, orderId: number) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { userId: true },
+  });
+  if (!order) return null;
+
+  const conversation = await resolveOrCreateOpenConversation(prisma, order.userId);
+  if (conversation.orderId !== orderId) {
+    // Repointing is idempotent (last writer wins) and does not need the lock:
+    // the locked section above guarantees at most one row can exist.
+    return prisma.supportConversation.update({
+      where: { id: conversation.id },
+      data: { orderId },
+    });
+  }
+  return conversation;
+}
+
+/**
+ * Icon + Persian label for announcement media, or null for text-only rows.
+ */
+function announcementMediaBadge(announcement: { mediaType?: AnnouncementMediaType | null }): string | null {
+  if (announcement.mediaType === AnnouncementMediaType.PHOTO) return "🖼️ تصویر";
+  if (announcement.mediaType === AnnouncementMediaType.VIDEO) return "🎬 ویدیو";
+  return null;
+}
+
+/**
+ * A stable, meaningful display label for an announcement. Media-only
+ * announcements have an empty title, so they fall back to the media badge
+ * instead of rendering as a blank string (active list, deactivate confirm).
+ */
+function announcementDisplayTitle(announcement: {
+  mediaType?: AnnouncementMediaType | null;
+  title?: string | null;
+  id?: number;
+}): string {
+  const title = announcement.title?.trim();
+  if (title) return title;
+  const media = announcementMediaBadge(announcement);
+  if (media) return `${media} (بدون عنوان)`;
+  return announcement.id != null ? `بدون عنوان (#${announcement.id})` : "بدون عنوان";
 }
 
 /**
@@ -581,7 +777,7 @@ function buildOrderDetailText(order: {
   // User info
   const u = order.user;
   text += `*مشتری:* ${esc(u.firstName)} (@${esc(u.username)})\n`;
-  text += `تلفن: ${esc(u.phone) || "-"}\n`;
+  text += `تلفن:\n${formatPhoneForDisplay(u.phone, "-")}\n`;
   text += `آدرس: ${esc(u.address) || "-"}\n`;
   if (u.locationLat != null) text += `📍 موقعیت ثبت شده\n`;
   else if (u.locationText) text += `📍 موقعیت: ${esc(u.locationText)}\n`;
@@ -639,11 +835,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     discountValue: number | null,
     audience: AnnouncementAudience,
     durationDays: number | null,
+    mediaType?: AnnouncementMediaType | null,
+    mediaFileId?: string | null,
   ): Promise<void> => {
     const announcement = await announcementService.create({
       type, title, message, discountType, discountValue, audience, managerId, durationDays,
+      mediaType, mediaFileId,
     });
-    const result = await announcementService.broadcast(announcement, clientBot);
+    const result = await announcementService.broadcast(announcement, clientBot, bot);
     managerSessions.delete(ctx.from!.id);
     await safeRender(ctx, ManagerTexts.announcementPublished(result.sent, result.failed), {
       reply_markup: ManagerKeyboards.announcementManagement(),
@@ -669,7 +868,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       discountValue: Number(session.data?.discountValue ?? 0) || null,
     });
     const audienceLabel = session.data?.audience === AnnouncementAudience.TEST ? "گروه آزمایشی" : "همه کاربران";
-    await safeRender(ctx, ManagerTexts.announcementChooseDuration(`${preview}\n\nمخاطب: ${audienceLabel}`), {
+    const mediaLabel = session.data?.mediaType === AnnouncementMediaType.PHOTO
+      ? "\n🖼️ همراه تصویر"
+      : session.data?.mediaType === AnnouncementMediaType.VIDEO ? "\n🎬 همراه ویدیو" : "";
+    await safeRender(ctx, ManagerTexts.announcementChooseDuration(`${preview}${mediaLabel}\n\nمخاطب: ${audienceLabel}`), {
       reply_markup: ManagerKeyboards.announcementDuration(),
     });
   };
@@ -684,6 +886,17 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
     await showAnnouncementAudience(ctx, session);
+  };
+
+  /** Enter the existing support reply → preview → confirm flow for a conversation. */
+  const enterSupportReplyFlow = async (ctx: Context, conversationId: number): Promise<void> => {
+    managerSessions.set(ctx.from!.id, {
+      state: "support:reply",
+      data: { conversationId },
+    });
+    await safeRender(ctx, ManagerTexts.supportAskReply(), {
+      reply_markup: ManagerKeyboards.backToMenu(),
+    });
   };
 
   // Global error handler to prevent crashes
@@ -775,6 +988,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         Number(session.data?.discountValue ?? 0) || null,
         (session.data?.audience as AnnouncementAudience) ?? AnnouncementAudience.ALL,
         durationDays,
+        (session.data?.mediaType as AnnouncementMediaType | null) ?? null,
+        String(session.data?.mediaFileId ?? "") || null,
       );
       return;
     }
@@ -1202,16 +1417,38 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
   });
 
   // ===========================================
-  // PHOTO HANDLER - For product images
+  // PHOTO HANDLER - Product images + announcement media
   // ===========================================
   bot.on("message:photo", async (ctx) => {
     const manager = await getManager(ctx, prisma);
     if (!manager) return;
 
     const session = managerSessions.get(ctx.from.id);
-    if (!session) return;
 
-    if (session.state === "product:add:image") {
+    // Announcement media — accepted at the title or message step, with an
+    // optional caption that becomes the announcement message. Enforced against
+    // the cross-bot 20 MiB cap (Telegram's getFile download limit).
+    if (session && (session.state === "announcement:title" || session.state === "announcement:message")) {
+      const photo = ctx.message.photo;
+      const largestPhoto = photo[photo.length - 1]; // largest size
+      if ((largestPhoto.file_size ?? 0) > MAX_CROSS_BOT_MEDIA_BYTES) {
+        await ctx.reply(ManagerTexts.announcementMediaTooLarge());
+        return;
+      }
+      const caption = ctx.message.caption?.trim() ?? "";
+      session.data = {
+        ...session.data,
+        ...(session.state === "announcement:title" ? { title: "" } : {}),
+        ...(caption ? { message: caption } : {}),
+        mediaType: AnnouncementMediaType.PHOTO,
+        mediaFileId: largestPhoto.file_id,
+      };
+      managerSessions.set(ctx.from.id, session);
+      await continueAfterAnnouncementMessage(ctx, session);
+      return;
+    }
+
+    if (session?.state === "product:add:image") {
       const photo = ctx.message.photo;
       const fileId = photo[photo.length - 1].file_id; // Get largest photo
 
@@ -1220,7 +1457,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (session.state === "product:edit:image") {
+    if (session?.state === "product:edit:image") {
       const productId = session.data?.productId as number;
       const photo = ctx.message.photo;
       const fileId = photo[photo.length - 1].file_id;
@@ -1237,7 +1474,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    if (session.state === "settings:image") {
+    if (session?.state === "settings:image") {
       const photo = ctx.message.photo;
       const fileId = photo[photo.length - 1].file_id;
 
@@ -1249,60 +1486,136 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       return;
     }
+
+    // No silent drops: a photo that cannot be used in the current step gets
+    // clear feedback instead of vanishing.
+    await ctx.reply(ManagerTexts.announcementMediaWrongStep());
   });
 
   // ===========================================
-  // DOCUMENT HANDLER - For product images sent as files
+  // VIDEO HANDLER - Announcement videos
+  // ===========================================
+  bot.on("message:video", async (ctx) => {
+    const manager = await getManager(ctx, prisma);
+    if (!manager) return;
+
+    const session = managerSessions.get(ctx.from.id);
+    if (!session || (session.state !== "announcement:title" && session.state !== "announcement:message")) {
+      // No silent drops: tell the manager the video cannot be used right now.
+      await ctx.reply(ManagerTexts.announcementMediaWrongStep());
+      return;
+    }
+
+    const video = ctx.message.video;
+    // The 20 MB cap matches Telegram's getFile download limit, which is the
+    // binding constraint when the manager bot must re-upload the media through
+    // the client bot.
+    if ((video.file_size ?? 0) > MAX_CROSS_BOT_MEDIA_BYTES) {
+      await ctx.reply(ManagerTexts.announcementMediaTooLarge());
+      return;
+    }
+
+    const caption = ctx.message.caption?.trim() ?? "";
+    session.data = {
+      ...session.data,
+      ...(session.state === "announcement:title" ? { title: "" } : {}),
+      ...(caption ? { message: caption } : {}),
+      mediaType: AnnouncementMediaType.VIDEO,
+      mediaFileId: video.file_id,
+    };
+    managerSessions.set(ctx.from.id, session);
+    await continueAfterAnnouncementMessage(ctx, session);
+  });
+
+  // ===========================================
+  // DOCUMENT HANDLER - Product images, settings image, announcement media as files
   // ===========================================
   bot.on("message:document", async (ctx) => {
     const manager = await getManager(ctx, prisma);
     if (!manager) return;
 
     const session = managerSessions.get(ctx.from.id);
-    if (!session) return;
-
-    // Only handle image documents
     const doc = ctx.message.document;
     const mime = doc.mime_type ?? "";
-    if (!mime.startsWith("image/")) {
-      if (session.state === "product:add:image" || session.state === "product:edit:image" || session.state === "settings:image") {
+
+    const inAnnouncementStep =
+      session != null && (session.state === "announcement:title" || session.state === "announcement:message");
+    const inImageFileStep =
+      session != null &&
+      (session.state === "product:add:image" || session.state === "product:edit:image" || session.state === "settings:image");
+
+    // Image/video sent as a file — accepted at the announcement title or
+    // message step, with an optional caption. The 20 MB cap matches Telegram's
+    // getFile download limit, which is the binding constraint when the manager
+    // bot must re-upload the media through the client bot.
+    if (inAnnouncementStep && (mime.startsWith("image/") || mime.startsWith("video/"))) {
+      if ((doc.file_size ?? 0) > MAX_CROSS_BOT_MEDIA_BYTES) {
+        await ctx.reply(ManagerTexts.announcementMediaTooLarge());
+        return;
+      }
+      const caption = ctx.message.caption?.trim() ?? "";
+      session.data = {
+        ...session.data,
+        ...(session.state === "announcement:title" ? { title: "" } : {}),
+        ...(caption ? { message: caption } : {}),
+        mediaType: mime.startsWith("video/") ? AnnouncementMediaType.VIDEO : AnnouncementMediaType.PHOTO,
+        mediaFileId: doc.file_id,
+      };
+      managerSessions.set(ctx.from.id, session);
+      await continueAfterAnnouncementMessage(ctx, session);
+      return;
+    }
+
+    if (inAnnouncementStep) {
+      // A document that is neither an image nor a video cannot become an
+      // announcement — tell the manager instead of dropping it silently.
+      await ctx.reply(ManagerTexts.announcementMediaNotImageOrVideo());
+      return;
+    }
+
+    if (inImageFileStep) {
+      if (!mime.startsWith("image/")) {
         await ctx.reply("⚠️ لطفاً یک تصویر ارسال کنید (فرمت JPEG، PNG و…)\n\nبرای رد شدن /skip را ارسال کنید.");
+        return;
+      }
+
+      const fileId = doc.file_id;
+
+      if (session.state === "product:add:image") {
+        session.data = { ...session.data, photoFileId: fileId };
+        await showProductDraftPreview(ctx, session);
+        return;
+      }
+
+      if (session.state === "product:edit:image") {
+        const productId = session.data?.productId as number;
+
+        await prisma.product.update({
+          where: { id: productId },
+          data: { photoFileId: fileId },
+        });
+
+        managerSessions.delete(ctx.from.id);
+        await ctx.reply(ManagerTexts.productUpdated(), {
+          reply_markup: ManagerKeyboards.productEdit(productId),
+        });
+        return;
+      }
+
+      if (session.state === "settings:image") {
+        await settingsService.set(SettingKeys.CHECKOUT_IMAGE_FILE_ID, fileId);
+        managerSessions.delete(ctx.from.id);
+
+        await ctx.reply(ManagerTexts.settingsImageUpdated(), {
+          reply_markup: ManagerKeyboards.settingsMenu(true),
+        });
+        return;
       }
       return;
     }
 
-    const fileId = doc.file_id;
-
-    if (session.state === "product:add:image") {
-      session.data = { ...session.data, photoFileId: fileId };
-      await showProductDraftPreview(ctx, session);
-      return;
-    }
-
-    if (session.state === "product:edit:image") {
-      const productId = session.data?.productId as number;
-
-      await prisma.product.update({
-        where: { id: productId },
-        data: { photoFileId: fileId },
-      });
-
-      managerSessions.delete(ctx.from.id);
-      await ctx.reply(ManagerTexts.productUpdated(), {
-        reply_markup: ManagerKeyboards.productEdit(productId),
-      });
-      return;
-    }
-
-    if (session.state === "settings:image") {
-      await settingsService.set(SettingKeys.CHECKOUT_IMAGE_FILE_ID, fileId);
-      managerSessions.delete(ctx.from.id);
-
-      await ctx.reply(ManagerTexts.settingsImageUpdated(), {
-        reply_markup: ManagerKeyboards.settingsMenu(true),
-      });
-      return;
-    }
+    // No active flow / wrong step: do not drop the document silently.
+    await ctx.reply(ManagerTexts.announcementMediaWrongStep());
   });
 
   // ===========================================
@@ -1461,6 +1774,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         Number(session.data?.discountValue ?? 0) || null,
         (session.data?.audience as AnnouncementAudience) ?? AnnouncementAudience.ALL,
         durationDays,
+        (session.data?.mediaType as AnnouncementMediaType | null) ?? null,
+        String(session.data?.mediaFileId ?? "") || null,
       );
       return;
     }
@@ -1477,13 +1792,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const text = announcements.map((announcement) => {
         const end = announcement.endsAt ? announcement.endsAt.toLocaleDateString("fa-IR") : "بدون تاریخ پایان";
         const audience = announcement.audience === AnnouncementAudience.TEST ? "گروه آزمایشی" : "همه کاربران";
-        return `#${announcement.id} · ${announcementTypeLabel(announcement.type)} · ${audience} · تا ${end}\n${formatAnnouncement(announcement)}`;
+        const mediaBadge = announcementMediaBadge(announcement);
+        const body = formatAnnouncement(announcement);
+        return `#${announcement.id} · ${announcementTypeLabel(announcement.type)}${mediaBadge ? ` · ${mediaBadge}` : ""} · ${audience} · تا ${end}${body ? `\n${body}` : mediaBadge ? `\n${announcementDisplayTitle(announcement)}` : ""}`;
       }).join("\n\n──────────\n\n");
 
       await safeRender(ctx, text, {
         reply_markup: ManagerKeyboards.announcementList(announcements.map((announcement) => ({
           id: announcement.id,
-          typeLabel: announcementTypeLabel(announcement.type),
+          typeLabel: `${announcementTypeLabel(announcement.type)}${announcementMediaBadge(announcement) ? ` ${announcementMediaBadge(announcement)}` : ""} #${announcement.id}`,
         }))),
       });
       return;
@@ -1505,7 +1822,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         await answerCallback({ text: "اطلاعیه یافت نشد.", show_alert: true });
         return;
       }
-      await safeRender(ctx, `آیا از توقف «${announcement.title}» مطمئن هستید؟`, {
+      await safeRender(ctx, ManagerTexts.announcementDeactivateConfirm(announcementDisplayTitle(announcement)), {
         reply_markup: new InlineKeyboard()
           .text("✅ بله، متوقف شود", `mgr:announcement:deactivate:confirm:${announcementId}`)
           .row()
@@ -1937,7 +2254,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ===========================================
     // ORDER DETAIL
     // ===========================================
-    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders") && !data.startsWith("mgr:order:location:") && !data.startsWith("mgr:order:cancel:") && !data.startsWith("mgr:order:delete:")) {
+    if (data.startsWith("mgr:order:") && !data.startsWith("mgr:orders") && !data.startsWith("mgr:order:location:") && !data.startsWith("mgr:order:contact:") && !data.startsWith("mgr:order:cancel:") && !data.startsWith("mgr:order:delete:")) {
       const orderId = safeId(parts[2]);
       const order = await prisma.order.findUnique({
         where: { id: orderId },
@@ -1974,12 +2291,31 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         detailKb.text("🗑️ حذف سفارش", `mgr:order:delete:${order.id}`);
       }
       detailKb.row();
+      detailKb.text("💬 پشتیبانی مشتری", `mgr:support:order:${order.id}`);
+      if (normalizeIranianPhone(order.user.phone)) {
+        detailKb.text("📞 تماس", `mgr:order:contact:${order.id}`);
+      }
+      detailKb.row();
       detailKb.text("📋 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
 
       await safeRender(ctx, detailText, {
         parse_mode: "Markdown",
         reply_markup: detailKb,
       });
+      return;
+    }
+
+    // ── SEND CONTACT — native Telegram contact card is reliably tappable/callable ──
+    if (data.startsWith("mgr:order:contact:")) {
+      const orderId = safeId(parts[3]);
+      const order = await prisma.order.findUnique({ where: { id: orderId }, include: { user: true } });
+      const phone = normalizeIranianPhone(order?.user.phone);
+      if (!order || !phone) {
+        await answerCallback({ text: ManagerTexts.orderContactNoPhone(), show_alert: true });
+        return;
+      }
+      await answerCallback();
+      await ctx.replyWithContact(phone, order.user.firstName || order.user.username || "مشتری");
       return;
     }
 
@@ -2848,17 +3184,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      // Find or create an open conversation for this user
-      let conversation = await prisma.supportConversation.findFirst({
-        where: { userId, status: SupportConversationStatus.OPEN },
-        orderBy: { createdAt: "desc" },
-      });
-
-      if (!conversation) {
-        conversation = await prisma.supportConversation.create({
-          data: { userId },
-        });
-      }
+      // Find or create an open conversation for this user (locked so two
+      // managers messaging the same user cannot create duplicates).
+      const conversation = await resolveOrCreateOpenConversation(prisma, userId);
 
       managerSessions.set(ctx.from.id, {
         state: "support:reply",
@@ -3711,39 +4039,131 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
+    // OPEN/REUSE SUPPORT CONVERSATION FROM AN ORDER — resolves or reuses the client's
+    // open conversation (tying a new one to the order on create, repointing a reused
+    // one at the clicked order) and enters the existing reply → preview → confirm flow.
+    if (data.startsWith("mgr:support:order:")) {
+      const orderId = safeId(parts[3]);
+      if (!orderId) {
+        await answerCallback({ text: ManagerTexts.orderNotFound(), show_alert: true });
+        return;
+      }
+
+      let conversation: Awaited<ReturnType<typeof openOrderSupportConversation>>;
+      try {
+        conversation = await openOrderSupportConversation(prisma, orderId);
+      } catch (error) {
+        // A DB outage must be visible: alert the manager instead of silently
+        // doing nothing after they clicked the support button.
+        console.error("[MGR] Failed to open support conversation for order:", error);
+        await answerCallback({ text: ManagerTexts.supportOpenError(), show_alert: true });
+        return;
+      }
+      if (!conversation) {
+        await answerCallback({ text: ManagerTexts.orderNotFound(), show_alert: true });
+        return;
+      }
+      await answerCallback();
+      await enterSupportReplyFlow(ctx, conversation.id);
+      return;
+    }
+
     // SET REPLY SESSION FOR SUPPORT
     if (data.startsWith("mgr:support:reply:")) {
       const convId = safeId(parts[3]);
-      managerSessions.set(ctx.from.id, {
-        state: "support:reply",
-        data: { conversationId: convId },
-      });
-      await safeRender(ctx, ManagerTexts.supportAskReply(), {
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
+      await enterSupportReplyFlow(ctx, convId);
       return;
     }
 
     if (data.startsWith("mgr:support:replyconfirm:")) {
       const convId = safeId(parts[3]);
       const session = managerSessions.get(ctx.from.id);
-      const replyText = session?.state === "support:reply:preview" && session.data?.conversationId === convId
-        ? String(session.data.replyText ?? "")
-        : "";
 
-      if (!replyText) {
+      // Never write/send into a CLOSED conversation: gate the confirmed draft
+      // and route through a deliberate reopen-vs-cancel chooser.
+      let conversation: { status: SupportConversationStatus } | null = null;
+      try {
+        conversation = await prisma.supportConversation.findUnique({ where: { id: convId } });
+      } catch (error) {
+        console.error("[MGR] Failed to load support conversation for reply:", error);
+        await answerCallback({ text: ManagerTexts.supportSendFailed(), show_alert: true });
+        return;
+      }
+
+      const gate = gateSupportReply(conversation, session, convId);
+      if (gate.kind === "missing-draft") {
         await answerCallback({ text: "متن پاسخ پیدا نشد. لطفاً دوباره پاسخ را بنویسید.", show_alert: true });
-        managerSessions.set(ctx.from.id, {
-          state: "support:reply",
-          data: { conversationId: convId },
-        });
-        await safeRender(ctx, ManagerTexts.supportAskReply(), {
-          reply_markup: ManagerKeyboards.backToMenu(),
+        await enterSupportReplyFlow(ctx, convId);
+        return;
+      }
+
+      if (gate.kind === "reopen-required") {
+        await answerCallback();
+        await safeRender(ctx, ManagerTexts.supportConversationClosedChoice(), {
+          reply_markup: ManagerKeyboards.supportReplyReopen(convId),
         });
         return;
       }
 
-      await sendManagerSupportReply(ctx, prisma, manager, notificationService, convId, replyText);
+      const replyText = extractReplyDraft(session, convId)!;
+      const result = await sendManagerSupportReply(ctx, prisma, manager, notificationService, convId, replyText);
+      if (result === "closed") {
+        // Raced: the conversation was closed between the gate and the write.
+        await answerCallback();
+        await safeRender(ctx, ManagerTexts.supportConversationClosedChoice(), {
+          reply_markup: ManagerKeyboards.supportReplyReopen(convId),
+        });
+        return;
+      }
+      if (result === "failed") {
+        await answerCallback({ text: ManagerTexts.supportSendFailed(), show_alert: true });
+        return;
+      }
+      if (result === "missing") return; // already rendered
+      return;
+    }
+
+    // REOPEN + SEND — deliberate reopen of a closed conversation chosen from the
+    // closed-conversation chooser; the draft is replayed from the session.
+    if (data.startsWith("mgr:support:reopensend:")) {
+      const convId = safeId(parts[3]);
+      const session = managerSessions.get(ctx.from.id);
+      const replyText = extractReplyDraft(session, convId);
+      if (replyText === null) {
+        await answerCallback({ text: "متن پاسخ پیدا نشد. لطفاً دوباره پاسخ را بنویسید.", show_alert: true });
+        await enterSupportReplyFlow(ctx, convId);
+        return;
+      }
+
+      try {
+        await prisma.supportConversation.update({
+          where: { id: convId },
+          data: { status: SupportConversationStatus.OPEN },
+        });
+      } catch (error) {
+        console.error("[MGR] Failed to reopen support conversation:", error);
+        await answerCallback({ text: ManagerTexts.supportSendFailed(), show_alert: true });
+        return;
+      }
+
+      const result = await sendManagerSupportReply(ctx, prisma, manager, notificationService, convId, replyText);
+      if (result === "failed") {
+        await answerCallback({ text: ManagerTexts.supportSendFailed(), show_alert: true });
+      } else if (result === "closed") {
+        // Raced: closed again between our reap and the write — show the chooser.
+        await answerCallback();
+        await safeRender(ctx, ManagerTexts.supportConversationClosedChoice(), {
+          reply_markup: ManagerKeyboards.supportReplyReopen(convId),
+        });
+      }
+      return;
+    }
+
+    // CANCEL SEND — abandon the draft; the conversation stays closed.
+    if (data.startsWith("mgr:support:cancelsend:")) {
+      const convId = safeId(parts[3]);
+      await answerCallback();
+      await enterSupportReplyFlow(ctx, convId);
       return;
     }
 
