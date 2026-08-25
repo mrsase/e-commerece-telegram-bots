@@ -314,6 +314,13 @@ export class AnnouncementService {
 
     if (!clientBot) return { targeted: users.length, sent: 0, failed: users.length };
 
+    const hasDeliverableMedia = Boolean(
+      announcement.mediaType && (announcement.clientMediaFileId || announcement.mediaFileId),
+    );
+    if (!hasDeliverableMedia && !formatAnnouncementText(announcement)) {
+      return { targeted: users.length, sent: 0, failed: users.length };
+    }
+
     // Pre-fetch the cross-bot media exactly once so per-recipient failures
     // that come after the download (blocked chats, chat-not-found, …) never
     // cause repeated downloads. A failed pre-download fails recipients fast.

@@ -7,7 +7,7 @@ import {
   it,
 } from "vitest";
 import { PrismaClient, OrderStatus } from "@prisma/client";
-import { OrderService, InsufficientStockError } from "./order-service.js";
+import { OrderService, InsufficientStockError, cancelOrderAndRestoreStock } from "./order-service.js";
 import type { AppliedDiscount } from "./discount-service.js";
 
 let prisma: PrismaClient;
@@ -191,5 +191,43 @@ describe("OrderService", () => {
       where: { userId, discountId: discount.id },
     });
     expect(usageCount).toBe(1);
+  });
+
+  it("restores finite stock exactly once when an unfulfilled order is cancelled", async () => {
+    const cart = await createCartWithQty(2);
+    const created = await service.createOrderFromCart({ userId, cartId: cart.id, appliedDiscounts: [] });
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(8);
+
+    const cancelled = await cancelOrderAndRestoreStock(prisma, {
+      orderId: created.orderId,
+      actorType: "manager",
+      actorId: null,
+      eventType: "order_cancelled",
+    });
+    expect(cancelled.kind).toBe("cancelled");
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(10);
+
+    const duplicate = await cancelOrderAndRestoreStock(prisma, {
+      orderId: created.orderId,
+      actorType: "manager",
+      actorId: null,
+      eventType: "order_cancelled",
+    });
+    expect(duplicate.kind).toBe("already-cancelled");
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(10);
+  });
+
+  it("submits one cart at most once under concurrent checkout attempts", async () => {
+    const cart = await createCartWithQty(2);
+
+    const attempts = await Promise.allSettled([
+      service.createOrderFromCart({ userId, cartId: cart.id, appliedDiscounts: [] }),
+      service.createOrderFromCart({ userId, cartId: cart.id, appliedDiscounts: [] }),
+    ]);
+
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+    expect(await prisma.order.count({ where: { cartId: cart.id } })).toBe(1);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(8);
   });
 });

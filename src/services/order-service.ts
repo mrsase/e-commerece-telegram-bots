@@ -49,6 +49,78 @@ export interface CreateOrderResult {
   grandTotal: number;
 }
 
+export type CancelOrderResult =
+  | { kind: "cancelled"; previousStatus: OrderStatus; userTgUserId: bigint }
+  | { kind: "missing" }
+  | { kind: "already-cancelled" }
+  | { kind: "not-allowed"; status: OrderStatus }
+  | { kind: "conflict" };
+
+/**
+ * Cancel an order atomically and return finite-stock inventory exactly once.
+ * Completed orders represent fulfilled sales, so archiving/cancelling them does
+ * not put sold units back into inventory.
+ */
+export async function cancelOrderAndRestoreStock(
+  prisma: PrismaClient,
+  args: {
+    orderId: number;
+    actorType: string;
+    actorId: number | null;
+    eventType: string;
+    completedEventType?: string;
+    allowedStatuses?: OrderStatus[];
+  },
+): Promise<CancelOrderResult> {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: args.orderId },
+      select: {
+        status: true,
+        user: { select: { tgUserId: true } },
+        items: { select: { productId: true, qty: true } },
+      },
+    });
+    if (!order) return { kind: "missing" as const };
+    if (order.status === OrderStatus.CANCELLED) return { kind: "already-cancelled" as const };
+    if (args.allowedStatuses && !args.allowedStatuses.includes(order.status)) {
+      return { kind: "not-allowed" as const, status: order.status };
+    }
+
+    const claimed = await tx.order.updateMany({
+      where: { id: args.orderId, status: order.status },
+      data: { status: OrderStatus.CANCELLED },
+    });
+    if (claimed.count === 0) return { kind: "conflict" as const };
+
+    if (order.status !== OrderStatus.COMPLETED) {
+      for (const item of order.items) {
+        await tx.product.updateMany({
+          where: { id: item.productId, stock: { not: null } },
+          data: { stock: { increment: item.qty } },
+        });
+      }
+    }
+
+    await tx.orderEvent.create({
+      data: {
+        orderId: args.orderId,
+        actorType: args.actorType,
+        actorId: args.actorId,
+        eventType: order.status === OrderStatus.COMPLETED && args.completedEventType
+          ? args.completedEventType
+          : args.eventType,
+      },
+    });
+
+    return {
+      kind: "cancelled" as const,
+      previousStatus: order.status,
+      userTgUserId: order.user.tgUserId,
+    };
+  });
+}
+
 export class OrderService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -78,6 +150,17 @@ export class OrderService {
 
       if (cart.items.length === 0) {
         throw new CartEmptyError();
+      }
+
+      // Atomically claim the cart before changing stock or creating the order.
+      // A second concurrent checkout can have read the same ACTIVE snapshot,
+      // but only one transaction may transition it to SUBMITTED.
+      const claimed = await tx.cart.updateMany({
+        where: { id: cart.id, userId, state: CartState.ACTIVE },
+        data: { state: CartState.SUBMITTED },
+      });
+      if (claimed.count === 0) {
+        throw new CartNotActiveError("Cart was already submitted");
       }
 
       const productIds = cart.items.map((item) => item.productId);
@@ -172,11 +255,6 @@ export class OrderService {
           })),
         });
       }
-
-      await tx.cart.update({
-        where: { id: cart.id },
-        data: { state: CartState.SUBMITTED },
-      });
 
       return {
         orderId: order.id,

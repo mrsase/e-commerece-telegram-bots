@@ -44,6 +44,9 @@ model User {
   usedReferralCodeId   Int?
 
   supportConversations SupportConversation[]
+
+  @@index([referredById])
+  @@index([usedReferralCodeId])
 }
 
 model Manager {
@@ -84,6 +87,8 @@ model ReferralCode {
   expiresAt       DateTime?
   
   usedBy          User[]    @relation("ReferralCodeUsedBy")
+
+  @@index([createdByUserId])
 }
 
 enum ManagerRole {
@@ -184,7 +189,7 @@ model Announcement {
   type               AnnouncementType
   audience           AnnouncementAudience @default(ALL)
   title              String           @default("اطلاعیه فروشگاه ایرانی")
-  message            String           @default("")
+  message            String
   discountType       DiscountType?
   discountValue      Int?
   mediaType          AnnouncementMediaType?
@@ -225,6 +230,8 @@ model Order {
   delivery       Delivery?
 
   supportConversations SupportConversation[]
+
+  @@index([userId])
 }
 
 model SupportConversation {

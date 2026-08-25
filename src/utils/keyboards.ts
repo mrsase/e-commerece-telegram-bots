@@ -318,13 +318,21 @@ export const ManagerKeyboards = {
   },
 
   /** User detail actions */
-  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountLabel?: string, maxReferralCodes?: number, isTestUser = false) => {
-    return new InlineKeyboard()
+  userActions: (userId: number, isActive: boolean, canCreateReferral: boolean, discountLabel?: string, maxReferralCodes?: number, isTestUser = false, parentUserId: number | null = null) => {
+    const kb = new InlineKeyboard()
       .text("📦 سفارش‌ها", `mgr:user:orders:${userId}`)
       .text("📋 تماس و آدرس", `mgr:user:contact:${userId}`)
       .text("📍 موقعیت", `mgr:user:location:${userId}`)
       .row()
-      .text("🎟️ دعوت‌نامه‌ها", `mgr:user:referrals:${userId}`)
+      .text("🌳 شبکه دعوت", `mgr:ref:node:${userId}:0`)
+      .text("🎟️ کدها", `mgr:user:referrals:${userId}`)
+      .row();
+
+    if (parentUserId !== null) {
+      kb.text("⬆️ مشاهده معرف", `mgr:user:${parentUserId}`).row();
+    }
+
+    return kb
       .text(
         canCreateReferral ? "🔒 بستن دعوت‌نامه" : "🔑 اجازه دعوت‌نامه",
         `mgr:user:toggleref:${userId}`
@@ -370,6 +378,8 @@ export const ManagerKeyboards = {
   /** Referral management menu */
   referralManagement: () => {
     return new InlineKeyboard()
+      .text("🌳 شبکه دعوت‌ها", "mgr:ref:roots:0")
+      .row()
       .text("📋 دعوت‌نامه‌ها", "mgr:referrals:list")
       .row()
       .text("➕ ساخت دعوت‌نامه", "mgr:referrals:create")
@@ -616,9 +626,9 @@ export const ManagerKeyboards = {
     });
 
     if (totalPages > 1) {
-      if (page > 0) kb.text("« قبلی", `mgr:support:${page - 1}`);
+      if (page > 0) kb.text("« قبلی", `mgr:support:page:${page - 1}`);
       kb.text(`${page + 1}/${totalPages}`, "noop");
-      if (page < totalPages - 1) kb.text("بعدی »", `mgr:support:${page + 1}`);
+      if (page < totalPages - 1) kb.text("بعدی »", `mgr:support:page:${page + 1}`);
       kb.row();
     }
 

@@ -138,6 +138,7 @@ describe("DiscountService", () => {
       data: {
         type: "GENERAL",
         title: "فروش ویژه",
+        message: "",
         discountType: "PERCENT",
         discountValue: 25,
       },
@@ -153,6 +154,7 @@ describe("DiscountService", () => {
       data: {
         type: "GENERAL",
         title: "تخفیف همگانی",
+        message: "",
         discountType: "FIXED",
         discountValue: 1800,
       },
@@ -173,6 +175,7 @@ describe("DiscountService", () => {
       data: {
         type: "GENERAL",
         title: "تخفیف تمام‌شده",
+        message: "",
         discountType: "PERCENT",
         discountValue: 50,
         endsAt: new Date(Date.now() - 1000),
@@ -189,6 +192,7 @@ describe("DiscountService", () => {
         type: "GENERAL",
         audience: "TEST",
         title: "تست تخفیف",
+        message: "",
         discountType: "PERCENT",
         discountValue: 20,
       },

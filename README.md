@@ -130,6 +130,10 @@ npx prisma generate
 npx prisma migrate deploy
 ```
 
+> The command above is only for creating a new local development database.
+> Never use it directly against production; production must use the verified
+> backup-and-deploy flow under [Deployment](#deployment).
+
 ### 4. Seed Database (Add Manager)
 
 Before using the manager bot, you need to add yourself as a manager:
@@ -552,13 +556,28 @@ export const ClientTexts = {
 > database file is missing, so it can never accidentally create a fresh empty
 > production database next to the real one.
 
-Production deploy for this release (adds announcement media columns):
+Production deploy for this release (adds announcement media columns and non-destructive referral lookup indexes):
 
 ```bash
-pm2 stop amoosh-telegram-bots      # stop the app FIRST (maintenance window)
+# Preflight from the exact commit that will be deployed
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+git status --short                 # must be empty
+
+# Maintenance window
+pm2 stop amoosh-telegram-bots      # stop the app FIRST
 npm run db:migrate                 # backup -> verify -> status gate -> deploy
-pm2 start amoosh-telegram-bots     # start the app ONLY after it succeeds
+pm2 start amoosh-telegram-bots     # start ONLY after migration succeeds
+pm2 logs amoosh-telegram-bots --lines 100
 ```
+
+Use an absolute production `DATABASE_URL` such as
+`file:/srv/amoosh/prisma/prod.db`. The application normalizes relative SQLite
+URLs before creating PrismaClient, but an absolute path is easier to audit and
+prevents ambiguity in shell tools.
 
 `npm run db:migrate` (`scripts/safe-prisma-deploy.sh`) performs, in order:
 
@@ -567,9 +586,11 @@ pm2 start amoosh-telegram-bots     # start the app ONLY after it succeeds
    `PRAGMA integrity_check`, and checks the `_prisma_migrations` ledger for
    failed/in-progress rows and tampered or deleted migration files.
 2. **Expected-migration guard**: compares local `prisma/migrations/*` directory
-   names against the applied rows in the target database and requires the ONLY
-   pending migration to be exactly `20260819090000_add_announcement_media`
-   (this release). It aborts if any historical migration is missing/unapplied,
+   names against the applied rows in the target database and allows pending
+   migrations only from this release set: `20260819090000_add_announcement_media`
+   and `20260824120000_add_referral_query_indexes`. One may already be applied;
+   after deployment both must be present in the ledger. It aborts if any
+   historical migration is missing/unapplied,
    any applied migration file is missing locally, or any extra pending
    migration exists. If the release migration is already applied (nothing
    pending), it aborts unless you re-run with `ALLOW_NOOP=1`; future releases
@@ -591,13 +612,37 @@ Backup only (needs no Prisma CLI — works even if the CLI is broken):
 npm run db:backup                  # integrity/ledger checks + backup + verify + exit
 ```
 
+### Rollback
+
+The deploy command prints the verified pre-migration backup path and SHA-256.
+If post-deploy checks or application smoke tests fail:
+
+```bash
+pm2 stop amoosh-telegram-bots
+
+# Preserve the failed database for diagnosis, then restore the verified backup.
+cp /absolute/path/to/prisma/prod.db /absolute/path/to/prisma/prod.failed.db
+sqlite3 /absolute/path/to/prisma/prod.db \
+  ".restore '/absolute/path/from-deploy-output/backup.db'"
+sqlite3 /absolute/path/to/prisma/prod.db "PRAGMA integrity_check;"
+
+# Check out/build the previous application commit before restarting it.
+pm ci
+npm run build
+pm2 start amoosh-telegram-bots
+```
+
+Never restore while any bot process is running, and never guess the database or
+backup path—copy both absolute paths from the deploy output.
+
 ### Production Checklist
 
 1. ✅ Set `NODE_ENV=production`
 2. ✅ Use the safe deploy script: stop the app, then run `npm run db:migrate`,
-   which verifies integrity and the migration ledger, requires the only
-   pending migration to be `20260819090000_add_announcement_media` (aborting
-   otherwise; override with `EXPECTED_PENDING_MIGRATIONS`, clean no-op only
+   which verifies integrity and the migration ledger, permits pending migrations
+   only from `20260819090000_add_announcement_media` and
+   `20260824120000_add_referral_query_indexes` (aborting on any other pending
+   migration; override with `EXPECTED_PENDING_MIGRATIONS`, clean no-op only
    with `ALLOW_NOOP=1`), creates and verifies a backup BEFORE `prisma migrate
    status` gates the deploy, refuses a missing database file, and aborts if a
    migration changes any existing table's row counts (backup only:
@@ -624,7 +669,9 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         PORT: "3000",
-        DATABASE_URL: "postgresql://user:pass@localhost:5432/amoosh",
+        // Prefer an absolute production path. The app also pins relative file:
+        // URLs to prisma/schema.prisma's directory before PrismaClient starts.
+        DATABASE_URL: "file:/absolute/path/to/apps/telegram-bots/prisma/prod.db",
         CLIENT_BOT_TOKEN: "<token>",
         MANAGER_BOT_TOKEN: "<token>",
         COURIER_BOT_TOKEN: "<token>",

@@ -435,15 +435,35 @@ export function registerInteractiveCourierBot(bot: Bot, deps: CourierBotDeps): v
         return;
       }
 
-      const failedDelivery = await prisma.delivery.update({
-        where: { id: session.deliveryId },
+      const claimed = await prisma.delivery.updateMany({
+        where: {
+          id: session.deliveryId,
+          assignedCourierId: courier.id,
+          status: {
+            in: [DeliveryStatus.ASSIGNED, DeliveryStatus.PICKED_UP, DeliveryStatus.OUT_FOR_DELIVERY],
+          },
+        },
         data: {
           status: DeliveryStatus.FAILED,
           failedAt: new Date(),
           failureReason: reason,
         },
+      });
+      if (claimed.count === 0) {
+        courierSessions.delete(ctx.from!.id);
+        await ctx.reply(CourierTexts.invalidDelivery(), { reply_markup: CourierKeyboards.menu() });
+        return;
+      }
+
+      const failedDelivery = await prisma.delivery.findUnique({
+        where: { id: session.deliveryId },
         include: { order: { include: { user: true } } },
       });
+      if (!failedDelivery) {
+        courierSessions.delete(ctx.from!.id);
+        await ctx.reply(CourierTexts.notFound(), { reply_markup: CourierKeyboards.menu() });
+        return;
+      }
 
       // Notify client and managers about delivery failure
       if (failedDelivery.order.user) {

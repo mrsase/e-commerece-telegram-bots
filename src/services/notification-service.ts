@@ -6,6 +6,7 @@ import { ClientTexts } from "../i18n/index.js";
 import { formatPrice } from "../utils/format-price.js";
 import { escapeMarkdown } from "../utils/escape-markdown.js";
 import { formatPhoneForDisplay, normalizeIranianPhone } from "../utils/phone.js";
+import { referralParentLabelMarkdown } from "../utils/referral-display.js";
 
 export interface NotificationServiceDeps {
   prisma: PrismaClient;
@@ -43,14 +44,31 @@ export class NotificationService {
     const bot = this.deps.managerBot;
     if (!bot) return;
 
-    const managers = await this.deps.prisma.manager.findMany({
-      where: { isActive: true },
-    });
+    const [managers, orderReferral] = await Promise.all([
+      this.deps.prisma.manager.findMany({
+        where: { isActive: true },
+      }),
+      this.deps.prisma.order.findUnique({
+        where: { id: orderId },
+        select: {
+          user: {
+            select: {
+              referredBy: { select: { id: true, username: true, firstName: true } },
+              usedReferralCode: { select: { createdByManagerId: true } },
+            },
+          },
+        },
+      }),
+    ]);
 
     const esc = escapeMarkdown;
     let text = `🔔 *سفارش جدید #${orderId}*\n`;
     text += `━━━━━━━━━━━━━━━\n`;
     text += `👤 مشتری: ${esc(userName)}\n`;
+    text += `👤 معرف: ${referralParentLabelMarkdown(
+      orderReferral?.user.referredBy,
+      orderReferral?.user.usedReferralCode?.createdByManagerId != null,
+    )}\n`;
     text += `📱 تلفن:\n${formatPhoneForDisplay(phone)}\n`;
     text += `🏠 آدرس: ${address ? esc(address) : '—'}\n\n`;
     text += `*اقلام:*\n`;
@@ -67,6 +85,12 @@ export class NotificationService {
       .text("💬 پشتیبانی مشتری", `mgr:support:order:${orderId}`);
     if (normalizeIranianPhone(phone)) {
       keyboard.text("📞 تماس", `mgr:order:contact:${orderId}`);
+    }
+    if (orderReferral?.user.referredBy) {
+      keyboard
+        .row()
+        .text("👤 مشاهده معرف", `mgr:user:${orderReferral.user.referredBy.id}`)
+        .text("🌳 شبکه معرف", `mgr:ref:node:${orderReferral.user.referredBy.id}:0`);
     }
 
     for (const mgr of managers) {

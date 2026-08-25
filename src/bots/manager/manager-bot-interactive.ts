@@ -65,6 +65,7 @@ const managerSessions = new SessionStore<ManagerSession>();
  * the broadcast would fail for every recipient.
  */
 const MAX_CROSS_BOT_MEDIA_BYTES = 20 * 1024 * 1024;
+const REFERRAL_TREE_PAGE_SIZE = 6;
 
 /**
  * Serialize per-user conversation resolution so two managers clicking
@@ -151,13 +152,19 @@ type UserDiscountFields = {
 import { createReferralCodeWithRetry } from "../../utils/referral-utils.js";
 import { NotificationService } from "../../services/notification-service.js";
 import { orderStatusLabel, eventTypeLabel, receiptStatusLabel, deliveryStatusLabel } from "../../utils/order-status.js";
-import { ReferralAnalyticsService, formatReferralTree } from "../../services/referral-analytics-service.js";
+import { ReferralAnalyticsService } from "../../services/referral-analytics-service.js";
 import { safeDeleteChatMessage, safeRender } from "../../utils/safe-reply.js";
 import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
 import { AnnouncementService, announcementTypeLabel, formatAnnouncement } from "../../services/announcement-service.js";
+import { cancelOrderAndRestoreStock } from "../../services/order-service.js";
 import { formatPhoneForDisplay, normalizeIranianPhone } from "../../utils/phone.js";
+import {
+  compactReferralUserLabel,
+  referralParentLabelMarkdown,
+  referralUserLabelMarkdown,
+} from "../../utils/referral-display.js";
 
 /**
  * Check if user is an authorized manager
@@ -340,7 +347,13 @@ async function buildManagerDashboardText(prisma: PrismaClient): Promise<string> 
 }
 
 async function renderManagerUserView(ctx: Context, prisma: PrismaClient, userId: number): Promise<boolean> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      referredBy: { select: { id: true, username: true, firstName: true } },
+      usedReferralCode: { select: { createdByManagerId: true } },
+    },
+  });
   if (!user) {
     await safeRender(ctx, "کاربر یافت نشد.", {
       reply_markup: ManagerKeyboards.backToMenu(),
@@ -353,14 +366,123 @@ async function renderManagerUserView(ctx: Context, prisma: PrismaClient, userId:
   const hasOverride = user.loyaltyScoreOverride != null;
   const discountLabel = userDiscountLabel(user);
 
+  const parentLabel = referralParentLabelMarkdown(
+    user.referredBy,
+    user.usedReferralCode?.createdByManagerId != null,
+  );
+
   await safeRender(ctx,
-    ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, discountLabel, user.maxReferralCodes, user.isTestUser),
+    ManagerTexts.userDetails(user.id, user.username, user.isActive, orderCount, user.canCreateReferral, effectiveScore, hasOverride, discountLabel, user.maxReferralCodes, user.isTestUser, parentLabel),
     {
       parse_mode: "Markdown",
-      reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, discountLabel, user.maxReferralCodes, user.isTestUser),
+      reply_markup: ManagerKeyboards.userActions(userId, user.isActive, user.canCreateReferral, discountLabel, user.maxReferralCodes, user.isTestUser, user.referredBy?.id ?? null),
     }
   );
   return true;
+}
+
+async function renderReferralRootPage(
+  ctx: Context,
+  prisma: PrismaClient,
+  requestedPage: number,
+): Promise<void> {
+  const page = await new ReferralAnalyticsService(prisma).getRootPage(requestedPage, REFERRAL_TREE_PAGE_SIZE);
+  let text = "🌳 *شبکه اصلی دعوت‌ها*\n\n";
+  text += `درخت‌های اصلی: ${page.totalRoots}\n`;
+  text += `اعضای شبکه: ${page.totalNetworkUsers}\n`;
+  text += `سفارش‌ها: ${page.totalOrders} · ${formatPrice(page.totalRevenue)}\n`;
+  text += "─────────────────\n";
+
+  if (page.roots.length === 0) {
+    text += "هنوز شبکه دعوت تأییدشده‌ای ایجاد نشده است.";
+  } else {
+    page.roots.forEach((root, index) => {
+      text += `\n${page.page * REFERRAL_TREE_PAGE_SIZE + index + 1}. *${referralUserLabelMarkdown(root)}*\n`;
+      text += `   مستقیم: ${root.directChildren} · کل شبکه: ${root.totalUsers} · عمق: ${root.maxDepth}\n`;
+      text += `   سفارش: ${root.totalOrders} · ${formatPrice(root.totalRevenue)}\n`;
+    });
+  }
+
+  const keyboard = new InlineKeyboard();
+  page.roots.forEach((root) => {
+    keyboard
+      .text(`🌿 ${compactReferralUserLabel(root)} · ${root.totalUsers} نفر`, `mgr:ref:node:${root.userId}:0`)
+      .row();
+  });
+  if (page.totalPages > 1) {
+    if (page.page > 0) keyboard.text("« قبلی", `mgr:ref:roots:${page.page - 1}`);
+    keyboard.text(`${page.page + 1}/${page.totalPages}`, "noop");
+    if (page.page < page.totalPages - 1) keyboard.text("بعدی »", `mgr:ref:roots:${page.page + 1}`);
+    keyboard.row();
+  }
+  keyboard
+    .text("« آمار دعوت‌ها", "mgr:analytics:referrals")
+    .text("« منو", "mgr:menu");
+
+  await safeRender(ctx, text, { parse_mode: "Markdown", reply_markup: keyboard });
+}
+
+async function renderReferralSubtreePage(
+  ctx: Context,
+  prisma: PrismaClient,
+  userId: number,
+  requestedPage: number,
+): Promise<void> {
+  const view = await new ReferralAnalyticsService(prisma).getSubtreePage(userId, requestedPage, REFERRAL_TREE_PAGE_SIZE);
+  if (!view) {
+    await safeRender(ctx, "کاربر این شبکه یافت نشد.", {
+      reply_markup: new InlineKeyboard().text("« شبکه اصلی", "mgr:ref:roots:0").text("« منو", "mgr:menu"),
+    });
+    return;
+  }
+
+  const lineageSegments = view.lineage.length > 6
+    ? [referralUserLabelMarkdown(view.lineage[0]), "…", ...view.lineage.slice(-4).map(referralUserLabelMarkdown)]
+    : view.lineage.map(referralUserLabelMarkdown);
+  const lineageText = lineageSegments.join(" › ");
+
+  let text = `🌿 *زیرشبکه ${referralUserLabelMarkdown(view.node)}*\n\n`;
+  text += `⬆️ معرف: ${referralParentLabelMarkdown(view.parent, view.node.invitedByManager)}\n`;
+  text += `🧭 مسیر: ${lineageText}\n`;
+  text += `👥 دعوت مستقیم: ${view.totalChildren}\n`;
+  text += `🌳 کل اعضای زیرشبکه: ${view.stats.totalUsers} (${view.stats.descendantCount} زیرمجموعه)\n`;
+  text += `📏 عمق زیرشبکه: ${view.stats.maxDepth}\n`;
+  text += `📦 سفارش خود کاربر: ${view.node.orderCount} · ${formatPrice(view.node.orderTotal)}\n`;
+  text += `📊 کل زیرشبکه: ${view.stats.totalOrders} سفارش · ${formatPrice(view.stats.totalRevenue)}\n`;
+  if (view.stats.cycleDetected) text += "\n⚠️ چرخه غیرعادی در داده‌های معرفی شناسایی شد.\n";
+  text += "\n*زیرمجموعه‌های مستقیم:*\n";
+
+  if (view.children.length === 0) {
+    text += "— این کاربر زیرمجموعه مستقیمی ندارد.\n";
+  } else {
+    view.children.forEach((child, index) => {
+      text += `${view.page * REFERRAL_TREE_PAGE_SIZE + index + 1}. ${referralUserLabelMarkdown(child)}\n`;
+      text += `   شبکه: ${child.totalUsers} · سفارش: ${child.totalOrders} · ${formatPrice(child.totalRevenue)}\n`;
+    });
+  }
+
+  const keyboard = new InlineKeyboard();
+  view.children.forEach((child) => {
+    keyboard
+      .text(`↳ ${compactReferralUserLabel(child)} · ${child.totalUsers} نفر`, `mgr:ref:node:${child.userId}:0`)
+      .row();
+  });
+  if (view.totalPages > 1) {
+    if (view.page > 0) keyboard.text("« قبلی", `mgr:ref:node:${view.node.userId}:${view.page - 1}`);
+    keyboard.text(`${view.page + 1}/${view.totalPages}`, "noop");
+    if (view.page < view.totalPages - 1) keyboard.text("بعدی »", `mgr:ref:node:${view.node.userId}:${view.page + 1}`);
+    keyboard.row();
+  }
+  if (view.parent) keyboard.text("⬆️ معرف", `mgr:ref:node:${view.parent.userId}:0`);
+  if (view.root.userId !== view.node.userId) keyboard.text("🌲 ریشه", `mgr:ref:node:${view.root.userId}:0`);
+  if (view.parent || view.root.userId !== view.node.userId) keyboard.row();
+  keyboard
+    .text("👤 جزئیات کاربر", `mgr:user:${view.node.userId}`)
+    .text("🌳 شبکه اصلی", "mgr:ref:roots:0")
+    .row()
+    .text("« منو", "mgr:menu");
+
+  await safeRender(ctx, text, { parse_mode: "Markdown", reply_markup: keyboard });
 }
 
 async function createManagerReferralCode(
@@ -760,10 +882,15 @@ function announcementDisplayTitle(announcement: {
 /**
  * Build a formatted order detail text with Persian labels for all statuses.
  */
-function buildOrderDetailText(order: {
+export function buildOrderDetailText(order: {
   id: number; status: OrderStatus; createdAt: Date;
   subtotal: number; discountTotal: number; grandTotal: number;
-  user: { firstName: string | null; username: string | null; phone: string | null; address: string | null; locationLat: number | null; locationLng: number | null; locationText: string | null };
+  user: {
+    firstName: string | null; username: string | null; phone: string | null;
+    address: string | null; locationLat: number | null; locationLng: number | null; locationText: string | null;
+    referredBy: { id: number; username: string | null; firstName: string | null } | null;
+    usedReferralCode: { createdByManagerId: number | null } | null;
+  };
   items: { product: { title: string }; qty: number; lineTotal: number }[];
   receipts: { reviewStatus: string }[];
   delivery: { status: string; assignedCourier: { username: string | null; id: number } | null } | null;
@@ -777,6 +904,7 @@ function buildOrderDetailText(order: {
   // User info
   const u = order.user;
   text += `*مشتری:* ${esc(u.firstName)} (@${esc(u.username)})\n`;
+  text += `👤 معرف: ${referralParentLabelMarkdown(u.referredBy, u.usedReferralCode?.createdByManagerId != null)}\n`;
   text += `تلفن:\n${formatPhoneForDisplay(u.phone, "-")}\n`;
   text += `آدرس: ${esc(u.address) || "-"}\n`;
   if (u.locationLat != null) text += `📍 موقعیت ثبت شده\n`;
@@ -824,6 +952,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
   const notificationService = new NotificationService({ prisma, clientBot, courierBot });
   const settingsService = new BotSettingsService(prisma);
   const announcementService = new AnnouncementService(prisma);
+  const activeAnnouncementBroadcasts = new Set<number>();
 
   const publishAnnouncement = async (
     ctx: Context,
@@ -838,15 +967,43 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     mediaType?: AnnouncementMediaType | null,
     mediaFileId?: string | null,
   ): Promise<void> => {
-    const announcement = await announcementService.create({
-      type, title, message, discountType, discountValue, audience, managerId, durationDays,
-      mediaType, mediaFileId,
-    });
-    const result = await announcementService.broadcast(announcement, clientBot, bot);
-    managerSessions.delete(ctx.from!.id);
-    await safeRender(ctx, ManagerTexts.announcementPublished(result.sent, result.failed), {
-      reply_markup: ManagerKeyboards.announcementManagement(),
-    });
+    if (activeAnnouncementBroadcasts.has(managerId)) {
+      await safeRender(ctx, ManagerTexts.announcementBroadcastInProgress(), {
+        reply_markup: ManagerKeyboards.announcementManagement(),
+      });
+      return;
+    }
+
+    activeAnnouncementBroadcasts.add(managerId);
+    let announcement: Awaited<ReturnType<AnnouncementService["create"]>>;
+    try {
+      announcement = await announcementService.create({
+        type, title, message, discountType, discountValue, audience, managerId, durationDays,
+        mediaType, mediaFileId,
+      });
+      managerSessions.delete(ctx.from!.id);
+      await safeRender(ctx, ManagerTexts.announcementBroadcastStarted(), {
+        reply_markup: ManagerKeyboards.announcementManagement(),
+      });
+    } catch (error) {
+      activeAnnouncementBroadcasts.delete(managerId);
+      throw error;
+    }
+
+    const resultChatId = ctx.chat?.id ?? ctx.from!.id;
+    void announcementService.broadcast(announcement, clientBot, bot)
+      .then((result) => bot.api.sendMessage(
+        resultChatId,
+        ManagerTexts.announcementPublished(result.sent, result.failed),
+      ))
+      .catch((error) => {
+        console.error(`[ANNOUNCEMENT ${announcement.id}] Background broadcast failed:`, error);
+        return bot.api.sendMessage(resultChatId, "❌ ارسال اطلاعیه با خطا متوقف شد. لطفاً گزارش سرور را بررسی کنید.")
+          .catch((notifyError) => console.error("Failed to report announcement broadcast error:", notifyError));
+      })
+      .finally(() => {
+        activeAnnouncementBroadcasts.delete(managerId);
+      });
   };
 
   const showAnnouncementAudience = async (ctx: Context, session: ManagerSession): Promise<void> => {
@@ -2033,38 +2190,20 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data.startsWith("mgr:reject:")) {
       const orderId = safeId(parts[2]);
 
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { user: true },
+      const rejected = await cancelOrderAndRestoreStock(prisma, {
+        orderId,
+        actorType: "manager",
+        actorId: manager.id,
+        eventType: "order_rejected",
+        allowedStatuses: [OrderStatus.AWAITING_MANAGER_APPROVAL],
       });
-      if (!order || order.status !== OrderStatus.AWAITING_MANAGER_APPROVAL) {
-        await answerCallback({ text: ManagerTexts.orderNotFound() });
-        return;
-      }
-
-      const rejected = await prisma.order.updateMany({
-        where: { id: orderId, status: OrderStatus.AWAITING_MANAGER_APPROVAL },
-        data: { status: OrderStatus.CANCELLED },
-      });
-
-      if (rejected.count === 0) {
+      if (rejected.kind !== "cancelled") {
         await answerCallback({ text: "این سفارش قبلاً توسط مدیر دیگر تأیید یا رد شده است.", show_alert: true });
         return;
       }
 
-      await prisma.orderEvent.create({
-        data: {
-          orderId,
-          actorType: "manager",
-          actorId: manager.id,
-          eventType: "order_rejected",
-        },
-      });
-
       // Notify client about rejection
-      if (order.user) {
-        await notificationService.notifyClientOrderRejected(order.user.tgUserId, orderId);
-      }
+      await notificationService.notifyClientOrderRejected(rejected.userTgUserId, orderId);
 
       await answerCallback({ 
         text: ManagerTexts.orderRejected(orderId),
@@ -2121,41 +2260,33 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ===========================================
     if (data.startsWith("mgr:order:cancel:confirm:")) {
       const orderId = safeId(parts[4]);
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { user: true },
+      const cancellation = await cancelOrderAndRestoreStock(prisma, {
+        orderId,
+        actorType: "manager",
+        actorId: manager.id,
+        eventType: "order_cancelled",
+        completedEventType: "order_deleted",
       });
 
-      if (!order) {
+      if (cancellation.kind === "missing") {
         await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
         return;
       }
-
-      if (order.status === OrderStatus.CANCELLED) {
+      if (cancellation.kind === "already-cancelled") {
         await answerCallback({ text: "این سفارش قبلاً لغو شده است.", show_alert: true });
         return;
       }
+      if (cancellation.kind !== "cancelled") {
+        await answerCallback({ text: "وضعیت سفارش همزمان تغییر کرد. دوباره تلاش کنید.", show_alert: true });
+        return;
+      }
 
-      const isCompleted = order.status === OrderStatus.COMPLETED;
-
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: OrderStatus.CANCELLED,
-          events: {
-            create: {
-              actorType: "manager",
-              actorId: manager.id,
-              eventType: isCompleted ? "order_deleted" : "order_cancelled",
-            },
-          },
-        },
-      });
+      const isCompleted = cancellation.previousStatus === OrderStatus.COMPLETED;
 
       // Notify client
       try {
         await clientBot?.api.sendMessage(
-          order.user.tgUserId.toString(),
+          cancellation.userTgUserId.toString(),
           isCompleted
             ? `سفارش #${orderId} توسط مدیریت از فهرست فعال خارج شد.`
             : `❌ سفارش #${orderId} توسط مدیریت لغو شد.`
@@ -2214,20 +2345,33 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
         return;
       }
+      if (order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.COMPLETED) {
+        await answerCallback({ text: "ابتدا سفارش را لغو یا تکمیل کنید.", show_alert: true });
+        return;
+      }
 
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: OrderStatus.CANCELLED,
-          events: {
-            create: {
-              actorType: "manager",
-              actorId: manager.id,
-              eventType: "order_deleted",
-            },
-          },
-        },
+      const archived = await prisma.$transaction(async (tx) => {
+        if (order.status === OrderStatus.COMPLETED) {
+          const claimed = await tx.order.updateMany({
+            where: { id: orderId, status: OrderStatus.COMPLETED },
+            data: { status: OrderStatus.CANCELLED },
+          });
+          if (claimed.count === 0) return false;
+        }
+        const existing = await tx.orderEvent.count({
+          where: { orderId, eventType: "order_deleted" },
+        });
+        if (existing === 0) {
+          await tx.orderEvent.create({
+            data: { orderId, actorType: "manager", actorId: manager.id, eventType: "order_deleted" },
+          });
+        }
+        return true;
       });
+      if (!archived) {
+        await answerCallback({ text: "وضعیت سفارش همزمان تغییر کرد. دوباره تلاش کنید.", show_alert: true });
+        return;
+      }
 
       // Notify client
       try {
@@ -2260,7 +2404,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         where: { id: orderId },
         include: {
           items: { include: { product: true } },
-          user: { select: { id: true, username: true, firstName: true, phone: true, address: true, locationLat: true, locationLng: true, locationText: true } },
+          user: {
+            select: {
+              id: true, username: true, firstName: true, phone: true, address: true,
+              locationLat: true, locationLng: true, locationText: true,
+              referredBy: { select: { id: true, username: true, firstName: true } },
+              usedReferralCode: { select: { createdByManagerId: true } },
+            },
+          },
           events: { orderBy: { createdAt: "asc" }, take: 10 },
           receipts: { orderBy: { submittedAt: "desc" }, take: 3 },
           delivery: { include: { assignedCourier: true } },
@@ -2296,6 +2447,12 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         detailKb.text("📞 تماس", `mgr:order:contact:${order.id}`);
       }
       detailKb.row();
+      if (order.user.referredBy) {
+        detailKb
+          .text("👤 مشاهده معرف", `mgr:user:${order.user.referredBy.id}`)
+          .text("🌳 شبکه معرف", `mgr:ref:node:${order.user.referredBy.id}:0`)
+          .row();
+      }
       detailKb.text("📋 همه سفارش‌ها", "mgr:allorders").text("« منو", "mgr:menu");
 
       await safeRender(ctx, detailText, {
@@ -2531,32 +2688,37 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
       const label = targetUser?.username || targetUser?.firstName || `#${userId}`;
 
-      const referralCodes = await prisma.referralCode.findMany({
-        where: { createdByUserId: userId },
-      });
-
-      const referredUsers = await prisma.user.findMany({
-        where: { referredById: userId },
-        select: { id: true, username: true, firstName: true },
-      });
+      const [referralCodes, totalCodes, referredUsers] = await Promise.all([
+        prisma.referralCode.findMany({
+          where: { createdByUserId: userId },
+          orderBy: { createdAt: "desc" },
+          take: 10,
+        }),
+        prisma.referralCode.count({ where: { createdByUserId: userId } }),
+        prisma.user.count({ where: { referredById: userId } }),
+      ]);
 
       let text = `🔗 *کدهای معرفی ${escapeMarkdown(label)}*\n\n`;
+      text += `کل کدهای ساخته‌شده: ${totalCodes}\n`;
+      text += `دعوت‌های مستقیم: ${referredUsers}\n\n`;
 
       if (referralCodes.length > 0) {
-        text += "*کدها:*\n";
+        text += totalCodes > referralCodes.length ? "*۱۰ کد آخر:*\n" : "*کدها:*\n";
         referralCodes.forEach((c) => {
           text += `\`${c.code}\` · ${c.usedCount > 0 ? "مصرف‌شده" : "قابل استفاده"}\n`;
         });
+      } else {
+        text += "این کاربر هنوز کدی نساخته است.\n";
       }
 
-      text += `\n*کاربران واردشده با این کدها:* ${referredUsers.length}\n`;
-      referredUsers.forEach((u) => {
-        text += `  ${escapeMarkdown(u.username || u.firstName || `#${u.id}`)}\n`;
-      });
-
+      const referralKb = new InlineKeyboard()
+        .text("🌳 مشاهده زیرشبکه", `mgr:ref:node:${userId}:0`)
+        .row()
+        .text("« کاربر", `mgr:user:${userId}`)
+        .text("« منو", "mgr:menu");
       await safeRender(ctx, text, {
         parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.backToMenu(),
+        reply_markup: referralKb,
       });
       return;
     }
@@ -3722,30 +3884,21 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       return;
     }
 
-    // REFERRAL TREE VIEW
-    if (data === "mgr:analytics:referraltree") {
-      const analyticsService = new ReferralAnalyticsService(prisma);
-      const trees = await analyticsService.getManagerReferralTrees();
+    // PAGINATED REFERRAL FOREST + SUBTREE DRILL-DOWN
+    if (data === "mgr:analytics:referraltree" || data.startsWith("mgr:ref:roots:")) {
+      const page = data.startsWith("mgr:ref:roots:") ? safeId(parts[3]) : 0;
+      await renderReferralRootPage(ctx, prisma, page);
+      return;
+    }
 
-      let text = "🌳 *درخت معرفی‌ها*\n\n";
-      if (trees.length === 0) {
-        text += "هنوز زنجیره معرفی‌ای ایجاد نشده.\n";
-      } else {
-        trees.forEach((tree) => {
-          text += formatReferralTree(tree);
-          text += "\n";
-        });
+    if (data.startsWith("mgr:ref:node:")) {
+      const userId = safeId(parts[3]);
+      const page = safeId(parts[4]);
+      if (userId <= 0) {
+        await answerCallback({ text: "کاربر شبکه معتبر نیست.", show_alert: true });
+        return;
       }
-
-      // Truncate if too long for Telegram
-      if (text.length > 4000) {
-        text = text.substring(0, 3950) + "\n\n... (ادامه دارد)";
-      }
-
-      await safeRender(ctx, text, {
-        parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.backToMenu(),
-      });
+      await renderReferralSubtreePage(ctx, prisma, userId, page);
       return;
     }
 

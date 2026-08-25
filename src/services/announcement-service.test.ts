@@ -297,6 +297,7 @@ describe("AnnouncementService", () => {
       data: {
         type: AnnouncementType.GENERAL,
         title: "آینده",
+        message: "",
         startsAt: new Date(now.getTime() + 60_000),
         isActive: true,
         createdByManagerId: managerId,
@@ -740,6 +741,26 @@ describe("AnnouncementService", () => {
     const result = await service.broadcast(announcement, undefined);
 
     expect(result).toEqual({ targeted: 1, sent: 0, failed: 1 });
+    const persisted = await prisma.announcement.findUniqueOrThrow({ where: { id: announcement.id } });
+    expect(persisted.broadcastAt).toBeNull();
+  });
+
+  it("does not count an empty text-only announcement as delivered", async () => {
+    await createUser();
+    const service = new AnnouncementService(prisma, () => now, 0);
+    const announcement = await service.create({
+      type: AnnouncementType.GENERAL,
+      title: "",
+      message: "",
+      managerId,
+      durationDays: 1,
+    });
+    const client = makeClientBot();
+
+    const result = await service.broadcast(announcement, client.bot);
+
+    expect(result).toEqual({ targeted: 1, sent: 0, failed: 1 });
+    expect(client.api.sendMessage).not.toHaveBeenCalled();
     const persisted = await prisma.announcement.findUniqueOrThrow({ where: { id: announcement.id } });
     expect(persisted.broadcastAt).toBeNull();
   });

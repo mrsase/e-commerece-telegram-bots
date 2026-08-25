@@ -113,6 +113,7 @@ export const ClientTexts = {
   askPhoneManualPrompt: () => "📱 لطفاً شماره تلفن خود را به صورت کامل وارد کنید (مثلاً: 09123456789):",
   phoneReceived: () => "✅ شماره تماس ثبت شد.",
   invalidPhone: () => "❌ شماره تلفن نامعتبر است. لطفاً یک شماره معتبر با فرمت 09123456789 وارد کنید:",
+  ownContactRequired: () => "❌ لطفاً فقط شماره تماس متعلق به حساب تلگرام خودتان را با دکمه «ارسال شماره تماس» بفرستید؛ یا شماره خود را دستی وارد کنید.",
   askLocation: () => "📍 لطفاً موقعیت مکانی تحویل را ارسال کنید.\n\nمی‌توانید موقعیت فعلی خود را بفرستید یا از منوی پیوست تلگرام نقطه مورد نظر را روی نقشه انتخاب کنید.",
   locationRequiredForNewUser: () => "📍 برای تکمیل عضویت، ثبت موقعیت مکانی الزامی است.\n\nاز دکمه زیر موقعیت فعلی را بفرستید یا از منوی پیوست تلگرام (📎) یک نقطه روی نقشه انتخاب و ارسال کنید.",
   locationRequiredForCheckout: () => "📍 برای ثبت سفارش، موقعیت مکانی تحویل الزامی است.\n\nاز دکمه زیر موقعیت فعلی را بفرستید یا از منوی پیوست تلگرام (📎) یک نقطه روی نقشه انتخاب و ارسال کنید.",
@@ -227,7 +228,9 @@ export const ManagerTexts = {
   announcementChooseDuration: (preview: string) => `پیش‌نمایش اطلاعیه:\n\n${preview}\n\nمدت فعال بودن اطلاعیه را انتخاب کنید:`,
   announcementAskCustomDuration: () => "تعداد روزهای فعال بودن اطلاعیه را وارد کنید (۱ تا ۳۶۵):",
   announcementInvalidDuration: () => "❌ مدت اطلاعیه باید عددی بین ۱ تا ۳۶۵ روز باشد.",
-  announcementPublished: (sent: number, failed: number) => `✅ اطلاعیه فعال شد و برای ${sent} کاربر ارسال شد.${failed > 0 ? `\nارسال ناموفق: ${failed}` : ""}`,
+  announcementBroadcastStarted: () => "✅ اطلاعیه ذخیره شد و ارسال آن در پس‌زمینه آغاز شد. پس از پایان، نتیجه در پیام جداگانه اعلام می‌شود.",
+  announcementBroadcastInProgress: () => "⏳ ارسال اطلاعیه قبلی این مدیر هنوز در حال انجام است. پس از دریافت نتیجه، اطلاعیه بعدی را منتشر کنید.",
+  announcementPublished: (sent: number, failed: number) => `✅ ارسال اطلاعیه پایان یافت. ارسال موفق: ${sent}.${failed > 0 ? `\nارسال ناموفق: ${failed}` : ""}`,
   noActiveAnnouncements: () => "در حال حاضر اطلاعیه فعالی وجود ندارد.",
   announcementDeactivated: () => "✅ اطلاعیه متوقف شد.",
   
@@ -249,8 +252,8 @@ export const ManagerTexts = {
   usersMenuTitle: () => "👥 *مدیریت کاربران*",
   userListTitle: () => "👥 *لیست کاربران*",
   noUsers: () => "هیچ کاربری یافت نشد.",
-  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountLabel: string, maxReferralCodes?: number, isTestUser = false) =>
-    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nگروه آزمایشی: ${isTestUser ? '🧪 عضو است' : '— عضو نیست'}\nمجوز ساخت کد معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n🔢 سقف ساخت کد: ${maxReferralCodes ?? 3}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (تنظیم‌شده توسط مدیر)' : ''}\n🎯 تخفیف کاربر: ${discountLabel}\nتعداد سفارش: ${orderCount}`,
+  userDetails: (id: number, username: string | null, isActive: boolean, orderCount: number, canCreateReferral: boolean, effectiveScore: number, hasOverride: boolean, discountLabel: string, maxReferralCodes?: number, isTestUser = false, parentLabel = "— بدون معرف ثبت‌شده") =>
+    `*کاربر #${id}*\n\nنام کاربری: ${escapeMarkdown(username) || '—'}\n👤 معرف: ${parentLabel}\nوضعیت: ${isActive ? '✅ فعال' : '🚫 مسدود'}\nگروه آزمایشی: ${isTestUser ? '🧪 عضو است' : '— عضو نیست'}\nمجوز ساخت کد معرفی: ${canCreateReferral ? '✅ دارد' : '❌ ندارد'}\n🔢 سقف ساخت کد: ${maxReferralCodes ?? 3}\n⭐ امتیاز وفاداری: ${effectiveScore}/10${hasOverride ? ' (تنظیم‌شده توسط مدیر)' : ''}\n🎯 تخفیف کاربر: ${discountLabel}\nتعداد سفارش: ${orderCount}`,
   userAddedToTestGroup: () => "🧪 کاربر به گروه آزمایشی اضافه شد.",
   userRemovedFromTestGroup: () => "کاربر از گروه آزمایشی خارج شد.",
   userBlocked: (username: string | null) => `🚫 کاربر ${username || 'نامشخص'} مسدود شد.`,

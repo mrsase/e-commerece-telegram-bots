@@ -1,6 +1,7 @@
+import { resolve } from "node:path";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import type { AppConfig } from "./app-config.js";
-import { loadAppConfigFromEnv } from "./app-config.js";
+import { loadAppConfigFromEnv, resolveDatabaseUrl } from "./app-config.js";
 
 const ORIGINAL_ENV = process.env;
 
@@ -32,12 +33,18 @@ describe("loadAppConfigFromEnv", () => {
 
     expect(config.nodeEnv).toBe("test");
     expect(config.port).toBe(4000);
-    expect(config.databaseUrl).toBe("file:./dev.db");
+    expect(config.databaseUrl).toBe(`file:${resolve("prisma/dev.db")}`);
+    expect(process.env.DATABASE_URL).toBe(config.databaseUrl);
     expect(config.clientBotToken).toBe("TEST_CLIENT_TOKEN");
     expect(config.clientBotUsername).toBe("IranianShopBot");
     expect(config.managerBotToken).toBe("TEST_MANAGER_TOKEN");
     expect(config.courierBotToken).toBe("TEST_COURIER_TOKEN");
     expect(config.updatesMode).toBe("polling");
+  });
+
+  it("keeps absolute SQLite URLs and query parameters intact", () => {
+    expect(resolveDatabaseUrl("file:/srv/app/prisma/prod.db?connection_limit=1"))
+      .toBe("file:/srv/app/prisma/prod.db?connection_limit=1");
   });
 
   it("throws when a required variable is missing", () => {

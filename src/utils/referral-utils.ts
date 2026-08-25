@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import type { PrismaClient } from "@prisma/client";
 
+type ReferralCodeClient = Pick<PrismaClient, "referralCode">;
+
 /**
  * Generate a random referral code.
  * @param prefix Optional prefix (e.g. "MGR_" for manager codes)
@@ -20,7 +22,7 @@ export function generateReferralCode(prefix = "", length = 8): string {
  * Create a referral code with retry on unique constraint violation (P2002).
  */
 export async function createReferralCodeWithRetry(
-  prisma: PrismaClient,
+  prisma: ReferralCodeClient,
   opts: {
     createdByUserId?: number;
     createdByManagerId?: number;

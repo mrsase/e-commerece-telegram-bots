@@ -13,11 +13,13 @@ beforeEach(async () => {
   await prisma.user.deleteMany({
     where: {
       referralCode: {
-        in: ["REF_USER_1", "REF_USER_2"],
+        in: ["REF_USER_1", "REF_USER_2", "REF_SELF_USER", "REF_VERIFIED_USER", "REF_PARENT_USER"],
       },
     },
   });
-  await prisma.referralCode.deleteMany({ where: { code: "ONE_TIME_CODE" } });
+  await prisma.referralCode.deleteMany({
+    where: { code: { in: ["ONE_TIME_CODE", "SELF_REF_CODE", "VERIFIED_REF_CODE"] } },
+  });
 });
 
 afterAll(async () => {
@@ -64,5 +66,63 @@ describe("validateAndUseReferralCode", () => {
     });
     expect(verifiedFirstUser.isVerified).toBe(true);
     expect(rejectedSecondUser.isVerified).toBe(false);
+  });
+
+  it("rejects self-referral without consuming the code", async () => {
+    const user = await prisma.user.create({
+      data: {
+        tgUserId: BigInt(900003),
+        referralCode: "REF_SELF_USER",
+        canCreateReferral: true,
+      },
+    });
+    const code = await prisma.referralCode.create({
+      data: {
+        code: "SELF_REF_CODE",
+        createdByUserId: user.id,
+        isActive: true,
+      },
+    });
+
+    await expect(validateAndUseReferralCode(user.id, code.code, prisma)).resolves.toBe(false);
+    const [freshUser, freshCode] = await Promise.all([
+      prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
+      prisma.referralCode.findUniqueOrThrow({ where: { id: code.id } }),
+    ]);
+    expect(freshUser.referredById).toBeNull();
+    expect(freshUser.isVerified).toBe(false);
+    expect(freshCode.usedCount).toBe(0);
+    expect(freshCode.isActive).toBe(true);
+  });
+
+  it("does not re-parent an already verified user", async () => {
+    const [verifiedUser, parent] = await Promise.all([
+      prisma.user.create({
+        data: {
+          tgUserId: BigInt(900004),
+          referralCode: "REF_VERIFIED_USER",
+          isVerified: true,
+        },
+      }),
+      prisma.user.create({
+        data: {
+          tgUserId: BigInt(900005),
+          referralCode: "REF_PARENT_USER",
+          isVerified: true,
+        },
+      }),
+    ]);
+    const code = await prisma.referralCode.create({
+      data: {
+        code: "VERIFIED_REF_CODE",
+        createdByUserId: parent.id,
+        isActive: true,
+      },
+    });
+
+    await expect(validateAndUseReferralCode(verifiedUser.id, code.code, prisma)).resolves.toBe(false);
+    const freshCode = await prisma.referralCode.findUniqueOrThrow({ where: { id: code.id } });
+    expect(freshCode.usedCount).toBe(0);
+    expect(freshCode.isActive).toBe(true);
   });
 });

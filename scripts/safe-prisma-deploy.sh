@@ -22,16 +22,17 @@
 #      so this script cross-checks the ledger itself.)
 #   5. Migration alignment guard (deploy mode only): compares the local
 #      migration directory names against the SUCCESSFUL rows in the target
-#      database's _prisma_migrations ledger and requires the ONLY pending
-#      migration to be exactly the one shipped by this release:
+#      database's _prisma_migrations ledger and allows pending migrations only
+#      from the additive migration set shipped by this release:
 #        20260819090000_add_announcement_media
+#        20260824120000_add_referral_query_indexes
 #      It aborts if:
 #        - any historical migration is missing from the database (unapplied),
 #        - any DB-applied migration file is missing locally,
 #        - any extra/unexpected pending migration exists,
-#        - migration 11 (20260819090000..._add_announcement_media) is already
-#          applied with nothing pending -- i.e. a no-op deploy. A clean no-op
-#          is allowed ONLY with the explicit ALLOW_NOOP flag.
+#        - both release migrations are already applied with nothing pending --
+#          i.e. a no-op deploy. A clean no-op is allowed ONLY with the explicit
+#          ALLOW_NOOP flag.
 #      Future releases override the expectation with EXPECTED_PENDING_MIGRATIONS
 #      (space-separated list of migration names).
 #   6. Creates a CONSISTENT backup of the actual target using the SQLite
@@ -73,7 +74,8 @@
 #   EXPECTED_PENDING_MIGRATIONS
 #                        Space-separated list of migration names allowed to be
 #                        pending before deploy. Safe default for THIS release:
-#                        20260819090000_add_announcement_media.
+#                        20260819090000_add_announcement_media and
+#                        20260824120000_add_referral_query_indexes.
 #                        Set explicitly for future releases (or for a fresh
 #                        database bootstrapping all migrations at once).
 #   ALLOW_NOOP           Any non-empty value allows the otherwise-aborted
@@ -100,9 +102,10 @@ MIGRATIONS_DIR="$PRISMA_DIR/migrations"
 BACKUP_DIR="${DATABASE_BACKUP_DIR:-$PROJECT_ROOT/backups/database}"
 TIMESTAMP=$(date -u '+%Y%m%dT%H%M%SZ')
 
-# Migration alignment guard configuration. Safe default: ONLY this release's
-# migration may be pending. Future releases override via the environment.
-EXPECTED_PENDING_MIGRATIONS="${EXPECTED_PENDING_MIGRATIONS:-20260819090000_add_announcement_media}"
+# Migration alignment guard configuration. Safe default: pending migrations
+# may only come from this release's two additive migrations. This also safely
+# supports a target where one of the two is already applied.
+EXPECTED_PENDING_MIGRATIONS="${EXPECTED_PENDING_MIGRATIONS:-20260819090000_add_announcement_media 20260824120000_add_referral_query_indexes}"
 NOOP=0
 
 # Work from the project root: the Prisma CLI discovers schema.prisma, .env

@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 
 export interface AppConfig {
@@ -29,6 +30,19 @@ const EnvSchema = z.object({
   WEBHOOK_SECRET_TOKEN: z.string().optional(),
 });
 
+export function resolveDatabaseUrl(databaseUrl: string): string {
+  if (!databaseUrl.startsWith("file:")) return databaseUrl;
+  const match = /^file:([^?#]+)([?#].*)?$/.exec(databaseUrl);
+  if (!match) return databaseUrl;
+  const databasePath = match[1];
+  if (isAbsolute(databasePath)) return databaseUrl;
+
+  // Pin relative SQLite URLs to the schema directory. Prisma CLI migrations
+  // already resolve them there, while generated clients can otherwise resolve
+  // against node_modules/.prisma/client and open a different empty database.
+  return `file:${resolve(process.cwd(), "prisma", databasePath)}${match[2] ?? ""}`;
+}
+
 export function loadAppConfigFromEnv(): AppConfig {
   const parsed = EnvSchema.safeParse(process.env);
 
@@ -48,6 +62,11 @@ export function loadAppConfigFromEnv(): AppConfig {
     throw new Error(`Invalid PORT environment variable: ${env.PORT}`);
   }
 
+  const databaseUrl = resolveDatabaseUrl(env.DATABASE_URL);
+  // PrismaClient reads DATABASE_URL directly when it is instantiated after this
+  // function in main.ts, so update the process environment as well as config.
+  process.env.DATABASE_URL = databaseUrl;
+
   let updatesMode: "webhook" | "polling";
   if (env.UPDATES_MODE === "webhook") {
     updatesMode = "webhook";
@@ -60,7 +79,7 @@ export function loadAppConfigFromEnv(): AppConfig {
   return {
     nodeEnv: env.NODE_ENV,
     port,
-    databaseUrl: env.DATABASE_URL,
+    databaseUrl,
     clientBotToken: env.CLIENT_BOT_TOKEN,
     clientBotUsername: env.CLIENT_BOT_USERNAME?.replace(/^@/, ""),
     managerBotToken: env.MANAGER_BOT_TOKEN,

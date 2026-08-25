@@ -4,7 +4,7 @@ import { CartState, OrderStatus, ReceiptReviewStatus, SupportConversationStatus,
 import { ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ClientKeyboards } from "../../utils/keyboards.js";
 import { formatPrice } from "../../utils/format-price.js";
-import { OrderService, InsufficientStockError } from "../../services/order-service.js";
+import { OrderService, InsufficientStockError, cancelOrderAndRestoreStock } from "../../services/order-service.js";
 
 import { SessionStore } from "../../utils/session-store.js";
 
@@ -195,6 +195,17 @@ export async function validateAndUseReferralCode(
       if (!referralCode.isActive) return false;
       if (referralCode.expiresAt && referralCode.expiresAt < new Date()) return false;
       if (referralCode.usedCount > 0) return false;
+      // Never allow a user to become their own parent. This can otherwise create
+      // a permanent cycle that breaks referral analytics and navigation.
+      if (referralCode.createdByUserId === userId) return false;
+
+      const targetUser = await tx.user.findUnique({
+        where: { id: userId },
+        select: { isVerified: true, usedReferralCodeId: true },
+      });
+      // Parentage is immutable after verification. Keep this guard inside the
+      // transaction so future entry points cannot re-parent an existing user.
+      if (!targetUser || targetUser.isVerified || targetUser.usedReferralCodeId !== null) return false;
 
       // Referral access codes are one-time tokens. Claim and expire immediately.
       const claimResult = await tx.referralCode.updateMany({
@@ -747,24 +758,52 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
-      if (!user) return;
+      // Re-check permission and quota at the actual write step. The manager may
+      // have revoked access after this flow opened, and stale/parallel messages
+      // must not bypass maxReferralCodes.
+      const creation = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.findUnique({
+          where: { tgUserId: BigInt(ctx.from.id) },
+        });
+        if (!user) return { kind: "missing" as const };
+        if (!user.isVerified || !user.canCreateReferral) return { kind: "forbidden" as const };
 
-      const code = await createReferralCodeWithRetry(prisma, {
-        createdByUserId: user.id,
-        maxUses: 1,
-        loyaltyScore: score,
+        const existingCodes = await tx.referralCode.count({ where: { createdByUserId: user.id } });
+        if (existingCodes >= user.maxReferralCodes) {
+          return { kind: "quota" as const, max: user.maxReferralCodes };
+        }
+
+        const code = await createReferralCodeWithRetry(tx, {
+          createdByUserId: user.id,
+          maxUses: 1,
+          loyaltyScore: score,
+        });
+        return { kind: "created" as const, code };
       });
+
+      if (creation.kind === "missing") {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply(ClientTexts.unableToIdentify(), { reply_markup: ClientKeyboards.backToMenu() });
+        return;
+      }
+      if (creation.kind === "forbidden") {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply(ClientTexts.referralNoPermission(), { reply_markup: ClientKeyboards.backToMenu() });
+        return;
+      }
+      if (creation.kind === "quota") {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply(ClientTexts.referralMaxCodesReached(creation.max), { reply_markup: ClientKeyboards.backToMenu() });
+        return;
+      }
 
       userSessions.delete(ctx.from.id);
       const botUsername = await resolveClientBotUsername(bot, clientBotUsername);
-      await ctx.reply(ClientTexts.referralCodeGenerated(code), {
+      await ctx.reply(ClientTexts.referralCodeGenerated(creation.code), {
         parse_mode: "Markdown",
         reply_markup: ClientKeyboards.backToMenu(),
       });
-      await ctx.reply(referralShareMessage(code, botUsername), { parse_mode: "Markdown" });
+      await ctx.reply(referralShareMessage(creation.code, botUsername), { parse_mode: "Markdown" });
       return;
     }
 
@@ -839,6 +878,10 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     
     if (session?.state === "checkout_phone") {
       const contact = ctx.message.contact;
+      if (contact.user_id != null && contact.user_id !== ctx.from.id) {
+        await ctx.reply(ClientTexts.ownContactRequired());
+        return;
+      }
       
       const user = await prisma.user.findUnique({
         where: { tgUserId: BigInt(ctx.from.id) },
@@ -1026,9 +1069,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       }
     };
     
-    // Answer immediately for responsive UX (will be skipped if answered later with specific text)
-    await answerCallback();
-
+    try {
     // Get user
     const { user, needsReferral } = await getOrCreateUser(ctx, prisma);
     
@@ -1569,19 +1610,17 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: OrderStatus.CANCELLED,
-          events: {
-            create: {
-              actorType: "user",
-              actorId: user.id,
-              eventType: "order_cancelled_by_user",
-            },
-          },
-        },
+      const cancelled = await cancelOrderAndRestoreStock(prisma, {
+        orderId,
+        actorType: "user",
+        actorId: user.id,
+        eventType: "order_cancelled_by_user",
+        allowedStatuses: [OrderStatus.AWAITING_MANAGER_APPROVAL],
       });
+      if (cancelled.kind !== "cancelled") {
+        await answerCallback({ text: "وضعیت سفارش تغییر کرده و دیگر قابل لغو نیست.", show_alert: true });
+        return;
+      }
 
       await safeRender(ctx, `✅ سفارش #${orderId} لغو شد.`, {
         reply_markup: ClientKeyboards.backToMenu(),
@@ -1855,7 +1894,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
 
       // Ownership: only the conversation owner may reply into it.
       if (!conversation || conversation.userId !== user.id) {
-        await ctx.answerCallbackQuery({ text: "گفتگو یافت نشد.", show_alert: true });
+        await answerCallback({ text: "گفتگو یافت نشد.", show_alert: true });
         return;
       }
 
@@ -1884,6 +1923,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     // NO-OP (for display-only buttons)
     if (data === "noop") {
       return;
+    }
+    } finally {
+      // Answer exactly once after handlers have had a chance to provide a
+      // meaningful alert/toast. This also clears Telegram's loading spinner.
+      await answerCallback();
     }
   });
 }
