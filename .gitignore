@@ -10,6 +10,8 @@ dev.db
 */*/*.db
 prisma/dev.db
 backups/
+coverage/
+/ecommerce-release.tar.gz
 
 # Local generated reports / handoff docs
 DEPLOYMENT_SAFE_ROLLOUT.md

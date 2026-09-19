@@ -1,661 +1,198 @@
 # Amoosh Telegram Bots
 
-A three-bot e-commerce system for Telegram built with TypeScript, Fastify, Prisma, and grammY.
+A polling-only Telegram e-commerce service built with TypeScript, grammY,
+Prisma, and SQLite.
 
-## Table of Contents
+## What runs
 
-- [Overview](#overview)
-- [System Architecture](#system-architecture)
-- [Requirements](#requirements)
-- [Quick Start](#quick-start)
-- [Environment Variables](#environment-variables)
-- [Database Schema](#database-schema)
-- [Client Bot](#client-bot)
-- [Manager Bot](#manager-bot)
-- [Order Workflow](#order-workflow)
-- [Background Jobs](#background-jobs)
-- [HTTP Endpoints](#http-endpoints)
-- [Development](#development)
-- [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
+The application starts three bots in one Node.js process:
 
----
+- **Client bot** — onboarding, referrals, catalogue, cart, checkout, receipts,
+  profile, and support.
+- **Manager bot** — products, customers, receipts, referrals, support,
+  announcements, analytics, settings, and courier assignment.
+- **Courier bot** — assigned deliveries and delivery status updates.
 
-## Overview
-
-This project implements three Telegram bots for an e-commerce platform:
-
-1. **Client Bot** - Customer-facing bot for browsing products, managing shopping cart, and placing orders
-2. **Manager Bot** - Admin bot for products, users, receipts, referrals, support, analytics, settings, and courier assignment
-3. **Courier Bot** - Delivery bot for assigned couriers to update delivery progress
-
-### Key Features
-
-- **Product Catalog**: Browse and view available products
-- **Shopping Cart**: Add/remove items, view cart contents
-- **Order Management**: Submit orders, send payment details, upload receipts, and complete delivery
-- **User Discounts**: Managers can assign a percentage or fixed تومان discount to selected users
-- **Invite Links**: Auto-generate Telegram channel invite links for approved orders
-- **Receipt Upload**: Customers can upload payment receipts
-- **Referral System**: One-time referral access codes for first login
-- **Store Announcements**: Broadcast general notices, limited-time promotions, or temporary closures to all active customers
-- **Stock Safety**: Zero-stock products are hidden and rejected at cart and checkout boundaries
-
----
-
-## System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Telegram API                              │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          ▼               ▼               ▼
-┌─────────────────┐             ┌─────────────────┐
-│   Client Bot    │             │  Manager Bot    │
-│   (Customers)   │             │   (Admins)      │
-└────────┬────────┘             └────────┬────────┘
-         │          ┌─────────────────┐  │
-         │          │   Courier Bot   │  │
-         │          │   (Delivery)    │  │
-         │          └────────┬────────┘  │
-         └───────────────────┼───────────┘
-                         ▼
-              ┌─────────────────────┐
-              │   App Runtime       │
-              │ Polling + optional  │
-              │ Webhook HTTP server │
-              └──────────┬──────────┘
-                         │
-         ┌───────────────┼───────────────┐
-         ▼               ▼               ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│   Prisma    │  │   BullMQ    │  │   Redis     │
-│   (SQLite/  │  │  (Workers)  │  │  (Queue)    │
-│  PostgreSQL)│  │  Optional   │  │  Optional   │
-└─────────────┘  └─────────────┘  └─────────────┘
-```
-
----
+Telegram updates are received exclusively through long polling. There is no
+webhook server, Redis, BullMQ, or PostgreSQL dependency.
 
 ## Requirements
 
-- **Node.js** 20.x or higher
-- **npm** 10.x or higher
-- **SQLite** (development) or **PostgreSQL** (production)
-- **Redis** (optional, for background job queues)
+- Node.js 20 or newer
+- npm 10 or newer
+- SQLite 3
 
----
-
-## Quick Start
-
-### 1. Install Dependencies
+## Quick start
 
 ```bash
-cd apps/telegram-bots
-npm install
-```
-
-### 2. Configure Environment
-
-Create a `.env` file:
-
-```env
-# Database
-# Relative file: paths resolve against prisma/schema.prisma, so ./dev.db
-# means prisma/dev.db (NOT ./prisma/dev.db -- that would point at a
-# prisma/prisma/ subdirectory).
-DATABASE_URL=file:./dev.db
-
-# Bot Tokens (get from @BotFather on Telegram)
-CLIENT_BOT_TOKEN=your_client_bot_token
-# Public username without @, used in referral invitation links
-CLIENT_BOT_USERNAME=your_client_bot_username
-MANAGER_BOT_TOKEN=your_manager_bot_token
-COURIER_BOT_TOKEN=your_courier_bot_token
-
-# Server
-PORT=3000
-NODE_ENV=development
-
-# Update Mode (polling by default; webhook is optional)
-UPDATES_MODE=polling
-```
-
-### 3. Initialize Database
-
-```bash
+npm ci
 npx prisma generate
 npx prisma migrate deploy
-```
-
-> The command above is only for creating a new local development database.
-> Never use it directly against production; production must use the verified
-> backup-and-deploy flow under [Deployment](#deployment).
-
-### 4. Seed Database (Add Manager)
-
-Before using the manager bot, you need to add yourself as a manager:
-
-```bash
 npm run db:seed
-```
-
-Or manually insert via Prisma Studio:
-
-```bash
-npx prisma studio
-```
-
-Then add a record to the `Manager` table:
-- `tgUserId`: Your Telegram user ID (get it from @userinfobot)
-- `role`: `ADMIN`
-- `isActive`: `true`
-
-### 5. Start Development Server
-
-```bash
 npm run dev
 ```
 
----
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | - | Prisma connection string |
-| `CLIENT_BOT_TOKEN` | Yes | - | Telegram bot token for client bot |
-| `CLIENT_BOT_USERNAME` | Recommended | - | Public client-bot username used to generate referral links |
-| `MANAGER_BOT_TOKEN` | Yes | - | Telegram bot token for manager bot |
-| `COURIER_BOT_TOKEN` | Yes | - | Telegram bot token for courier bot |
-| `ADMIN_TG_USER_ID` | Yes | - | Telegram user ID for the admin manager (seed) |
-| `COURIER_TG_USER_ID` | No | - | Telegram user ID for the courier (seed) |
-| `PORT` | No | `3000` | HTTP server port |
-| `NODE_ENV` | No | `development` | Environment mode |
-| `UPDATES_MODE` | No | `polling` | `polling` or `webhook`; legacy `auto` is treated as `polling` |
-| `ENABLE_QUEUES` | No | `false` | Enable Redis/BullMQ workers |
-| `REDIS_URL` | If queues | - | Redis connection string |
-| `CHECKOUT_CHANNEL_ID` | If queues | - | Telegram channel for invite links |
-
-### Getting Bot Tokens
-
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot` and follow the prompts
-3. Create three bots: one for clients, one for managers, one for couriers
-4. Copy the tokens to your `.env` file
-
-### Getting Your Telegram User ID
-
-To use the manager bot, you need your Telegram user ID:
-
-1. Message [@userinfobot](https://t.me/userinfobot) on Telegram
-2. It will reply with your user ID (a number like `123456789`)
-
----
-
-## Database Schema
-
-### Core Models
-
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│     User     │────▶│     Cart     │────▶│   CartItem   │
-│              │     │              │     │              │
-│ - tgUserId   │     │ - state      │     │ - qty        │
-│ - username   │     │ - userId     │     │ - unitPrice  │
-│ - referral   │     │              │     │              │
-└──────────────┘     └──────────────┘     └──────────────┘
-       │                    │
-       │                    ▼
-       │             ┌──────────────┐     ┌──────────────┐
-       │             │    Order     │────▶│  OrderItem   │
-       │             │              │     │              │
-       │             │ - status     │     │ - qty        │
-       │             │ - subtotal   │     │ - lineTotal  │
-       │             │ - grandTotal │     │              │
-       │             └──────────────┘     └──────────────┘
-       │                    │
-       ▼                    ▼
-┌──────────────┐     ┌──────────────┐
-│   Manager    │     │  OrderEvent  │
-│              │     │              │
-│ - role       │     │ - eventType  │
-│ - isActive   │     │ - actorType  │
-└──────────────┘     └──────────────┘
-```
-
-### Key Enums
-
-**CartState**: `ACTIVE` | `SUBMITTED` | `EXPIRED`
-
-**OrderStatus**:
-- `AWAITING_MANAGER_APPROVAL` - Order submitted, waiting for review
-- `APPROVED` - Manager approved the order
-- `INVITE_SENT` - Invite link sent to customer
-- `AWAITING_RECEIPT` - Waiting for payment receipt
-- `COMPLETED` - Order completed
-- `CANCELLED` - Order rejected/cancelled
-
-**ManagerRole**: `STAFF` | `ADMIN`
-
----
-
-## Client Bot
-
-The client bot serves customers who want to browse products and place orders.
-
-### Commands
-
-| Command | Usage | Description |
-|---------|-------|-------------|
-| `/start` | `/start` | Register and welcome message |
-| `/products` | `/products` | View available products (up to 10) |
-| `/add` | `/add <productId> <qty>` | Add item to cart |
-| `/remove` | `/remove <productId>` | Remove item from cart |
-| `/cart` | `/cart` | View cart contents and subtotal |
-| `/checkout` | `/checkout` | Submit order for approval |
-
-### Example Flow
-
-```
-User: /start
-Bot: Welcome to the Amoosh shop (TS bot skeleton).
-
-User: /products
-Bot: Available products:
-     Widget A - 10000 IRR
-     Widget B - 15000 IRR
-
-User: /add 1 2
-Bot: Added to cart: Widget A x 2.
-
-User: /cart
-Bot: Your cart:
-     Widget A x 2 = 20000 IRR
-     
-     Subtotal: 20000
-
-User: /checkout
-Bot: Order submitted! ID: 1, total: 20000.
-```
-
-### How It Works
-
-1. **Registration**: On `/start`, the bot creates/updates the user record with their Telegram info
-2. **Referral Access**: New users enter a one-time referral code to unlock the bot. After one successful use, that code expires.
-3. **Cart Management**: Users have one active cart at a time; adding items creates or updates cart
-4. **Price Snapshot**: Cart items store the price at time of addition (protects against price changes)
-5. **Checkout**: Creates an order, links it to the cart, marks cart as SUBMITTED
-
----
-
-## Manager Bot
-
-The manager bot is for administrators to review and process customer orders.
-
-### Authorization
-
-Only users in the `Manager` table with `isActive: true` can use this bot. Others receive:
-> "You are not authorized to use this bot."
-
-### Commands
-
-| Command | Usage | Description |
-|---------|-------|-------------|
-| `/start` | `/start` | Show pending orders count |
-| `/pending_orders` | `/pending_orders` | List up to 10 pending orders |
-| `/approve_order` | `/approve_order <orderId>` | Approve an order |
-| `/reject_order` | `/reject_order <orderId>` | Reject an order |
-
-### Example Flow
-
-```
-Manager: /start
-Bot: Hello, manager. Pending orders: 3.
-
-Manager: /pending_orders
-Bot: Pending orders:
-     #1 – user 5 – total 20000
-     #2 – user 8 – total 15000
-     #3 – user 5 – total 35000
-
-Manager: /approve_order 1
-Bot: Order #1 approved.
-
-Manager: /reject_order 2
-Bot: Order #2 rejected.
-```
-
-### How It Works
-
-1. **Authentication**: Each command checks if the sender is an active manager
-2. **Order Review**: Managers see order ID, user ID, and total amount
-3. **Approval**: Changes status to `APPROVED`, creates an `order_approved` event
-4. **Rejection**: Changes status to `CANCELLED`, creates an `order_rejected` event
-5. **Event Tracking**: All actions are logged with actor type and ID
-
----
-
-## Order Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ORDER LIFECYCLE                           │
-└─────────────────────────────────────────────────────────────────┘
-
-Customer                          System                        Manager
-   │                                │                              │
-   │ /checkout                      │                              │
-   ├───────────────────────────────▶│                              │
-   │                                │ Create Order                 │
-   │                                │ Status: AWAITING_APPROVAL    │
-   │                                │                              │
-   │                                │◀─────────────────────────────┤
-   │                                │     /pending_orders          │
-   │                                │                              │
-   │                                │     /approve_order <id>      │
-   │                                │◀─────────────────────────────┤
-   │                                │                              │
-   │                                │ Status: APPROVED             │
-   │                                │                              │
-   │                                │ [If queues enabled]          │
-   │                                │ Worker creates invite link   │
-   │                                │ Status: INVITE_SENT          │
-   │                                │                              │
-   │◀───────────────────────────────│                              │
-   │ "Your order approved!          │                              │
-   │  Join: t.me/+abc123"           │                              │
-   │                                │                              │
-```
-
----
-
-## Background Jobs
-
-Background jobs are **optional** and require Redis. They handle:
-
-### 1. Send Invites Worker (`send_invites`)
-
-- **Frequency**: Every 60 seconds
-- **Purpose**: Find approved orders without invite links, create invite, notify customer
-- **Process**:
-  1. Query orders with `status: APPROVED` and `inviteLink: null`
-  2. Create Telegram channel invite link
-  3. Update order with invite link and status `INVITE_SENT`
-  4. Send message to customer with the invite link
-
-### 2. Cleanup Carts Worker (`cleanup_carts`)
-
-- **Frequency**: Every hour
-- **Purpose**: Expire abandoned shopping carts
-- **Process**:
-  1. Find carts with `state: ACTIVE` and `updatedAt` older than 24 hours
-  2. Update state to `EXPIRED`
-
-### Enabling Background Jobs
+Minimum `.env` configuration:
 
 ```env
-ENABLE_QUEUES=true
-REDIS_URL=redis://localhost:6379
-CHECKOUT_CHANNEL_ID=@your_checkout_channel
+NODE_ENV=development
+DATABASE_URL=file:./dev.db
+CLIENT_BOT_TOKEN=your_client_bot_token
+CLIENT_BOT_USERNAME=your_client_bot_username
+MANAGER_BOT_TOKEN=your_manager_bot_token
+COURIER_BOT_TOKEN=your_courier_bot_token
+ADMIN_TG_USER_ID=your_telegram_user_id
 ```
 
----
+Relative SQLite URLs are resolved against `prisma/schema.prisma`, so
+`file:./dev.db` points to `prisma/dev.db`. Use an absolute URL in production,
+for example `file:/srv/amoosh/prisma/prod.db`.
 
-## HTTP Endpoints
+### Environment variables
 
-These endpoints are only used when `UPDATES_MODE=webhook`. In the recommended polling mode, the app does not start the Fastify webhook listener.
+| Variable                 |         Required | Purpose                                             |
+| ------------------------ | ---------------: | --------------------------------------------------- |
+| `DATABASE_URL`           |              Yes | SQLite connection URL                               |
+| `CLIENT_BOT_TOKEN`       |              Yes | Customer bot token from BotFather                   |
+| `CLIENT_BOT_USERNAME`    |      Recommended | Public customer-bot username used in referral links |
+| `MANAGER_BOT_TOKEN`      |              Yes | Manager bot token                                   |
+| `COURIER_BOT_TOKEN`      |              Yes | Courier bot token                                   |
+| `ADMIN_TG_USER_ID`       | For manager seed | Telegram ID of the initial administrator            |
+| `COURIER_TG_USER_ID`     |               No | Telegram ID of an optional seeded courier           |
+| `CHECKOUT_IMAGE_FILE_ID` |               No | Fallback Telegram file ID for payment instructions  |
+| `SEED_PRODUCTS`          |               No | Set to `true` when running `db:seed:all`            |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check (`{ "status": "ok" }`) |
-| `POST` | `/webhook/client` | Telegram webhook for client bot |
-| `POST` | `/webhook/manager` | Telegram webhook for manager bot |
-| `POST` | `/webhook/courier` | Telegram webhook for courier bot |
+## Order workflow
 
-### Setting Up Webhooks
+Checkout is automatic; a manager does **not** approve a newly submitted order.
 
-If you explicitly choose webhook mode, configure Telegram to send updates to your server:
+1. The client confirms their phone, Telegram location, and address.
+2. Checkout atomically claims the active cart and verifies/decrements stock.
+3. The order is created with status `APPROVED`.
+4. Payment instructions are sent immediately.
+5. The order moves to `AWAITING_RECEIPT` while the customer pays.
+6. A manager approves or rejects the uploaded receipt.
+7. An approved receipt moves the order to `PAID`; delivery can then be assigned.
+8. A courier completes the delivery and the order becomes `COMPLETED`.
 
-```bash
-# Client bot webhook
-curl "https://api.telegram.org/bot<CLIENT_TOKEN>/setWebhook" \
-  -d "url=https://your-domain.com/webhook/client"
+`AWAITING_MANAGER_APPROVAL` remains in the database enum for historical orders
+and backward compatibility. It is not part of the current checkout path.
 
-# Manager bot webhook
-curl "https://api.telegram.org/bot<MANAGER_TOKEN>/setWebhook" \
-  -d "url=https://your-domain.com/webhook/manager"
+Stock changes and order creation happen in a transaction. Cancelling an
+unfulfilled order restores finite stock exactly once.
 
-# Courier bot webhook
-curl "https://api.telegram.org/bot<COURIER_TOKEN>/setWebhook" \
-  -d "url=https://your-domain.com/webhook/courier"
+## Application structure
+
+```text
+src/
+├── bots/
+│   ├── client/        customer interaction flows
+│   ├── manager/       manager flows and extracted feature modules
+│   └── courier/       delivery flows
+├── config/            validated environment and Telegram command menus
+├── infra/
+│   ├── scheduler/     in-process recurring work
+│   └── telegram/      grammY bot construction
+├── jobs/              scheduled job implementations
+├── services/          orders, discounts, announcements, notifications, analytics
+├── utils/             shared formatting, keyboards, sessions, and safe replies
+└── main.ts            polling runtime and graceful shutdown
+
+prisma/
+├── migrations/        ordered SQLite migrations
+├── schema.prisma      application schema
+└── seed.ts            manager, courier, and optional sample-data seed
 ```
 
----
+The manager interaction layer is being split by feature. Support conversation
+resolution and reply validation live in `manager-support.ts`; future changes
+should continue this pattern instead of adding unrelated behavior to
+`manager-bot-interactive.ts`.
+
+## Scheduled work
+
+The runtime uses a guarded in-process scheduler. It expires active carts that
+have been idle for 24 hours and runs the check once per hour. Only one
+application instance should run for a given set of bot tokens and SQLite
+database.
 
 ## Development
 
-### Project Structure
-
-```
-src/
-├── bots/
-│   ├── client/
-│   │   ├── client-bot-handlers.ts      # Client bot commands
-│   │   └── client-bot-handlers.test.ts
-│   └── manager/
-│       ├── manager-bot-handlers.ts     # Manager bot commands
-│       └── manager-bot-handlers.test.ts
-├── config/
-│   └── app-config.ts                   # Environment config
-├── infra/
-│   ├── db/                             # Database utilities
-│   ├── http/
-│   │   └── server.ts                   # Fastify server
-│   ├── queue/
-│   │   └── bullmq.ts                   # Queue setup
-│   └── telegram/
-│       ├── bots.ts                     # Bot creation
-│       └── webhooks.ts                 # Webhook handlers
-├── jobs/
-│   ├── send-invites.worker.ts          # Invite worker
-│   └── cleanup-carts.worker.ts         # Cart cleanup worker
-├── services/
-│   ├── order-service.ts                # Order creation logic
-│   ├── discount-service.ts             # Discount calculations
-│   └── invite-service.ts               # Invite link creation
-└── main.ts                             # Application entry point
+```bash
+npm run dev            # run from TypeScript
+npm run typecheck      # TypeScript validation
+npm run lint           # ESLint
+npm test               # test suite
+npm run test:coverage  # coverage report and configured thresholds
+npm run build          # compile to dist/
+npm start              # run compiled output
 ```
 
-### NPM Scripts
+Tests recreate `prisma/test.db` from every checked-in migration. Generated
+coverage reports and release archives are intentionally ignored by Git.
 
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start development server with hot reload |
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm start` | Run compiled production build |
-| `npm test` | Run all tests |
-| `npm run test:coverage` | Run tests with coverage report |
-| `npm run lint` | Run ESLint |
-| `npm run typecheck` | Run TypeScript type checking |
+All user-facing text is centralized in `src/i18n/texts.ts`. Telegram command
+menus are defined in `src/config/bot-commands.ts`; the bots currently expose
+only `/start` and use inline keyboards for navigation.
 
-### Running Tests
+## Database changes
+
+Create a new ordered migration for every schema or one-time data change. Do
+not perform migration-style writes during application startup. The username
+fallback is therefore applied once by
+`20260919120000_backfill_usernames` rather than scanning users on every boot.
+
+For a disposable local database:
 
 ```bash
-# Run all tests
-npm test
-
-# Run with coverage
-npm run test:coverage
-
-# Run specific test file
-npx vitest run src/bots/client/client-bot-handlers.test.ts
+npx prisma migrate deploy
 ```
 
-### Customizing Bot Texts
+For production, use the guarded workflow below.
 
-All user-facing messages are centralized in `src/i18n/texts.ts`. To customize:
+## Production deployment
 
-1. Open `src/i18n/texts.ts`
-2. Find the text you want to modify
-3. Edit the return value of the function
-
-**Example:**
-```typescript
-// Before
-welcome: () => "Welcome to the Amoosh shop! Use /help to see available commands.",
-
-// After
-welcome: () => "Welcome to our store! Type /help for assistance.",
-```
-
-**Text categories:**
-- `ClientTexts` - Customer-facing bot messages
-- `ManagerTexts` - Manager bot messages
-- `NotificationTexts` - Background worker notifications
-
-### Adding New Commands
-
-1. **Define the command** in `src/config/bot-commands.ts`:
-```typescript
-export const CLIENT_BOT_COMMANDS: BotCommand[] = [
-  // ... existing commands
-  { command: "mycommand", description: "My new command" },
-];
-```
-
-2. **Add the handler** in the appropriate bot handlers file:
-```typescript
-bot.command("mycommand", async (ctx) => {
-  const user = await ensureUser(ctx, prisma);
-  // Your logic here
-  await ctx.reply(ClientTexts.myCommandResponse());
-});
-```
-
-3. **Add texts** to `src/i18n/texts.ts`:
-```typescript
-export const ClientTexts = {
-  // ... existing texts
-  myCommandResponse: () => "Response for my command",
-};
-```
-
-4. **Add tests** in the corresponding test file.
-
----
-
-## Deployment
-
-> **Stop the application before migrating.** SQLite allows only one writer at
-> a time; a running bot can hold a write lock or be mid-transaction. Use
-> `pm2 stop amoosh-telegram-bots` (or stop the service) before deploying and
-> start it again afterwards. The deploy script also refuses to run when the
-> database file is missing, so it can never accidentally create a fresh empty
-> production database next to the real one.
-
-Production deploy for this release (adds announcement media columns and non-destructive referral lookup indexes):
+SQLite supports only one writer reliably for this deployment model. Stop the
+application before migration and keep one polling process per bot token.
 
 ```bash
-# Preflight from the exact commit that will be deployed
 npm ci
 npm run typecheck
 npm run lint
 npm test
 npm run build
-git status --short                 # must be empty
 
-# Maintenance window
-pm2 stop amoosh-telegram-bots      # stop the app FIRST
-npm run db:migrate                 # backup -> verify -> status gate -> deploy
-pm2 start amoosh-telegram-bots     # start ONLY after migration succeeds
+pm2 stop amoosh-telegram-bots
+npm run db:migrate
+pm2 start amoosh-telegram-bots
 pm2 logs amoosh-telegram-bots --lines 100
 ```
 
-Use an absolute production `DATABASE_URL` such as
-`file:/srv/amoosh/prisma/prod.db`. The application normalizes relative SQLite
-URLs before creating PrismaClient, but an absolute path is easier to audit and
-prevents ambiguity in shell tools.
+`npm run db:migrate`:
 
-`npm run db:migrate` (`scripts/safe-prisma-deploy.sh`) performs, in order:
+1. resolves and validates the exact SQLite file;
+2. verifies integrity and the Prisma migration ledger;
+3. creates and verifies an online backup;
+4. permits only the expected release migrations;
+5. deploys migrations and performs post-deploy integrity and row-count checks.
 
-1. **Location + integrity checks**: resolves the real SQLite file from
-   `DATABASE_URL` (refuses a missing file, never mints a fresh DB), verifies
-   `PRAGMA integrity_check`, and checks the `_prisma_migrations` ledger for
-   failed/in-progress rows and tampered or deleted migration files.
-2. **Expected-migration guard**: compares local `prisma/migrations/*` directory
-   names against the applied rows in the target database and allows pending
-   migrations only from this release set: `20260819090000_add_announcement_media`
-   and `20260824120000_add_referral_query_indexes`. One may already be applied;
-   after deployment both must be present in the ledger. It aborts if any
-   historical migration is missing/unapplied,
-   any applied migration file is missing locally, or any extra pending
-   migration exists. If the release migration is already applied (nothing
-   pending), it aborts unless you re-run with `ALLOW_NOOP=1`; future releases
-   override the expectation with `EXPECTED_PENDING_MIGRATIONS` (space-
-   separated list of migration names).
-3. **Verified backup first**: creates a crash-consistent backup via the SQLite
-   online backup API and verifies it (integrity + per-table fingerprint
-   against the source). `prisma migrate status` gates the deploy only after
-   the backup is verified, so a failure never leaves you without a recovery
-   artifact. The run prints the backup's absolute path and SHA-256.
-4. **Deploy + post-checks**: snapshots per-table row counts before/after
-   `prisma migrate deploy`, aborts if any pre-existing table's row count
-   changes, then re-checks integrity, migration status, and that the expected
-   migration is recorded as applied.
+The default expected release set is:
 
-Backup only (needs no Prisma CLI — works even if the CLI is broken):
+- `20260819090000_add_announcement_media`
+- `20260824120000_add_referral_query_indexes`
+- `20260919120000_backfill_usernames`
+
+If the target already has some of these migrations, the remaining subset is
+accepted. Override `EXPECTED_PENDING_MIGRATIONS` for a later release. A fully
+migrated no-op requires `ALLOW_NOOP=1`.
+
+Backup without deploying:
 
 ```bash
-npm run db:backup                  # integrity/ledger checks + backup + verify + exit
+npm run db:backup
 ```
 
-### Rollback
-
-The deploy command prints the verified pre-migration backup path and SHA-256.
-If post-deploy checks or application smoke tests fail:
-
-```bash
-pm2 stop amoosh-telegram-bots
-
-# Preserve the failed database for diagnosis, then restore the verified backup.
-cp /absolute/path/to/prisma/prod.db /absolute/path/to/prisma/prod.failed.db
-sqlite3 /absolute/path/to/prisma/prod.db \
-  ".restore '/absolute/path/from-deploy-output/backup.db'"
-sqlite3 /absolute/path/to/prisma/prod.db "PRAGMA integrity_check;"
-
-# Check out/build the previous application commit before restarting it.
-pm ci
-npm run build
-pm2 start amoosh-telegram-bots
-```
-
-Never restore while any bot process is running, and never guess the database or
-backup path—copy both absolute paths from the deploy output.
-
-### Production Checklist
-
-1. ✅ Set `NODE_ENV=production`
-2. ✅ Use the safe deploy script: stop the app, then run `npm run db:migrate`,
-   which verifies integrity and the migration ledger, permits pending migrations
-   only from `20260819090000_add_announcement_media` and
-   `20260824120000_add_referral_query_indexes` (aborting on any other pending
-   migration; override with `EXPECTED_PENDING_MIGRATIONS`, clean no-op only
-   with `ALLOW_NOOP=1`), creates and verifies a backup BEFORE `prisma migrate
-   status` gates the deploy, refuses a missing database file, and aborts if a
-   migration changes any existing table's row counts (backup only:
-   `npm run db:backup`)
-3. ✅ Set `UPDATES_MODE=polling`
-4. ✅ Run a single app instance per bot token while using polling
-5. ✅ Set up Redis if using background jobs
-6. ✅ Add manager(s) to database
-7. ✅ Seed optional courier(s) if delivery workflow is enabled
-
-### PM2 Configuration
-
-Create `ecosystem.config.cjs`:
+Example PM2 configuration:
 
 ```js
 module.exports = {
@@ -663,77 +200,67 @@ module.exports = {
     {
       name: "amoosh-telegram-bots",
       script: "./dist/main.js",
-      cwd: "/path/to/apps/telegram-bots",
+      cwd: "/srv/amoosh",
       instances: 1,
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
-        PORT: "3000",
-        // Prefer an absolute production path. The app also pins relative file:
-        // URLs to prisma/schema.prisma's directory before PrismaClient starts.
-        DATABASE_URL: "file:/absolute/path/to/apps/telegram-bots/prisma/prod.db",
+        DATABASE_URL: "file:/srv/amoosh/prisma/prod.db",
         CLIENT_BOT_TOKEN: "<token>",
+        CLIENT_BOT_USERNAME: "<username>",
         MANAGER_BOT_TOKEN: "<token>",
         COURIER_BOT_TOKEN: "<token>",
-        UPDATES_MODE: "polling",
-        ENABLE_QUEUES: "true",
-        REDIS_URL: "redis://localhost:6379",
-        CHECKOUT_CHANNEL_ID: "@your_channel",
       },
     },
   ],
 };
 ```
 
-Deploy:
+### Rollback
 
-```bash
-npm run build
-pm2 start ecosystem.config.cjs
-pm2 save
+The deploy script prints the verified backup path and SHA-256. If deployment
+checks fail, leave the service stopped, preserve the failed database, restore
+the printed backup with SQLite's `.restore`, check `PRAGMA integrity_check`,
+then rebuild the previous commit before restarting.
+
+## Branch workflow
+
+- `main` — production-only history. Merge into it only for a production release.
+- `dev` — integration branch for changes that have passed automated checks.
+- `feature/*` or `fix/*` — short-lived work branches created from `dev`.
+- `codex/*` — short-lived Codex work branches, also created from `dev`.
+
+Normal flow:
+
+```text
+feature/* or fix/*  ->  dev  ->  main
 ```
 
----
+Tag production commits on `main` (for example `v1.4.0`). Do not maintain a
+separate long-lived `prod` branch; `main` plus release tags gives the same
+signal with less branch drift.
 
 ## Troubleshooting
 
-### Bot Not Responding
+### A bot does not respond
 
-1. **Check bot token**: Ensure tokens are correct in `.env`
-2. **Check updates mode**: Use `UPDATES_MODE=polling`
-3. **Check logs**: Look for errors in console output
-4. **Avoid duplicate polling**: Only one running process should poll a given Telegram bot token
+- Verify its token and network access.
+- Ensure no other process is polling the same bot token.
+- Check the application logs and confirm the SQLite path is correct.
 
-### Manager Bot Says "Not Authorized"
+### Manager access is denied
 
-1. **Check Manager table**: Ensure your Telegram user ID is in the database
-2. **Verify user ID**: Use @userinfobot to confirm your ID
-3. **Check isActive**: Manager record must have `isActive: true`
+- Confirm the Telegram ID exists in `Manager`.
+- Confirm the manager record has `isActive = true`.
+- Run `npm run db:seed` with `ADMIN_TG_USER_ID` for the initial admin.
 
-### Orders Not Getting Invite Links
+### Database errors
 
-1. **Enable queues**: Set `ENABLE_QUEUES=true`
-2. **Check Redis**: Ensure Redis is running and `REDIS_URL` is correct
-3. **Check channel ID**: `CHECKOUT_CHANNEL_ID` must be a valid channel
-4. **Bot permissions**: Bot must be admin in the channel
-
-### Database Errors
-
-1. **Run migrations**: stop the app, then `npm run db:migrate` (safe script:
-   backup + expected-migration guard + status gate + deploy). Fast paths only
-   when the safe script is unusable:
-   `npx prisma generate && npx prisma migrate deploy`
-2. **Check connection**: Verify `DATABASE_URL` is correct
-3. **Generate client**: `npx prisma generate`
-
-### Test Failures
-
-1. **Test database setup**: Vitest recreates `prisma/test.db` from the checked-in migrations before each test file
-2. **Missing tools**: Run `npm ci` before tests so Vitest, TypeScript, ESLint, and Prisma are installed
-3. **Skipped tests**: One legacy command-handler test is still skipped and should be revisited during the refactor
-
----
+- Stop the running bot before production migrations.
+- Verify `DATABASE_URL` points to the intended existing file.
+- Run `npx prisma generate` after dependency or schema changes.
+- Use `npm run db:migrate` in production so backup and integrity checks run.
 
 ## License
 
-Private - All rights reserved
+Private — all rights reserved.

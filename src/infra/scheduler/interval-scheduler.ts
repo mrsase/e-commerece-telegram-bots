@@ -10,7 +10,7 @@ export interface Scheduler {
 }
 
 /**
- * Simple setInterval-based scheduler that replaces BullMQ.
+ * Simple in-process scheduler for the single-instance polling runtime.
  * Runs periodic jobs using plain Node.js timers.
  */
 function createGuardedJob(
@@ -22,7 +22,9 @@ function createGuardedJob(
   let running = false;
   const timer = setInterval(async () => {
     if (running) {
-      console.warn(`[Scheduler] ${name} skipped — previous run still in progress`);
+      console.warn(
+        `[Scheduler] ${name} skipped — previous run still in progress`,
+      );
       return;
     }
     running = true;
@@ -41,12 +43,17 @@ export function startScheduler(deps: SchedulerDeps): Scheduler {
   const timers: ReturnType<typeof setInterval>[] = [];
 
   // ── Cleanup idle carts: every hour ──
-  createGuardedJob("cleanup-carts", async () => {
-    await expireIdleCarts(
-      { prisma: deps.prisma },
-      { idleThresholdMs: 24 * 60 * 60 * 1000 },
-    );
-  }, 60 * 60 * 1000, timers);
+  createGuardedJob(
+    "cleanup-carts",
+    async () => {
+      await expireIdleCarts(
+        { prisma: deps.prisma },
+        { idleThresholdMs: 24 * 60 * 60 * 1000 },
+      );
+    },
+    60 * 60 * 1000,
+    timers,
+  );
 
   console.log("✓ Background scheduler started (setInterval-based)");
 

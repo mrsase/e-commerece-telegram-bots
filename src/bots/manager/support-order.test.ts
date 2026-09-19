@@ -4,7 +4,7 @@ import {
   extractReplyDraft,
   gateSupportReply,
   openOrderSupportConversation,
-} from "./manager-bot-interactive.js";
+} from "./manager-support.js";
 
 const prisma = new PrismaClient();
 

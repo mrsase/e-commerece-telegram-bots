@@ -23,14 +23,15 @@
 #   5. Migration alignment guard (deploy mode only): compares the local
 #      migration directory names against the SUCCESSFUL rows in the target
 #      database's _prisma_migrations ledger and allows pending migrations only
-#      from the additive migration set shipped by this release:
+#      from the migration set shipped by this release:
 #        20260819090000_add_announcement_media
 #        20260824120000_add_referral_query_indexes
+#        20260919120000_backfill_usernames
 #      It aborts if:
 #        - any historical migration is missing from the database (unapplied),
 #        - any DB-applied migration file is missing locally,
 #        - any extra/unexpected pending migration exists,
-#        - both release migrations are already applied with nothing pending --
+#        - all release migrations are already applied with nothing pending --
 #          i.e. a no-op deploy. A clean no-op is allowed ONLY with the explicit
 #          ALLOW_NOOP flag.
 #      Future releases override the expectation with EXPECTED_PENDING_MIGRATIONS
@@ -50,7 +51,7 @@
 #      aborts and points at the verified backup.
 #   9. Snapshots per-table row counts immediately before `prisma migrate
 #      deploy` and compares them afterwards. Migrations in this project are
-#      additive; if ANY pre-existing non-system table's row count changes
+#      row-count preserving; if ANY pre-existing non-system table's row count changes
 #      (or a table disappears), the script aborts loudly -- that is the
 #      signature of a destructive / unexpected migration.
 #  10. Post-checks after a deploy: integrity_check, `prisma migrate status`
@@ -75,7 +76,8 @@
 #                        Space-separated list of migration names allowed to be
 #                        pending before deploy. Safe default for THIS release:
 #                        20260819090000_add_announcement_media and
-#                        20260824120000_add_referral_query_indexes.
+#                        20260824120000_add_referral_query_indexes, and
+#                        20260919120000_backfill_usernames.
 #                        Set explicitly for future releases (or for a fresh
 #                        database bootstrapping all migrations at once).
 #   ALLOW_NOOP           Any non-empty value allows the otherwise-aborted
@@ -103,9 +105,9 @@ BACKUP_DIR="${DATABASE_BACKUP_DIR:-$PROJECT_ROOT/backups/database}"
 TIMESTAMP=$(date -u '+%Y%m%dT%H%M%SZ')
 
 # Migration alignment guard configuration. Safe default: pending migrations
-# may only come from this release's two additive migrations. This also safely
-# supports a target where one of the two is already applied.
-EXPECTED_PENDING_MIGRATIONS="${EXPECTED_PENDING_MIGRATIONS:-20260819090000_add_announcement_media 20260824120000_add_referral_query_indexes}"
+# may only come from this release's known migrations. This safely supports a
+# target where any earlier migration in the set is already applied.
+EXPECTED_PENDING_MIGRATIONS="${EXPECTED_PENDING_MIGRATIONS:-20260819090000_add_announcement_media 20260824120000_add_referral_query_indexes 20260919120000_backfill_usernames}"
 NOOP=0
 
 # Work from the project root: the Prisma CLI discovers schema.prisma, .env
@@ -765,14 +767,14 @@ if [ -s "$TMPDIR_PRIVATE/snapshot-pre.txt" ]; then
   if [ "$ec" -ne 0 ] || [ -n "$out" ]; then
     echo "safe-prisma-deploy: ERROR: row counts CHANGED across the migration." >&2
     echo "$out" >&2
-    echo "safe-prisma-deploy: Migrations in this project are expected to be additive only." >&2
+    echo "safe-prisma-deploy: Release migrations must preserve row counts." >&2
     echo "safe-prisma-deploy: Restore the database from the backup created by this run:" >&2
     echo "  $BACKUP_FILE" >&2
     echo "  SHA-256: $BACKUP_HASH" >&2
     echo "  restore with: sqlite3 '$DB_FILE' \".restore '$BACKUP_FILE'\"" >&2
     exit 1
   fi
-  info "row counts unchanged for every pre-existing table (migration is additive only)"
+  info "row counts unchanged for every pre-existing table"
 else
   info "no pre-existing tables before deploy (fresh database); row-count check trivially passes"
 fi
@@ -808,5 +810,5 @@ echo " Deploy complete."
 echo " Database:      $DB_FILE"
 echo " Backup:        $BACKUP_FILE"
 echo " Backup SHA-256: $BACKUP_HASH"
-echo " Migrations:    applied; database schema is up to date; no data changes."
+echo " Migrations:    applied; database schema is up to date; row counts preserved."
 echo "==============================================================================="

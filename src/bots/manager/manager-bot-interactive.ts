@@ -12,6 +12,12 @@ import { formatPrice } from "../../utils/format-price.js";
 
 import { SessionStore } from "../../utils/session-store.js";
 import { crossBotFile } from "../../utils/cross-bot-file.js";
+import {
+  extractReplyDraft,
+  gateSupportReply,
+  openOrderSupportConversation,
+  resolveOrCreateOpenConversation,
+} from "./manager-support.js";
 
 // Session state for multi-step flows
 type SessionState = 
@@ -66,74 +72,6 @@ const managerSessions = new SessionStore<ManagerSession>();
  */
 const MAX_CROSS_BOT_MEDIA_BYTES = 20 * 1024 * 1024;
 const REFERRAL_TREE_PAGE_SIZE = 6;
-
-/**
- * Serialize per-user conversation resolution so two managers clicking
- * support for the same customer at the same moment cannot both observe
- * "no open conversation" and create a duplicate. In-process only — a
- * multi-instance deployment would need a DB constraint (schema change) to
- * close the remaining gap.
- */
-const supportConversationLocks = new Map<number, Promise<unknown>>();
-
-function withConversationUserLock<T>(userId: number, fn: () => Promise<T>): Promise<T> {
-  const previous = supportConversationLocks.get(userId) ?? Promise.resolve();
-  // Run `fn` on both settle paths so a failed attempt never wedges the chain.
-  const next = previous.then(fn, fn);
-  const tracked = next.then(
-    (value) => {
-      supportConversationLocks.delete(userId);
-      return value;
-    },
-    (error) => {
-      supportConversationLocks.delete(userId);
-      throw error;
-    },
-  );
-  supportConversationLocks.set(userId, tracked);
-  return tracked;
-}
-
-/**
- * Decide what a support-reply confirmation may do for the given conversation.
- *
- * - Missing conversation or a missing/foreign reply draft → `missing-draft`.
- * - Closed conversation → `reopen-required`: the reply must NOT be written or
- *   sent; the manager gets a deliberate reopen-vs-cancel chooser instead.
- * - Open conversation with a draft → `send`.
- */
-export type SupportReplyGate =
-  | { kind: "send" }
-  | { kind: "reopen-required" }
-  | { kind: "missing-draft" };
-
-export function gateSupportReply(
-  conversation: { status: SupportConversationStatus } | null,
-  session: { state?: string; data?: Record<string, unknown> } | undefined,
-  conversationId: number,
-): SupportReplyGate {
-  if (!conversation) return { kind: "missing-draft" };
-  if (extractReplyDraft(session, conversationId) === null) return { kind: "missing-draft" };
-  if (conversation.status === SupportConversationStatus.CLOSED) return { kind: "reopen-required" };
-  return { kind: "send" };
-}
-
-/**
- * The draft typed by the manager in the reply → preview flow, but only when
- * the session is currently previewing exactly this conversation. A draft from
- * any other conversation is rejected so a stale preview button cannot send the
- * wrong text into the wrong chat.
- */
-export function extractReplyDraft(
-  session: { state?: string; data?: Record<string, unknown> } | undefined,
-  conversationId: number,
-): string | null {
-  if (session?.state !== "support:reply:preview") return null;
-  if (session.data?.conversationId !== conversationId) return null;
-  const replyText = session.data.replyText;
-  if (typeof replyText !== "string" || !replyText.trim()) return null;
-  return replyText;
-}
 
 interface ManagerBotDeps {
   prisma: PrismaClient;
@@ -800,57 +738,6 @@ async function sendManagerSupportReply(
       .text("« صندوق", "mgr:support"),
   });
   return "sent";
-}
-
-/**
- * Locked resolve-or-create of the customer's open support conversation, without
- * any order link. Used by the user-message shortcut from the user list.
- */
-async function resolveOrCreateOpenConversation(prisma: PrismaClient, userId: number) {
-  return withConversationUserLock(userId, async () => {
-    const existing = await prisma.supportConversation.findFirst({
-      where: { userId, status: SupportConversationStatus.OPEN },
-      orderBy: { createdAt: "desc" },
-    });
-    if (existing) return existing;
-
-    return prisma.supportConversation.create({
-      data: { userId },
-    });
-  });
-}
-
-/**
- * Resolve the support conversation for an order's customer, entering the
- * reply → preview → confirm flow.
- *
- * - No open conversation → a fresh one is created and tied to the order.
- * - An open conversation already exists → it is reused (clients and managers
- *   must never have two live chats with the same customer at once), and its
- *   orderId is updated to the clicked order so the shortcut stays truly
- *   order-linked instead of pointing at an old order.
- * - Closed conversations are never reused; a new open one is created.
- *
- * Resolution is serialized per user (see {@link withConversationUserLock}) to
- * shrink the duplicate-open race between concurrent manager clicks.
- */
-export async function openOrderSupportConversation(prisma: PrismaClient, orderId: number) {
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { userId: true },
-  });
-  if (!order) return null;
-
-  const conversation = await resolveOrCreateOpenConversation(prisma, order.userId);
-  if (conversation.orderId !== orderId) {
-    // Repointing is idempotent (last writer wins) and does not need the lock:
-    // the locked section above guarantees at most one row can exist.
-    return prisma.supportConversation.update({
-      where: { id: conversation.id },
-      data: { orderId },
-    });
-  }
-  return conversation;
 }
 
 /**
