@@ -255,7 +255,7 @@ async function sendPaymentDetailsForOrder(
 
   const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
   const effectiveExpiryMin = await settingsService.getInviteExpiryMinutes(60);
-  const cardNumber = await settingsService.getPaymentCardNumber();
+  const paymentDetails = await settingsService.getPaymentDetails();
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -279,7 +279,7 @@ async function sendPaymentDetailsForOrder(
   const paymentCaption = ChannelTexts.paymentMessage(
     orderId,
     order.grandTotal,
-    cardNumber ?? undefined,
+    paymentDetails,
     order.items[0]?.product?.currency ?? "IRR",
   );
 

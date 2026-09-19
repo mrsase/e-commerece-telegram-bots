@@ -69,7 +69,9 @@ Checkout is automatic; a manager does **not** approve a newly submitted order.
 1. The client confirms their phone, Telegram location, and address.
 2. Checkout atomically claims the active cart and verifies/decrements stock.
 3. The order is created with status `APPROVED`.
-4. Payment instructions are sent immediately.
+4. Payment instructions are sent immediately. The manager bot can configure a
+   16-digit card number and holder name, a Sheba number (`IR` + 24 digits) and
+   holder name, or both.
 5. The order moves to `AWAITING_RECEIPT` while the customer pays.
 6. A manager approves or rejects the uploaded receipt.
 7. An approved receipt moves the order to `PAID`; delivery can then be assigned.
@@ -162,10 +164,11 @@ npm run lint
 npm test
 npm run build
 
-pm2 stop amoosh-telegram-bots
+sudo systemctl stop amoosh-telegram-bots
 npm run db:migrate
-pm2 start amoosh-telegram-bots
-pm2 logs amoosh-telegram-bots --lines 100
+sudo systemctl start amoosh-telegram-bots
+sudo systemctl status amoosh-telegram-bots
+sudo journalctl -u amoosh-telegram-bots -n 100 --no-pager
 ```
 
 `npm run db:migrate`:
@@ -192,29 +195,30 @@ Backup without deploying:
 npm run db:backup
 ```
 
-Example PM2 configuration:
+Example systemd unit (`/etc/systemd/system/amoosh-telegram-bots.service`):
 
-```js
-module.exports = {
-  apps: [
-    {
-      name: "amoosh-telegram-bots",
-      script: "./dist/main.js",
-      cwd: "/srv/amoosh",
-      instances: 1,
-      exec_mode: "fork",
-      env: {
-        NODE_ENV: "production",
-        DATABASE_URL: "file:/srv/amoosh/prisma/prod.db",
-        CLIENT_BOT_TOKEN: "<token>",
-        CLIENT_BOT_USERNAME: "<username>",
-        MANAGER_BOT_TOKEN: "<token>",
-        COURIER_BOT_TOKEN: "<token>",
-      },
-    },
-  ],
-};
+```ini
+[Unit]
+Description=Amoosh Telegram bots
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amoosh
+WorkingDirectory=/srv/amoosh
+Environment=NODE_ENV=production
+EnvironmentFile=/srv/amoosh/.env
+ExecStart=/usr/bin/node /srv/amoosh/dist/main.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
+
+Adjust the user and paths to match the server, then run
+`sudo systemctl daemon-reload` and `sudo systemctl enable --now amoosh-telegram-bots`.
 
 ### Rollback
 

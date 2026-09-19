@@ -40,8 +40,12 @@ type SessionState =
   | "settings:image"
   | "settings:expiry"
   | "settings:card"
+  | "settings:card:holder"
+  | "settings:sheba"
+  | "settings:sheba:holder"
   | "settings:deliverymsg"
   | "settings:card:preview"
+  | "settings:sheba:preview"
   | "settings:deliverymsg:preview"
   | "settings:expiry:preview"
   | "courier:add"
@@ -98,6 +102,11 @@ import { referralShareMessage, resolveClientBotUsername } from "../../utils/refe
 import { AnnouncementService, announcementTypeLabel, formatAnnouncement } from "../../services/announcement-service.js";
 import { cancelOrderAndRestoreStock } from "../../services/order-service.js";
 import { formatPhoneForDisplay, normalizeIranianPhone } from "../../utils/phone.js";
+import {
+  normalizePaymentCardNumber,
+  normalizePaymentHolderName,
+  normalizeShebaNumber,
+} from "../../utils/payment-details.js";
 import {
   compactReferralUserLabel,
   referralParentLabelMarkdown,
@@ -643,12 +652,17 @@ async function showSettingsMenu(
 ): Promise<void> {
   const imageFileId = await settingsService.getCheckoutImageFileId(fallbackImageFileId);
   const imageStatus = imageFileId ? "✅ تنظیم شده" : "❌ تنظیم نشده";
-  const cardNumber = await settingsService.getPaymentCardNumber();
-  const cardStatus = cardNumber ? `✅ ${cardNumber}` : undefined;
+  const paymentDetails = await settingsService.getPaymentDetails();
+  const cardStatus = paymentDetails.cardNumber
+    ? `✅ ${paymentDetails.cardNumber}${paymentDetails.cardHolderName ? ` · ${escapeMarkdown(paymentDetails.cardHolderName)}` : " · نام ثبت نشده"}`
+    : undefined;
+  const shebaStatus = paymentDetails.shebaNumber
+    ? `✅ ${paymentDetails.shebaNumber}${paymentDetails.shebaHolderName ? ` · ${escapeMarkdown(paymentDetails.shebaHolderName)}` : " · نام ثبت نشده"}`
+    : undefined;
   const deliveryMsg = await settingsService.getOutForDeliveryMessage();
   const deliveryMsgStatus = deliveryMsg ? "✅ تنظیم شده" : undefined;
 
-  await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, cardStatus, deliveryMsgStatus), {
+  await safeRender(ctx, ManagerTexts.settingsMenuTitle(imageStatus, cardStatus, shebaStatus, deliveryMsgStatus), {
     parse_mode: "Markdown",
     reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
   });
@@ -1161,6 +1175,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         // Search by Telegram ID
         users = await prisma.user.findMany({
           where: { tgUserId: BigInt(query) },
+          include: { usedReferralCode: { select: { createdByManagerId: true } } },
           take: 10,
         });
       } else {
@@ -1173,6 +1188,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
               { lastName: { contains: query } },
             ],
           },
+          include: { usedReferralCode: { select: { createdByManagerId: true } } },
           take: 10,
         });
       }
@@ -1259,10 +1275,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (session.state === "settings:card") {
-      const input = ctx.message.text.trim().replace(/\s+/g, '');
+      const input = ctx.message.text.trim();
 
       if (input === "/delete") {
-        await settingsService.delete(SettingKeys.PAYMENT_CARD_NUMBER);
+        await settingsService.deletePaymentCardDetails();
         managerSessions.delete(ctx.from.id);
 
         const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
@@ -1272,18 +1288,82 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         return;
       }
 
-      if (!/^\d{16}$/.test(input)) {
+      const cardNumber = normalizePaymentCardNumber(input);
+      if (!cardNumber) {
         await ctx.reply(ManagerTexts.settingsCardInvalid());
         return;
       }
 
       managerSessions.set(ctx.from.id, {
-        state: "settings:card:preview",
-        data: { cardNumber: input },
+        state: "settings:card:holder",
+        data: { cardNumber },
       });
-      await ctx.reply(`💳 *پیش‌نمایش شماره کارت پرداخت*\n\n\`${input}\`\n\nاین شماره در پیام پرداخت مشتری نمایش داده می‌شود.`, {
+      await ctx.reply(ManagerTexts.settingsCardHolderAsk());
+      return;
+    }
+
+    if (session.state === "settings:card:holder") {
+      const holderName = normalizePaymentHolderName(ctx.message.text);
+      if (!holderName) {
+        await ctx.reply(ManagerTexts.settingsHolderInvalid());
+        return;
+      }
+
+      const cardNumber = String(session.data?.cardNumber ?? "");
+      managerSessions.set(ctx.from.id, {
+        state: "settings:card:preview",
+        data: { cardNumber, holderName },
+      });
+      await ctx.reply(`💳 *پیش‌نمایش مشخصات کارت*\n\n💳 \`${cardNumber}\`\n👤 ${escapeMarkdown(holderName)}\n\nاین مشخصات در پیام پرداخت مشتری نمایش داده می‌شود.`, {
         parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.settingsConfirm("card"),
+      });
+      return;
+    }
+
+    if (session.state === "settings:sheba") {
+      const input = ctx.message.text.trim();
+
+      if (input === "/delete") {
+        await settingsService.deletePaymentShebaDetails();
+        managerSessions.delete(ctx.from.id);
+
+        const imageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
+        await ctx.reply(ManagerTexts.settingsShebaDeleted(), {
+          reply_markup: ManagerKeyboards.settingsMenu(!!imageFileId),
+        });
+        return;
+      }
+
+      const shebaNumber = normalizeShebaNumber(input);
+      if (!shebaNumber) {
+        await ctx.reply(ManagerTexts.settingsShebaInvalid());
+        return;
+      }
+
+      managerSessions.set(ctx.from.id, {
+        state: "settings:sheba:holder",
+        data: { shebaNumber },
+      });
+      await ctx.reply(ManagerTexts.settingsShebaHolderAsk());
+      return;
+    }
+
+    if (session.state === "settings:sheba:holder") {
+      const holderName = normalizePaymentHolderName(ctx.message.text);
+      if (!holderName) {
+        await ctx.reply(ManagerTexts.settingsHolderInvalid());
+        return;
+      }
+
+      const shebaNumber = String(session.data?.shebaNumber ?? "");
+      managerSessions.set(ctx.from.id, {
+        state: "settings:sheba:preview",
+        data: { shebaNumber, holderName },
+      });
+      await ctx.reply(`🏦 *پیش‌نمایش مشخصات شبا*\n\n🏦 \`${shebaNumber}\`\n👤 ${escapeMarkdown(holderName)}\n\nاین مشخصات در پیام پرداخت مشتری نمایش داده می‌شود.`, {
+        parse_mode: "Markdown",
+        reply_markup: ManagerKeyboards.settingsConfirm("sheba"),
       });
       return;
     }
@@ -1932,7 +2012,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       try {
         const effectiveImageFileId = await settingsService.getCheckoutImageFileId(checkoutImageFileId);
-        const cardNumber = await settingsService.getPaymentCardNumber();
+        const paymentDetails = await settingsService.getPaymentDetails();
 
         // Checkout image was uploaded to the manager bot — file_ids are bot-specific.
         // Download from manager bot and re-upload via client bot.
@@ -1948,7 +2028,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         const paymentCaption = ChannelTexts.paymentMessage(
           orderId,
           order.grandTotal,
-          cardNumber ?? undefined,
+          paymentDetails,
           order.items[0]?.product?.currency ?? "IRR",
         );
 
@@ -2937,6 +3017,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const [users, total] = await Promise.all([
         prisma.user.findMany({
           orderBy: { id: "desc" },
+          include: { usedReferralCode: { select: { createdByManagerId: true } } },
           skip: page * pageSize,
           take: pageSize,
         }),
@@ -3700,18 +3781,19 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       weekStart.setDate(weekStart.getDate() - weekStart.getDay());
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      const [total, verified, active, newToday, newThisWeek, newThisMonth] = await Promise.all([
+      const [total, verified, pending, active, blocked, newToday, newThisWeek, newThisMonth] = await Promise.all([
         prisma.user.count(),
         prisma.user.count({ where: { isVerified: true } }),
+        prisma.user.count({ where: { isVerified: false } }),
         prisma.user.count({ where: { isActive: true, isVerified: true } }),
-        prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
-        prisma.user.count({ where: { createdAt: { gte: weekStart } } }),
-        prisma.user.count({ where: { createdAt: { gte: monthStart } } }),
+        prisma.user.count({ where: { isActive: false } }),
+        prisma.user.count({ where: { isVerified: true, createdAt: { gte: todayStart } } }),
+        prisma.user.count({ where: { isVerified: true, createdAt: { gte: weekStart } } }),
+        prisma.user.count({ where: { isVerified: true, createdAt: { gte: monthStart } } }),
       ]);
-      const blocked = total - active;
 
       await safeRender(ctx, 
-        ManagerTexts.userAnalytics(total, verified, active, blocked, newToday, newThisWeek, newThisMonth),
+        ManagerTexts.userAnalytics(total, verified, pending, active, blocked, newToday, newThisWeek, newThisMonth),
         {
           parse_mode: "Markdown",
           reply_markup: new InlineKeyboard()
@@ -3734,11 +3816,17 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data === "mgr:analytics:referrals" || data === "mgr:referrals:stats") {
-      const [totalCodes, activeCodes, totalUsesResult, referredUsers] = await Promise.all([
+      const [totalCodes, activeCodes, totalUsesResult, referredUsers, managerInvitedUsers] = await Promise.all([
         prisma.referralCode.count(),
         prisma.referralCode.count({ where: { isActive: true } }),
         prisma.referralCode.aggregate({ _sum: { usedCount: true } }),
-        prisma.user.count({ where: { referredById: { not: null } } }),
+        prisma.user.count({ where: { isVerified: true, usedReferralCodeId: { not: null } } }),
+        prisma.user.count({
+          where: {
+            isVerified: true,
+            usedReferralCode: { createdByManagerId: { not: null } },
+          },
+        }),
       ]);
       const totalUses = totalUsesResult._sum.usedCount || 0;
       const avgUses = totalCodes > 0 ? (totalUses / totalCodes).toFixed(1) : "0";
@@ -3760,6 +3848,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           activeCodes,
           totalUses,
           referredUsers,
+          managerInvitedUsers,
           avgUses,
           topReferrer?.createdByUser?.username ? escapeMarkdown(topReferrer.createdByUser.username) : null
         ),
@@ -4241,14 +4330,29 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     if (data.startsWith("mgr:settings:confirm:")) {
-      const kind = parts[3] as "card" | "deliverymsg" | "expiry";
+      const kind = parts[3] as "card" | "sheba" | "deliverymsg" | "expiry";
       const session = managerSessions.get(ctx.from.id);
 
       if (kind === "card" && session?.state === "settings:card:preview") {
         const cardNumber = String(session.data?.cardNumber ?? "");
-        await settingsService.set(SettingKeys.PAYMENT_CARD_NUMBER, cardNumber);
+        const holderName = String(session.data?.holderName ?? "");
+        await settingsService.setPaymentCardDetails(cardNumber, holderName);
         managerSessions.delete(ctx.from.id);
-        await safeRender(ctx, ManagerTexts.settingsCardUpdated(cardNumber), {
+        await safeRender(ctx, ManagerTexts.settingsCardUpdated(cardNumber, holderName), {
+          parse_mode: "Markdown",
+          reply_markup: ManagerKeyboards.settingsMenu(
+            !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
+          ),
+        });
+        return;
+      }
+
+      if (kind === "sheba" && session?.state === "settings:sheba:preview") {
+        const shebaNumber = String(session.data?.shebaNumber ?? "");
+        const holderName = String(session.data?.holderName ?? "");
+        await settingsService.setPaymentShebaDetails(shebaNumber, holderName);
+        managerSessions.delete(ctx.from.id);
+        await safeRender(ctx, ManagerTexts.settingsShebaUpdated(shebaNumber, holderName), {
           parse_mode: "Markdown",
           reply_markup: ManagerKeyboards.settingsMenu(
             !!(await settingsService.getCheckoutImageFileId(checkoutImageFileId)),
@@ -4312,14 +4416,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       await settingsService.delete(SettingKeys.CHECKOUT_IMAGE_FILE_ID);
       await answerCallback({ text: ManagerTexts.settingsImageDeleted(), show_alert: true });
 
-      const cardNumber = await settingsService.getPaymentCardNumber();
-      const cardStatus = cardNumber ? `✅ ${cardNumber}` : undefined;
-      const deliveryMsg = await settingsService.getOutForDeliveryMessage();
-      const deliveryMsgStatus = deliveryMsg ? "✅ تنظیم شده" : undefined;
-      await safeRender(ctx, ManagerTexts.settingsMenuTitle("❌ تنظیم نشده", cardStatus, deliveryMsgStatus), {
-        parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.settingsMenu(false),
-      });
+      await showSettingsMenu(ctx, settingsService, checkoutImageFileId);
       return;
     }
 
@@ -4334,6 +4431,15 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data === "mgr:settings:card") {
       managerSessions.set(ctx.from.id, { state: "settings:card" });
       await safeRender(ctx, ManagerTexts.settingsCardAsk(), {
+        reply_markup: ManagerKeyboards.backToMenu(),
+      });
+      return;
+    }
+
+    if (data === "mgr:settings:sheba") {
+      managerSessions.set(ctx.from.id, { state: "settings:sheba" });
+      await safeRender(ctx, ManagerTexts.settingsShebaAsk(), {
+        parse_mode: "Markdown",
         reply_markup: ManagerKeyboards.backToMenu(),
       });
       return;

@@ -296,13 +296,22 @@ export const ManagerKeyboards = {
   },
 
   /** User list */
-  userList: (users: { id: number; username: string | null; isActive: boolean }[], page: number = 0, totalPages: number = 1) => {
+  userList: (users: {
+    id: number;
+    username: string | null;
+    isActive: boolean;
+    isVerified: boolean;
+    usedReferralCode?: { createdByManagerId: number | null } | null;
+  }[], page: number = 0, totalPages: number = 1) => {
     const kb = new InlineKeyboard();
 
     users.forEach((u) => {
-      const status = u.isActive ? "✅" : "🚫";
+      const status = !u.isActive ? "🚫" : u.isVerified ? "✅" : "⏳";
       const name = u.username || `کاربر #${u.id}`;
-      kb.text(`${status} ${name}`, `mgr:user:${u.id}`).row();
+      const invitation = u.isVerified && u.usedReferralCode?.createdByManagerId != null
+        ? " · دعوت مدیر"
+        : "";
+      kb.text(`${status} ${name}${invitation}`, `mgr:user:${u.id}`).row();
     });
 
     // Navigation
@@ -419,7 +428,8 @@ export const ManagerKeyboards = {
   /** Settings menu */
   settingsMenu: (hasImage: boolean) => {
     const kb = new InlineKeyboard()
-      .text("🏦 شماره کارت", "mgr:settings:card")
+      .text("💳 مشخصات کارت", "mgr:settings:card")
+      .text("🏦 مشخصات شبا", "mgr:settings:sheba")
       .row()
       .text("🚚 پیام ارسال", "mgr:settings:deliverymsg")
       .row()
@@ -434,7 +444,7 @@ export const ManagerKeyboards = {
     return kb;
   },
 
-  settingsConfirm: (kind: "card" | "deliverymsg" | "expiry") => {
+  settingsConfirm: (kind: "card" | "sheba" | "deliverymsg" | "expiry") => {
     return new InlineKeyboard()
       .text("✅ تأیید و ذخیره", `mgr:settings:confirm:${kind}`)
       .row()

@@ -333,10 +333,11 @@ export const ManagerTexts = {
     text += `   فروش: ${formatPrice(revenue)}`;
     return text;
   },
-  userAnalytics: (total: number, verified: number, active: number, blocked: number, newToday: number, newThisWeek: number, newThisMonth: number) =>
+  userAnalytics: (total: number, verified: number, pending: number, active: number, blocked: number, newToday: number, newThisWeek: number, newThisMonth: number) =>
     `👥 *آمار کاربران*\n\n` +
     `👤 کل کاربران: ${total}\n` +
     `✅ تأییدشده: ${verified}\n` +
+    `⏳ در انتظار کد دعوت: ${pending}\n` +
     `🟢 فعال: ${active}\n` +
     `🚫 مسدود: ${blocked}\n` +
     `─────────────────\n` +
@@ -366,12 +367,13 @@ export const ManagerTexts = {
     }
     return text;
   },
-  referralAnalytics: (totalCodes: number, activeCodes: number, totalUses: number, referredUsers: number, avgUses: string, topReferrer: string | null) =>
+  referralAnalytics: (totalCodes: number, activeCodes: number, totalUses: number, referredUsers: number, managerInvitedUsers: number, avgUses: string, topReferrer: string | null) =>
     `🔗 *آمار معرفی*\n\n` +
     `📋 کل کدها: ${totalCodes}\n` +
     `✅ کدهای استفاده‌نشده: ${activeCodes}\n` +
     `📊 کدهای استفاده‌شده: ${totalUses}\n` +
     `👥 کاربران معرفی‌شده: ${referredUsers}\n` +
+    `👨‍💼 دعوت‌شده توسط مدیر: ${managerInvitedUsers}\n` +
     `📈 میانگین مصرف کدها: ${avgUses}\n` +
     `🏆 بهترین معرف: ${topReferrer || '—'}`,
 
@@ -415,8 +417,8 @@ export const ManagerTexts = {
   orderContactNoPhone: () => "شماره تماس معتبری برای این مشتری ثبت نشده است.",
 
   // Settings
-  settingsMenuTitle: (imageStatus: string, cardStatus?: string, deliveryMsgStatus?: string) =>
-    `⚙️ *تنظیمات ربات*\n\n🖼️ تصویر پرداخت: ${imageStatus}\n🏦 شماره کارت: ${cardStatus || '❌ تنظیم نشده'}\n🚚 پیام ارسال: ${deliveryMsgStatus || '❌ تنظیم نشده'}`,
+  settingsMenuTitle: (imageStatus: string, cardStatus?: string, shebaStatus?: string, deliveryMsgStatus?: string) =>
+    `⚙️ *تنظیمات ربات*\n\n🖼️ تصویر پرداخت: ${imageStatus}\n💳 مشخصات کارت: ${cardStatus || '❌ تنظیم نشده'}\n🏦 مشخصات شبا: ${shebaStatus || '❌ تنظیم نشده'}\n🚚 پیام ارسال: ${deliveryMsgStatus || '❌ تنظیم نشده'}`,
   settingsImageUpdated: () => "✅ تصویر پرداخت با موفقیت به‌روزرسانی شد.",
   settingsImageDeleted: () => "✅ تصویر پرداخت حذف شد. از این پس فقط متن ارسال می‌شود.",
   settingsImageAsk: () => "🖼️ تصویر پرداخت را ارسال کنید (این تصویر همراه اطلاعات پرداخت برای کاربر ارسال می‌شود):",
@@ -424,9 +426,16 @@ export const ManagerTexts = {
   settingsExpiryUpdated: (minutes: number) => `✅ مهلت پرداخت به ${minutes} دقیقه تغییر یافت.`,
   settingsExpiryInvalid: () => "❌ لطفاً یک عدد معتبر (بزرگتر از صفر) وارد کنید.",
   // Card Number Settings
-  settingsCardAsk: () => "💳 شماره کارت ۱۶ رقمی را وارد کنید (بدون فاصله یا خط تیره).\n\nقبل از ذخیره، پیش‌نمایش و دکمه تأیید نمایش داده می‌شود.\nبرای پاک کردن شماره کارت، /delete را ارسال کنید.",
-  settingsCardUpdated: (cardNumber: string) => `✅ شماره کارت به \`${cardNumber}\` تغییر یافت.`,
-  settingsCardDeleted: () => "✅ شماره کارت حذف شد. پیام پرداخت بدون شماره کارت ارسال می‌شود.",
+  settingsCardAsk: () => "💳 شماره کارت ۱۶ رقمی را وارد کنید. فاصله مجاز است، اما خط تیره مجاز نیست.\n\nپس از آن، نام صاحب کارت پرسیده می‌شود.\nبرای پاک کردن هر دو، /delete را ارسال کنید.",
+  settingsCardHolderAsk: () => "👤 نام صاحب کارت را وارد کنید:",
+  settingsCardUpdated: (cardNumber: string, holderName: string) => `✅ مشخصات کارت ذخیره شد.\n💳 \`${cardNumber}\`\n👤 ${escapeMarkdown(holderName)}`,
+  settingsCardDeleted: () => "✅ شماره کارت و نام صاحب آن حذف شد.",
+  settingsHolderInvalid: () => "❌ نام صاحب حساب باید بین ۲ تا ۱۰۰ نویسه باشد. دوباره تلاش کنید:",
+  settingsShebaAsk: () => "🏦 شماره شبا را با IR و دقیقاً ۲۴ رقم پس از آن وارد کنید. فاصله مجاز است.\nمثال: `IR123456789012345678901234`\n\nپس از آن، نام صاحب شبا پرسیده می‌شود.\nبرای پاک کردن هر دو، /delete را ارسال کنید.",
+  settingsShebaHolderAsk: () => "👤 نام صاحب شبا را وارد کنید:",
+  settingsShebaUpdated: (shebaNumber: string, holderName: string) => `✅ مشخصات شبا ذخیره شد.\n🏦 \`${shebaNumber}\`\n👤 ${escapeMarkdown(holderName)}`,
+  settingsShebaDeleted: () => "✅ شماره شبا و نام صاحب آن حذف شد.",
+  settingsShebaInvalid: () => "❌ شماره شبا باید با IR شروع شود و پس از آن دقیقاً ۲۴ رقم داشته باشد.",
 
   // Courier Message Settings
   settingsDeliveryMsgAsk: () => "📝 پیام ارسالی به کاربر هنگام «در مسیر ارسال» شدن را وارد کنید.\n\nقبل از ذخیره، پیش‌نمایش و دکمه تأیید نمایش داده می‌شود.\nبرای پاک کردن پیام سفارشی، /delete را ارسال کنید.",
@@ -489,12 +498,36 @@ export const CourierTexts = {
 // ===========================================
 
 export const ChannelTexts = {
-  paymentMessage: (orderId: number, grandTotal: number, cardNumber?: string, currency?: string) =>
-    `💳 *پرداخت سفارش #${orderId}*\n\n` +
-    `مبلغ قابل پرداخت: *${formatPrice(grandTotal)}${currency && currency !== "IRR" ? ` ${currency}` : ""}*\n\n` +
-    (cardNumber ? `🏦 شماره کارت: \`${cardNumber}\`\n\n` : '') +
-    `لطفاً مبلغ فوق را به شماره کارت ذکر شده واریز کنید ` +
-    `و سپس عکس رسید را در همین ربات ارسال نمایید.\n\n` +
-    `⏳ این پیام پس از اتمام مهلت پرداخت حذف خواهد شد.\n\n` +
-    `🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`,
+  paymentMessage: (
+    orderId: number,
+    grandTotal: number,
+    details: { cardNumber?: string | null; cardHolderName?: string | null; shebaNumber?: string | null; shebaHolderName?: string | null } = {},
+    currency?: string,
+  ) => {
+    const paymentLines: string[] = [];
+    if (details.cardNumber) {
+      paymentLines.push(`💳 شماره کارت: \`${details.cardNumber}\``);
+      if (details.cardHolderName) paymentLines.push(`👤 صاحب کارت: ${escapeMarkdown(details.cardHolderName)}`);
+    }
+    if (details.shebaNumber) {
+      if (paymentLines.length) paymentLines.push("");
+      paymentLines.push(`🏦 شماره شبا: \`${details.shebaNumber}\``);
+      if (details.shebaHolderName) paymentLines.push(`👤 صاحب شبا: ${escapeMarkdown(details.shebaHolderName)}`);
+    }
+
+    const destinationText = paymentLines.length
+      ? `${paymentLines.join("\n")}\n\n`
+      : "";
+    const instruction = paymentLines.length
+      ? "لطفاً مبلغ فوق را به یکی از مشخصات پرداخت بالا واریز کنید"
+      : "لطفاً مبلغ فوق را طبق مشخصات پرداخت اعلام‌شده واریز کنید";
+
+    return `💳 *پرداخت سفارش #${orderId}*\n\n` +
+      `مبلغ قابل پرداخت: *${formatPrice(grandTotal)}${currency && currency !== "IRR" ? ` ${currency}` : ""}*\n\n` +
+      destinationText +
+      `${instruction} ` +
+      `و سپس عکس رسید را در همین ربات ارسال نمایید.\n\n` +
+      `⏳ این پیام پس از اتمام مهلت پرداخت حذف خواهد شد.\n\n` +
+      `🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`;
+  },
 };
