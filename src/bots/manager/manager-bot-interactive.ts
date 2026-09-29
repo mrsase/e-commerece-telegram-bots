@@ -33,6 +33,7 @@ type SessionState =
   | "product:edit:stock"
   | "product:edit:image"
   | "user:search"
+  | "referral:jump"
   | "referral:create:score"
   | "receipt:reject:reason"
   | "receipt:approve:eta"
@@ -100,7 +101,7 @@ import { escapeMarkdown } from "../../utils/escape-markdown.js";
 import { BotSettingsService, SettingKeys } from "../../services/bot-settings-service.js";
 import { referralShareMessage, resolveClientBotUsername } from "../../utils/referral-share.js";
 import { AnnouncementService, announcementTypeLabel, formatAnnouncement } from "../../services/announcement-service.js";
-import { cancelOrderAndRestoreStock } from "../../services/order-service.js";
+import { archiveOrderAndRestoreStock, cancelOrderAndRestoreStock } from "../../services/order-service.js";
 import { formatPhoneForDisplay, normalizeIranianPhone } from "../../utils/phone.js";
 import {
   normalizePaymentCardNumber,
@@ -344,16 +345,15 @@ async function renderReferralRootPage(
     text += "هنوز شبکه دعوت تأییدشده‌ای ایجاد نشده است.";
   } else {
     page.roots.forEach((root, index) => {
-      text += `\n${page.page * REFERRAL_TREE_PAGE_SIZE + index + 1}. *${referralUserLabelMarkdown(root)}*\n`;
-      text += `   مستقیم: ${root.directChildren} · کل شبکه: ${root.totalUsers} · عمق: ${root.maxDepth}\n`;
-      text += `   سفارش: ${root.totalOrders} · ${formatPrice(root.totalRevenue)}\n`;
+      text += `${page.page * REFERRAL_TREE_PAGE_SIZE + index + 1}. ${referralUserLabelMarkdown(root)} · ${root.totalUsers} نفر\n`;
     });
   }
 
   const keyboard = new InlineKeyboard();
   page.roots.forEach((root) => {
     keyboard
-      .text(`🌿 ${compactReferralUserLabel(root)} · ${root.totalUsers} نفر`, `mgr:ref:node:${root.userId}:0`)
+      .text(`🌿 ${compactReferralUserLabel(root)} (#${root.userId})`, `mgr:ref:node:${root.userId}:0`)
+      .text("👤", `mgr:user:${root.userId}`)
       .row();
   });
   if (page.totalPages > 1) {
@@ -363,6 +363,8 @@ async function renderReferralRootPage(
     keyboard.row();
   }
   keyboard
+    .text("🔎 یافتن کاربر در شبکه", "mgr:ref:jump")
+    .row()
     .text("« آمار دعوت‌ها", "mgr:analytics:referrals")
     .text("« منو", "mgr:menu");
 
@@ -383,18 +385,11 @@ async function renderReferralSubtreePage(
     return;
   }
 
-  const lineageSegments = view.lineage.length > 6
-    ? [referralUserLabelMarkdown(view.lineage[0]), "…", ...view.lineage.slice(-4).map(referralUserLabelMarkdown)]
-    : view.lineage.map(referralUserLabelMarkdown);
-  const lineageText = lineageSegments.join(" › ");
-
   let text = `🌿 *زیرشبکه ${referralUserLabelMarkdown(view.node)}*\n\n`;
   text += `⬆️ معرف: ${referralParentLabelMarkdown(view.parent, view.node.invitedByManager)}\n`;
-  text += `🧭 مسیر: ${lineageText}\n`;
+  text += `🧭 عمق از ریشه: ${Math.max(0, view.lineage.length - 1)}\n`;
   text += `👥 دعوت مستقیم: ${view.totalChildren}\n`;
   text += `🌳 کل اعضای زیرشبکه: ${view.stats.totalUsers} (${view.stats.descendantCount} زیرمجموعه)\n`;
-  text += `📏 عمق زیرشبکه: ${view.stats.maxDepth}\n`;
-  text += `📦 سفارش خود کاربر: ${view.node.orderCount} · ${formatPrice(view.node.orderTotal)}\n`;
   text += `📊 کل زیرشبکه: ${view.stats.totalOrders} سفارش · ${formatPrice(view.stats.totalRevenue)}\n`;
   if (view.stats.cycleDetected) text += "\n⚠️ چرخه غیرعادی در داده‌های معرفی شناسایی شد.\n";
   text += "\n*زیرمجموعه‌های مستقیم:*\n";
@@ -403,15 +398,15 @@ async function renderReferralSubtreePage(
     text += "— این کاربر زیرمجموعه مستقیمی ندارد.\n";
   } else {
     view.children.forEach((child, index) => {
-      text += `${view.page * REFERRAL_TREE_PAGE_SIZE + index + 1}. ${referralUserLabelMarkdown(child)}\n`;
-      text += `   شبکه: ${child.totalUsers} · سفارش: ${child.totalOrders} · ${formatPrice(child.totalRevenue)}\n`;
+      text += `${view.page * REFERRAL_TREE_PAGE_SIZE + index + 1}. ${referralUserLabelMarkdown(child)} · ${child.totalUsers} نفر\n`;
     });
   }
 
   const keyboard = new InlineKeyboard();
   view.children.forEach((child) => {
     keyboard
-      .text(`↳ ${compactReferralUserLabel(child)} · ${child.totalUsers} نفر`, `mgr:ref:node:${child.userId}:0`)
+      .text(`↳ ${compactReferralUserLabel(child)} (#${child.userId})`, `mgr:ref:node:${child.userId}:0`)
+      .text("👤", `mgr:user:${child.userId}`)
       .row();
   });
   if (view.totalPages > 1) {
@@ -425,6 +420,8 @@ async function renderReferralSubtreePage(
   if (view.parent || view.root.userId !== view.node.userId) keyboard.row();
   keyboard
     .text("👤 جزئیات کاربر", `mgr:user:${view.node.userId}`)
+    .text("🔎 یافتن کاربر", "mgr:ref:jump")
+    .row()
     .text("🌳 شبکه اصلی", "mgr:ref:roots:0")
     .row()
     .text("« منو", "mgr:menu");
@@ -785,7 +782,7 @@ function announcementDisplayTitle(announcement: {
  */
 export function buildOrderDetailText(order: {
   id: number; status: OrderStatus; createdAt: Date;
-  subtotal: number; discountTotal: number; grandTotal: number;
+  subtotal: number; discountTotal: number; shippingCost: number; grandTotal: number;
   user: {
     firstName: string | null; username: string | null; phone: string | null;
     address: string | null; locationLat: number | null; locationLng: number | null; locationText: string | null;
@@ -819,6 +816,7 @@ export function buildOrderDetailText(order: {
   });
   text += `\nجمع: ${formatPrice(order.subtotal)}\n`;
   if (order.discountTotal > 0) text += `تخفیف: ${formatPrice(order.discountTotal)}\n`;
+  text += `هزینه ارسال: ${order.shippingCost ? formatPrice(order.shippingCost) : 'رایگان'}\n`;
   text += `*نهایی: ${formatPrice(order.grandTotal)}*\n`;
 
   // Receipts
@@ -1167,6 +1165,54 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     }
 
     // USER SEARCH
+    if (session.state === "referral:jump") {
+      const query = text.trim().replace(/^[@#]/, "");
+      if (!query) {
+        await ctx.reply("شناسه کاربر، شناسه تلگرام یا نام کاربری را وارد کنید.");
+        return;
+      }
+      const numericId = /^\d+$/.test(query) ? Number(query) : null;
+      const numericTgId = /^\d{1,19}$/.test(query) ? BigInt(query) : null;
+      const numericFilters = [
+        ...(numericId !== null && Number.isSafeInteger(numericId) && numericId <= 2_147_483_647 ? [{ id: numericId }] : []),
+        ...(numericTgId !== null && numericTgId <= 9_223_372_036_854_775_807n ? [{ tgUserId: numericTgId }] : []),
+      ];
+      if (numericId !== null && numericFilters.length === 0) {
+        await ctx.reply("شناسه واردشده بیش از حد طولانی است. لطفاً یک شناسه معتبر وارد کنید.");
+        return;
+      }
+      const users = await prisma.user.findMany({
+        where: {
+          isVerified: true,
+          OR: numericId !== null
+            ? numericFilters
+            : [
+                { username: { contains: query } },
+                { firstName: { contains: query } },
+                { lastName: { contains: query } },
+              ],
+        },
+        select: { id: true, username: true, firstName: true },
+        orderBy: { id: "desc" },
+        take: 10,
+      });
+      managerSessions.delete(ctx.from.id);
+      if (!users.length) {
+        await ctx.reply("کاربر تأییدشده‌ای پیدا نشد. با شناسه دقیق یا نام کاربری دوباره جستجو کنید.", {
+          reply_markup: new InlineKeyboard().text("🔎 جستجوی دوباره", "mgr:ref:jump").text("🌳 شبکه اصلی", "mgr:ref:roots:0"),
+        });
+        return;
+      }
+      const keyboard = new InlineKeyboard();
+      users.forEach((user) => {
+        keyboard.text(`🌿 ${compactReferralUserLabel(user)} (#${user.id})`, `mgr:ref:node:${user.id}:0`)
+          .text("👤", `mgr:user:${user.id}`).row();
+      });
+      keyboard.text("🔎 جستجوی دوباره", "mgr:ref:jump").text("🌳 شبکه اصلی", "mgr:ref:roots:0");
+      await ctx.reply(`🔎 ${users.length} نتیجه (هر ردیف: شبکه / جزئیات کاربر)`, { reply_markup: keyboard });
+      return;
+    }
+
     if (session.state === "user:search") {
       const query = text;
       let users;
@@ -2030,6 +2076,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           order.grandTotal,
           paymentDetails,
           order.items[0]?.product?.currency ?? "IRR",
+          order.shippingCost,
         );
 
         // 1) Atomically claim the order — only succeeds if still AWAITING_MANAGER_APPROVAL
@@ -2285,13 +2332,21 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
         return;
       }
+      const alreadyArchived = await prisma.orderEvent.count({ where: { orderId, eventType: "order_deleted" } });
+      if (alreadyArchived) {
+        await answerCallback({ text: "این سفارش قبلاً حذف شده است.", show_alert: true });
+        return;
+      }
 
       const confirmKb = new InlineKeyboard()
         .text("✅ بله، حذف شود", `mgr:order:delete:confirm:${orderId}`)
         .row()
         .text("❌ خیر", `mgr:order:${orderId}`);
 
-      await safeRender(ctx, `⚠️ *آیا از حذف سفارش #${orderId} مطمئن هستید؟*\n\nوضعیت فعلی: ${orderStatusLabel(order.status)}\n\nاین اقدام قابل بازگشت نیست.`, {
+      const paymentWarning = order.status === OrderStatus.PAID
+        ? "\n\n⚠️ پرداخت این سفارش ثبت شده است؛ بازگشت وجه باید جداگانه انجام شود."
+        : "";
+      await safeRender(ctx, `⚠️ *لغو و حذف سفارش #${orderId}*\n\nوضعیت فعلی: ${orderStatusLabel(order.status)}\n\nسفارش در یک مرحله لغو و از فهرست فعال پنهان می‌شود. موجودی کالای تحویل‌داده‌نشده برمی‌گردد. این اقدام قابل بازگشت نیست.${paymentWarning}`, {
         parse_mode: "Markdown",
         reply_markup: confirmKb,
       });
@@ -2303,48 +2358,22 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     // ===========================================
     if (data.startsWith("mgr:order:delete:confirm:")) {
       const orderId = safeId(parts[4]);
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { user: true },
-      });
-
-      if (!order) {
-        await answerCallback({ text: "سفارش یافت نشد.", show_alert: true });
-        return;
-      }
-      if (order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.COMPLETED) {
-        await answerCallback({ text: "ابتدا سفارش را لغو یا تکمیل کنید.", show_alert: true });
-        return;
-      }
-
-      const archived = await prisma.$transaction(async (tx) => {
-        if (order.status === OrderStatus.COMPLETED) {
-          const claimed = await tx.order.updateMany({
-            where: { id: orderId, status: OrderStatus.COMPLETED },
-            data: { status: OrderStatus.CANCELLED },
-          });
-          if (claimed.count === 0) return false;
-        }
-        const existing = await tx.orderEvent.count({
-          where: { orderId, eventType: "order_deleted" },
-        });
-        if (existing === 0) {
-          await tx.orderEvent.create({
-            data: { orderId, actorType: "manager", actorId: manager.id, eventType: "order_deleted" },
-          });
-        }
-        return true;
-      });
-      if (!archived) {
-        await answerCallback({ text: "وضعیت سفارش همزمان تغییر کرد. دوباره تلاش کنید.", show_alert: true });
+      const archived = await archiveOrderAndRestoreStock(prisma, { orderId, managerId: manager.id });
+      if (archived.kind !== "archived") {
+        const reason = archived.kind === "missing" ? "سفارش یافت نشد."
+          : archived.kind === "already-archived" ? "این سفارش قبلاً حذف شده است."
+          : "وضعیت سفارش همزمان تغییر کرد. دوباره تلاش کنید.";
+        await answerCallback({ text: reason, show_alert: true });
         return;
       }
 
       // Notify client
       try {
         await clientBot?.api.sendMessage(
-          order.user.tgUserId.toString(),
-          `سفارش #${orderId} توسط مدیریت از فهرست فعال خارج شد.`
+          archived.userTgUserId.toString(),
+          archived.previousStatus === OrderStatus.COMPLETED
+            ? `سفارش #${orderId} توسط مدیریت از فهرست فعال خارج شد.`
+            : `❌ سفارش #${orderId} توسط مدیریت لغو و از فهرست فعال خارج شد.`
         );
       } catch (err) {
         console.error(`[DELETE ORDER] Failed to notify client for order #${orderId}:`, err);
@@ -2379,7 +2408,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
               usedReferralCode: { select: { createdByManagerId: true } },
             },
           },
-          events: { orderBy: { createdAt: "asc" }, take: 10 },
+          events: { orderBy: { createdAt: "desc" }, take: 10 },
           receipts: { orderBy: { submittedAt: "desc" }, take: 3 },
           delivery: { include: { assignedCourier: true } },
         },
@@ -2392,6 +2421,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       const detailText = buildOrderDetailText(order);
       const detailKb = new InlineKeyboard();
+      detailKb.text("👤 مشاهده مشتری", `mgr:user:${order.userId}`).row();
       const pendingReceipt = order.receipts.find(r => r.reviewStatus === ReceiptReviewStatus.PENDING);
       if (pendingReceipt) {
         detailKb
@@ -2402,11 +2432,8 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       if (order.user.locationLat != null && order.user.locationLng != null) {
         detailKb.text("📍 موقعیت", `mgr:order:location:${order.id}`).row();
       }
-      if (order.status !== OrderStatus.CANCELLED) {
-        detailKb.text("❌ لغو سفارش", `mgr:order:cancel:${order.id}`);
-      }
-      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.COMPLETED) {
-        detailKb.text("🗑️ حذف سفارش", `mgr:order:delete:${order.id}`);
+      if (!order.events.some((event) => event.eventType === "order_deleted")) {
+        detailKb.text("🗑️ لغو و حذف سفارش", `mgr:order:delete:${order.id}`);
       }
       detailKb.row();
       detailKb.text("💬 پشتیبانی مشتری", `mgr:support:order:${order.id}`);
@@ -2529,12 +2556,11 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
         .text("❌ لغوشده", "mgr:allorders:CANCELLED:0")
         .row();
 
-      // Per-order detail buttons (3 per row)
-      orders.forEach((o, i) => {
-        allKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`);
-        if ((i + 1) % 3 === 0 && i < orders.length - 1) allKb.row();
+      // Each order row has an exact customer shortcut.
+      orders.forEach((o) => {
+        allKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`)
+          .text(`👤 #${o.userId}`, `mgr:user:${o.userId}`).row();
       });
-      if (orders.length > 0) allKb.row();
 
       // Pagination row with "All" button
       const filterPart = statusFilter ? `:${statusFilter}` : "";
@@ -2588,11 +2614,10 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       }
 
       const delKb = new InlineKeyboard();
-      orders.forEach((o, i) => {
-        delKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`);
-        if ((i + 1) % 3 === 0 && i < orders.length - 1) delKb.row();
+      orders.forEach((o) => {
+        delKb.text(`📋 #${o.id}`, `mgr:order:${o.id}`)
+          .text(`👤 #${o.userId}`, `mgr:user:${o.userId}`).row();
       });
-      if (orders.length > 0) delKb.row();
 
       if (page > 0) delKb.text("« قبلی", `mgr:deletedorders:${page - 1}`);
       delKb.text(`${page + 1}/${totalPages}`, "noop");
@@ -3075,23 +3100,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       await answerCallback({ text: message, show_alert: true });
 
-      // Refresh user view
-      const updated = await prisma.user.findUnique({ where: { id: userId } });
-      if (!updated) {
-        await answerCallback({ text: "کاربر یافت نشد" });
-        return;
-      }
-      const orderCount = await prisma.order.count({ where: { userId } });
-      const eScore = updated.loyaltyScoreOverride ?? updated.loyaltyScore;
-      const hasOvr = updated.loyaltyScoreOverride != null;
-
-      await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore, hasOvr, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
-        {
-          parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
-        }
-      );
+      await renderManagerUserView(ctx, prisma, userId);
       return;
     }
 
@@ -3132,22 +3141,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       await answerCallback({ text: message, show_alert: true });
 
-      const updated = await prisma.user.findUnique({ where: { id: userId } });
-      if (!updated) {
-        await answerCallback({ text: "کاربر یافت نشد" });
-        return;
-      }
-      const orderCount = await prisma.order.count({ where: { userId } });
-      const eScore2 = updated.loyaltyScoreOverride ?? updated.loyaltyScore;
-      const hasOvr2 = updated.loyaltyScoreOverride != null;
-
-      await safeRender(ctx, 
-        ManagerTexts.userDetails(updated.id, updated.username, updated.isActive, orderCount, updated.canCreateReferral, eScore2, hasOvr2, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
-        {
-          parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.userActions(userId, updated.isActive, updated.canCreateReferral, userDiscountLabel(updated), updated.maxReferralCodes, updated.isTestUser),
-        }
-      );
+      await renderManagerUserView(ctx, prisma, userId);
       return;
     }
 
@@ -3839,6 +3833,9 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       });
 
       const refKb = new InlineKeyboard();
+      if (topReferrer?.createdByUserId) {
+        refKb.text("👤 بهترین معرف", `mgr:user:${topReferrer.createdByUserId}`).row();
+      }
       refKb.text("🌳 مشاهده درخت معرفی‌ها", "mgr:analytics:referraltree").row();
       refKb.text("« بازگشت به آمار", "mgr:analytics").text("« منو", "mgr:menu");
 
@@ -3864,6 +3861,14 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
     if (data === "mgr:analytics:referraltree" || data.startsWith("mgr:ref:roots:")) {
       const page = data.startsWith("mgr:ref:roots:") ? safeId(parts[3]) : 0;
       await renderReferralRootPage(ctx, prisma, page);
+      return;
+    }
+
+    if (data === "mgr:ref:jump") {
+      managerSessions.set(ctx.from.id, { state: "referral:jump" });
+      await safeRender(ctx, "🔎 شناسه کاربر، شناسه تلگرام یا نام کاربری را بفرستید.\n\nبرای نام‌های مشابه، نتیجه‌ها با شناسه یکتا نمایش داده می‌شوند. روی 🌿 برای شبکه یا 👤 برای پرونده کاربر بزنید.", {
+        reply_markup: new InlineKeyboard().text("🌳 شبکه اصلی", "mgr:ref:roots:0"),
+      });
       return;
     }
 
@@ -3959,7 +3964,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
           await ctx.replyWithPhoto(receiptInput, {
             caption: text,
             parse_mode: "Markdown",
-            reply_markup: ManagerKeyboards.receiptActions(receiptId, receipt.order.id),
+            reply_markup: ManagerKeyboards.receiptActions(receiptId, receipt.order.id, receipt.user.id),
           });
           receiptSent = true;
         } catch (err) {
@@ -3969,7 +3974,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       if (!receiptSent) {
         await safeRender(ctx, text + "\n\n⚠️ تصویر رسید قابل نمایش نیست.", {
           parse_mode: "Markdown",
-          reply_markup: ManagerKeyboards.receiptActions(receiptId, receipt.order.id),
+          reply_markup: ManagerKeyboards.receiptActions(receiptId, receipt.order.id, receipt.user.id),
         });
       }
       return;
@@ -4118,6 +4123,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
       const totalPages = Math.ceil(total / pageSize);
       const items = conversations.map((c) => ({
         id: c.id,
+        userId: c.user.id,
         userLabel: c.user.username || c.user.firstName || `کاربر #${c.user.id}`,
         lastMessageAtLabel: c.lastMessageAt.toISOString().split("T")[0],
       }));
@@ -4163,7 +4169,7 @@ export function registerInteractiveManagerBot(bot: Bot, deps: ManagerBotDeps): v
 
       await safeRender(ctx, convText, {
         parse_mode: "Markdown",
-        reply_markup: ManagerKeyboards.supportConversationActions(convId),
+        reply_markup: ManagerKeyboards.supportConversationActions(convId, conversation.user.id),
       });
       return;
     }

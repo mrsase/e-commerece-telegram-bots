@@ -53,6 +53,7 @@ export class NotificationService {
         select: {
           user: {
             select: {
+              id: true,
               referredBy: { select: { id: true, username: true, firstName: true } },
               usedReferralCode: { select: { createdByManagerId: true } },
             },
@@ -77,12 +78,14 @@ export class NotificationService {
     }
     text += `\nجمع: ${formatPrice(subtotal)}\n`;
     if (discountTotal > 0) text += `تخفیف: ${formatPrice(discountTotal)}\n`;
+    const shippingCost = grandTotal - subtotal + discountTotal;
+    text += `هزینه ارسال: ${shippingCost ? formatPrice(shippingCost) : 'رایگان'}\n`;
     text += `*نهایی: ${formatPrice(grandTotal)}*\n`;
 
     const keyboard = new InlineKeyboard()
-      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
-      .row()
-      .text("💬 پشتیبانی مشتری", `mgr:support:order:${orderId}`);
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+    if (orderReferral?.user) keyboard.text("👤 مشاهده مشتری", `mgr:user:${orderReferral.user.id}`);
+    keyboard.row().text("💬 پشتیبانی مشتری", `mgr:support:order:${orderId}`);
     if (normalizeIranianPhone(phone)) {
       keyboard.text("📞 تماس", `mgr:order:contact:${orderId}`);
     }
@@ -110,9 +113,10 @@ export class NotificationService {
     const bot = this.deps.managerBot;
     if (!bot) return;
 
-    const managers = await this.deps.prisma.manager.findMany({
-      where: { isActive: true },
-    });
+    const [managers, order] = await Promise.all([
+      this.deps.prisma.manager.findMany({ where: { isActive: true } }),
+      this.deps.prisma.order.findUnique({ where: { id: orderId }, select: { userId: true } }),
+    ]);
 
     const text = NotificationServiceTexts.newReceiptForManager(orderId, userLabel);
     const keyboard = new InlineKeyboard()
@@ -122,6 +126,7 @@ export class NotificationService {
       .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`)
       .row()
       .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+    if (order) keyboard.text("👤 مشاهده مشتری", `mgr:user:${order.userId}`);
 
     for (const mgr of managers) {
       try {
@@ -137,9 +142,10 @@ export class NotificationService {
     const bot = this.deps.managerBot;
     if (!bot) return;
 
-    const managers = await this.deps.prisma.manager.findMany({
-      where: { isActive: true },
-    });
+    const [managers, conversation] = await Promise.all([
+      this.deps.prisma.manager.findMany({ where: { isActive: true } }),
+      this.deps.prisma.supportConversation.findUnique({ where: { id: conversationId }, select: { userId: true } }),
+    ]);
 
     const text = `💬 *پیام جدید پشتیبانی*\n` +
       `گفتگو #${conversationId}\n` +
@@ -148,6 +154,7 @@ export class NotificationService {
 
     const keyboard = new InlineKeyboard()
       .text("✍️ پاسخ", `mgr:support:reply:${conversationId}`);
+    if (conversation) keyboard.text("👤 مشاهده مشتری", `mgr:user:${conversation.userId}`);
 
     for (const mgr of managers) {
       try {

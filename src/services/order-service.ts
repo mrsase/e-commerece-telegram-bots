@@ -1,5 +1,6 @@
 import { PrismaClient, CartState, OrderStatus } from "@prisma/client";
 import type { AppliedDiscount } from "./discount-service.js";
+import { shippingCostForBasket } from "../utils/shipping-cost.js";
 
 export class CartNotFoundError extends Error {
   constructor(message = "Cart not found") {
@@ -46,6 +47,7 @@ export interface CreateOrderResult {
   orderId: number;
   subtotal: number;
   discountTotal: number;
+  shippingCost: number;
   grandTotal: number;
 }
 
@@ -55,6 +57,65 @@ export type CancelOrderResult =
   | { kind: "already-cancelled" }
   | { kind: "not-allowed"; status: OrderStatus }
   | { kind: "conflict" };
+
+export type ArchiveOrderResult =
+  | { kind: "archived"; previousStatus: OrderStatus; userTgUserId: bigint }
+  | { kind: "missing" | "already-archived" | "conflict" };
+
+/** In one transaction: cancel if needed, return stock once, then hide the order. */
+export async function archiveOrderAndRestoreStock(
+  prisma: PrismaClient,
+  args: { orderId: number; managerId: number },
+): Promise<ArchiveOrderResult> {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: args.orderId },
+      select: {
+        status: true,
+        user: { select: { tgUserId: true } },
+        items: { select: { productId: true, qty: true } },
+        events: { where: { eventType: "order_deleted" }, select: { id: true }, take: 1 },
+      },
+    });
+    if (!order) return { kind: "missing" as const };
+    if (order.events.length) return { kind: "already-archived" as const };
+
+    if (order.status !== OrderStatus.CANCELLED) {
+      const claimed = await tx.order.updateMany({
+        where: { id: args.orderId, status: order.status },
+        data: { status: OrderStatus.CANCELLED },
+      });
+      if (claimed.count === 0) return { kind: "conflict" as const };
+
+      if (order.status !== OrderStatus.COMPLETED) {
+        for (const item of order.items) {
+          await tx.product.updateMany({
+            where: { id: item.productId, stock: { not: null } },
+            data: { stock: { increment: item.qty } },
+          });
+        }
+      }
+      await tx.orderEvent.create({
+        data: {
+          orderId: args.orderId,
+          actorType: "manager",
+          actorId: args.managerId,
+          eventType: "order_cancelled",
+        },
+      });
+    }
+
+    await tx.orderEvent.create({
+      data: {
+        orderId: args.orderId,
+        actorType: "manager",
+        actorId: args.managerId,
+        eventType: "order_deleted",
+      },
+    });
+    return { kind: "archived" as const, previousStatus: order.status, userTgUserId: order.user.tgUserId };
+  });
+}
 
 /**
  * Cancel an order atomically and return finite-stock inventory exactly once.
@@ -209,7 +270,8 @@ export class OrderService {
         0,
       );
       const discountTotal = Math.min(rawDiscountTotal, subtotal);
-      const grandTotal = subtotal - discountTotal;
+      const shippingCost = shippingCostForBasket(subtotal - discountTotal);
+      const grandTotal = subtotal - discountTotal + shippingCost;
 
       const order = await tx.order.create({
         data: {
@@ -217,6 +279,7 @@ export class OrderService {
           cartId: cart.id,
           subtotal,
           discountTotal,
+          shippingCost,
           grandTotal,
           status: OrderStatus.APPROVED,
           items: {
@@ -236,6 +299,7 @@ export class OrderService {
                 cartId: cart.id,
                 subtotal,
                 discountTotal,
+                shippingCost,
                 grandTotal,
                 appliedDiscounts,
               }),
@@ -260,6 +324,7 @@ export class OrderService {
         orderId: order.id,
         subtotal,
         discountTotal,
+        shippingCost,
         grandTotal,
       };
     });

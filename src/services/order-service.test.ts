@@ -7,7 +7,8 @@ import {
   it,
 } from "vitest";
 import { PrismaClient, OrderStatus } from "@prisma/client";
-import { OrderService, InsufficientStockError, cancelOrderAndRestoreStock } from "./order-service.js";
+import { OrderService, InsufficientStockError, archiveOrderAndRestoreStock, cancelOrderAndRestoreStock } from "./order-service.js";
+import { shippingCostForBasket } from "../utils/shipping-cost.js";
 import type { AppliedDiscount } from "./discount-service.js";
 
 let prisma: PrismaClient;
@@ -98,7 +99,8 @@ describe("OrderService", () => {
 
     expect(result.subtotal).toBe(2000);
     expect(result.discountTotal).toBe(0);
-    expect(result.grandTotal).toBe(2000);
+    expect(result.shippingCost).toBe(500_000);
+    expect(result.grandTotal).toBe(502_000);
 
     const product = await prisma.product.findUniqueOrThrow({ where: { id: productId } });
     expect(product.stock).toBe(8);
@@ -109,6 +111,7 @@ describe("OrderService", () => {
     });
 
     expect(order.status).toBe(OrderStatus.APPROVED);
+    expect(order.shippingCost).toBe(500_000);
     expect(order.items).toHaveLength(1);
     expect(order.items[0]?.qty).toBe(2);
 
@@ -185,7 +188,8 @@ describe("OrderService", () => {
 
     expect(result.subtotal).toBe(3000);
     expect(result.discountTotal).toBe(500);
-    expect(result.grandTotal).toBe(2500);
+    expect(result.shippingCost).toBe(500_000);
+    expect(result.grandTotal).toBe(502_500);
 
     const usageCount = await prisma.discountUsage.count({
       where: { userId, discountId: discount.id },
@@ -215,6 +219,51 @@ describe("OrderService", () => {
     });
     expect(duplicate.kind).toBe("already-cancelled");
     expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(10);
+  });
+
+  it("applies exact shipping thresholds to the discounted basket", () => {
+    expect(shippingCostForBasket(5_999_999)).toBe(500_000);
+    expect(shippingCostForBasket(6_000_000)).toBe(350_000);
+    expect(shippingCostForBasket(10_000_000)).toBe(350_000);
+    expect(shippingCostForBasket(10_000_001)).toBe(0);
+  });
+
+  it("uses the discounted amount for the stored shipping tier", async () => {
+    await prisma.product.update({ where: { id: productId }, data: { price: 6_000_000 } });
+    const cart = await prisma.cart.create({
+      data: {
+        userId,
+        items: { create: { productId, qty: 1, unitPriceSnapshot: 6_000_000 } },
+      },
+    });
+    const result = await service.createOrderFromCart({
+      userId,
+      cartId: cart.id,
+      appliedDiscounts: [{ discountId: 0, code: null, amount: 1, description: "test" }],
+    });
+    expect(result.shippingCost).toBe(500_000);
+    expect(result.grandTotal).toBe(6_499_999);
+    const saved = await prisma.order.findUniqueOrThrow({ where: { id: result.orderId } });
+    expect(saved.shippingCost).toBe(500_000);
+  });
+
+  it("archives directly and restores stock only once", async () => {
+    const cart = await createCartWithQty(2);
+    const created = await service.createOrderFromCart({ userId, cartId: cart.id, appliedDiscounts: [] });
+    const manager = await prisma.manager.create({ data: { tgUserId: BigInt(99001), role: "ADMIN" } });
+    try {
+      const archived = await archiveOrderAndRestoreStock(prisma, { orderId: created.orderId, managerId: manager.id });
+      expect(archived.kind).toBe("archived");
+      expect((await prisma.order.findUniqueOrThrow({ where: { id: created.orderId } })).status).toBe(OrderStatus.CANCELLED);
+      expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(10);
+      expect(await prisma.orderEvent.count({ where: { orderId: created.orderId, eventType: "order_deleted" } })).toBe(1);
+
+      const again = await archiveOrderAndRestoreStock(prisma, { orderId: created.orderId, managerId: manager.id });
+      expect(again.kind).toBe("already-archived");
+      expect((await prisma.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(10);
+    } finally {
+      await prisma.manager.delete({ where: { id: manager.id } });
+    }
   });
 
   it("submits one cart at most once under concurrent checkout attempts", async () => {

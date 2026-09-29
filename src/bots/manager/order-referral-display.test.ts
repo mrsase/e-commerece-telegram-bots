@@ -16,6 +16,7 @@ describe("manager referral parent display", () => {
       createdAt: new Date("2026-01-01T00:00:00Z"),
       subtotal: 1000,
       discountTotal: 0,
+      shippingCost: 0,
       grandTotal: 1000,
       user: {
         firstName: "Child",

@@ -22,4 +22,13 @@ describe("buildCartDisplay", () => {
     expect(result.items).toHaveLength(0);
     expect(result.subtotal).toBe(0);
   });
+
+  it("shows the shipping quote and total before checkout", () => {
+    const result = buildCartDisplay([
+      { productId: 1, title: "Item A", qty: 1, unitPrice: 6_100_000, currency: "IRR" },
+    ], 5_900_000);
+    expect(result.text).toContain("تخفیف: 200,000 تومان");
+    expect(result.text).toContain("هزینه ارسال: 500,000 تومان");
+    expect(result.text).toContain("مبلغ قابل پرداخت: 6,400,000 تومان");
+  });
 });

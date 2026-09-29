@@ -5,6 +5,7 @@ import { ClientTexts, ChannelTexts } from "../../i18n/index.js";
 import { ClientKeyboards } from "../../utils/keyboards.js";
 import { formatPrice } from "../../utils/format-price.js";
 import { OrderService, InsufficientStockError, cancelOrderAndRestoreStock } from "../../services/order-service.js";
+import { DiscountService } from "../../services/discount-service.js";
 
 import { SessionStore } from "../../utils/session-store.js";
 
@@ -288,6 +289,7 @@ async function sendPaymentDetailsForOrder(
     order.grandTotal,
     paymentDetails,
     order.items[0]?.product?.currency ?? "IRR",
+    order.shippingCost,
   );
 
   const userTgId = order.user.tgUserId.toString();
@@ -350,7 +352,7 @@ async function processCheckout(
   checkoutImageFileId?: string,
 ): Promise<void> {
   const orderService = new OrderService(prisma);
-  const discountService = new (await import("../../services/discount-service.js")).DiscountService(prisma);
+  const discountService = new DiscountService(prisma);
 
   try {
     // Repair any legacy/un-normalized stored phone to the +98 international
@@ -411,8 +413,8 @@ async function processCheckout(
     });
 
     const orderMsg = discountResult.totalDiscount > 0
-      ? ClientTexts.orderSubmittedWithDiscount(result.orderId, result.grandTotal, result.subtotal, discountResult.totalDiscount)
-      : ClientTexts.orderSubmitted(result.orderId, result.grandTotal);
+      ? ClientTexts.orderSubmittedWithDiscount(result.orderId, result.grandTotal, result.subtotal, discountResult.totalDiscount, result.shippingCost)
+      : ClientTexts.orderSubmitted(result.orderId, result.grandTotal, result.shippingCost);
 
     await safeRender(
       ctx,
@@ -514,6 +516,33 @@ async function continueCheckoutFlow(
       reply_markup: ClientKeyboards.mainMenu(),
     });
   }
+}
+
+async function buildPricedCartDisplay(
+  prisma: PrismaClient,
+  userId: number,
+  cartItems: {
+    productId: number;
+    qty: number;
+    unitPriceSnapshot: number;
+    product: { title: string; currency: string };
+  }[],
+): Promise<ReturnType<typeof buildCartDisplay>> {
+  const discounts = await new DiscountService(prisma).calculateDiscounts({
+    userId,
+    items: cartItems.map((item) => ({
+      productId: item.productId,
+      qty: item.qty,
+      unitPrice: item.unitPriceSnapshot,
+    })),
+  });
+  return buildCartDisplay(cartItems.map((item) => ({
+    productId: item.productId,
+    title: item.product.title,
+    qty: item.qty,
+    unitPrice: item.unitPriceSnapshot,
+    currency: item.product.currency,
+  })), discounts.grandTotal);
 }
 
 /**
@@ -1323,13 +1352,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      const display = buildCartDisplay(updatedCart.items.map((item) => ({
-        productId: item.productId,
-        title: item.product.title,
-        qty: item.qty,
-        unitPrice: item.unitPriceSnapshot,
-        currency: item.product.currency,
-      })));
+      const display = await buildPricedCartDisplay(prisma, user.id, updatedCart.items);
 
       await safeRender(ctx, display.text, {
         reply_markup: ClientKeyboards.cartView(display.items),
@@ -1355,13 +1378,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      const display = buildCartDisplay(cart.items.map((item) => ({
-        productId: item.productId,
-        title: item.product.title,
-        qty: item.qty,
-        unitPrice: item.unitPriceSnapshot,
-        currency: item.product.currency,
-      })));
+      const display = await buildPricedCartDisplay(prisma, user.id, cart.items);
 
       await safeRender(ctx, display.text, {
         reply_markup: ClientKeyboards.cartView(display.items),
@@ -1399,13 +1416,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
 
-      const display = buildCartDisplay(updatedCart.items.map((item) => ({
-        productId: item.productId,
-        title: item.product.title,
-        qty: item.qty,
-        unitPrice: item.unitPriceSnapshot,
-        currency: item.product.currency,
-      })));
+      const display = await buildPricedCartDisplay(prisma, user.id, updatedCart.items);
 
       await safeRender(ctx, display.text, {
         reply_markup: ClientKeyboards.cartView(display.items),
@@ -1560,6 +1571,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       if (order.discountTotal > 0) {
         detailText += `تخفیف: ${formatPrice(order.discountTotal)}\n`;
       }
+      detailText += `هزینه ارسال: ${order.shippingCost ? formatPrice(order.shippingCost) : 'رایگان'}\n`;
       detailText += `*مبلغ نهایی: ${formatPrice(order.grandTotal)}*\n`;
 
       if (order.delivery) {

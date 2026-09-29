@@ -214,6 +214,7 @@ model Order {
   cart           Cart?           @relation(fields: [cartId], references: [id])
   subtotal       Int
   discountTotal  Int
+  shippingCost   Int             @default(0)
   grandTotal     Int
   status         OrderStatus     @default(AWAITING_MANAGER_APPROVAL)
   inviteLink          String?

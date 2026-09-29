@@ -75,19 +75,30 @@ Checkout is automatic; a manager does **not** approve a newly submitted order.
 1. The client confirms their phone, Telegram location, and address.
 2. Checkout atomically claims the active cart and verifies/decrements stock.
 3. The order is created with status `APPROVED`.
-4. Payment instructions are sent immediately. The manager bot can configure a
+4. Shipping is calculated from the discounted basket value: below 6,000,000
+   toman costs 500,000; 6,000,000 through 10,000,000 costs 350,000; above
+   10,000,000 is free. The shipping amount is stored on the order and included
+   in the amount due.
+5. Payment instructions are sent immediately. The manager bot can configure a
    16-digit card number and holder name, a Sheba number (`IR` + 24 digits) and
    holder name, or both.
-5. The order moves to `AWAITING_RECEIPT` while the customer pays.
-6. A manager approves or rejects the uploaded receipt.
-7. An approved receipt moves the order to `PAID`; delivery can then be assigned.
-8. A courier completes the delivery and the order becomes `COMPLETED`.
+6. The order moves to `AWAITING_RECEIPT` while the customer pays.
+7. A manager approves or rejects the uploaded receipt.
+8. An approved receipt moves the order to `PAID`; delivery can then be assigned.
+9. A courier completes the delivery and the order becomes `COMPLETED`.
 
 `AWAITING_MANAGER_APPROVAL` remains in the database enum for historical orders
 and backward compatibility. It is not part of the current checkout path.
 
 Stock changes and order creation happen in a transaction. Cancelling an
 unfulfilled order restores finite stock exactly once.
+
+The manager bot shows an exact `👤` shortcut beside customers in orders,
+receipts, support, and referral views. The referral tree also offers a jump
+search by user ID, Telegram ID, or name; matches show their unique user IDs.
+An order can be cancelled and removed from active lists with one confirmed
+action. It remains in deleted-order history. If payment was already recorded,
+the manager must arrange any refund separately.
 
 ## Application structure
 
@@ -190,6 +201,7 @@ The default expected release set is:
 - `20260819090000_add_announcement_media`
 - `20260824120000_add_referral_query_indexes`
 - `20260919120000_backfill_usernames`
+- `20260929120000_add_order_shipping_cost`
 
 If the target already has some of these migrations, the remaining subset is
 accepted. Override `EXPECTED_PENDING_MIGRATIONS` for a later release. A fully

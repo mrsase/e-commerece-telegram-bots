@@ -1,5 +1,6 @@
 import { ClientTexts } from "../i18n/index.js";
 import { formatPrice } from "./format-price.js";
+import { shippingCostForBasket } from "./shipping-cost.js";
 
 interface CartDisplayItem {
   productId: number;
@@ -18,7 +19,7 @@ export interface CartDisplayResult {
 /**
  * Build cart display text and extract items for keyboard rendering.
  */
-export function buildCartDisplay(cartItems: CartDisplayItem[]): CartDisplayResult {
+export function buildCartDisplay(cartItems: CartDisplayItem[], discountedBasketTotal?: number): CartDisplayResult {
   const items = cartItems.map((item) => ({
     productId: item.productId,
     title: item.title,
@@ -36,6 +37,13 @@ export function buildCartDisplay(cartItems: CartDisplayItem[]): CartDisplayResul
     text += `${item.title} x${item.qty} = ${formatPrice(lineTotal)}\n`;
   });
   text += `\n${ClientTexts.cartSubtotal(subtotal)}`;
+  if (discountedBasketTotal !== undefined) {
+    const discount = Math.max(0, subtotal - discountedBasketTotal);
+    if (discount > 0) text += `\nتخفیف: ${formatPrice(discount)}`;
+    const shippingCost = shippingCostForBasket(discountedBasketTotal);
+    text += `\n🚚 هزینه ارسال: ${shippingCost ? formatPrice(shippingCost) : 'رایگان'}`;
+    text += `\n💳 مبلغ قابل پرداخت: ${formatPrice(discountedBasketTotal + shippingCost)}`;
+  }
 
   return { text, items, subtotal };
 }

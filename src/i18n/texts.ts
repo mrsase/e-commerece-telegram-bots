@@ -70,10 +70,10 @@ export const ClientTexts = {
   removedFromCart: (title: string) => `از سبد خرید حذف شد: ${title}.`,
 
   // Checkout
-  orderSubmitted: (orderId: number, grandTotal: number) =>
-    `✅ سفارش شما ثبت شد.\nشماره سفارش: ${orderId}\nمبلغ قابل پرداخت: ${formatPrice(grandTotal)}\n\nاطلاعات پرداخت در پیام بعدی ارسال می‌شود. لطفاً پس از پرداخت، عکس رسید را همین‌جا ارسال کنید.\n\n🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`,
-  orderSubmittedWithDiscount: (orderId: number, grandTotal: number, subtotal: number, discount: number) =>
-    `✅ سفارش شما ثبت شد.\nشماره سفارش: ${orderId}\n\n💰 مبلغ قبل از تخفیف: ${formatPrice(subtotal)}\n🎁 تخفیف اختصاصی شما: ${formatPrice(discount)}\n💳 مبلغ قابل پرداخت: ${formatPrice(grandTotal)}\n\nاطلاعات پرداخت در پیام بعدی ارسال می‌شود. لطفاً پس از پرداخت، عکس رسید را همین‌جا ارسال کنید.\n\n🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`,
+  orderSubmitted: (orderId: number, grandTotal: number, shippingCost = 0) =>
+    `✅ سفارش شما ثبت شد.\nشماره سفارش: ${orderId}\nهزینه ارسال: ${shippingCost ? formatPrice(shippingCost) : 'رایگان'}\nمبلغ قابل پرداخت: ${formatPrice(grandTotal)}\n\nاطلاعات پرداخت در پیام بعدی ارسال می‌شود. لطفاً پس از پرداخت، عکس رسید را همین‌جا ارسال کنید.\n\n🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`,
+  orderSubmittedWithDiscount: (orderId: number, grandTotal: number, subtotal: number, discount: number, shippingCost = 0) =>
+    `✅ سفارش شما ثبت شد.\nشماره سفارش: ${orderId}\n\n💰 مبلغ قبل از تخفیف: ${formatPrice(subtotal)}\n🎁 تخفیف اختصاصی شما: ${formatPrice(discount)}\n🚚 هزینه ارسال: ${shippingCost ? formatPrice(shippingCost) : 'رایگان'}\n💳 مبلغ قابل پرداخت: ${formatPrice(grandTotal)}\n\nاطلاعات پرداخت در پیام بعدی ارسال می‌شود. لطفاً پس از پرداخت، عکس رسید را همین‌جا ارسال کنید.\n\n🙏 تا زمان تحویل سفارش، پیام‌های ربات را دنبال کنید؛ هماهنگی‌های ارسال از همین‌جا انجام می‌شود.`,
   outOfStock: () => "متأسفانه موجودی یک یا چند قلم کافی نیست. لطفاً تعداد یا اقلام سبد خرید را اصلاح کنید.",
   checkoutError: () => "ثبت سفارش با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید.",
 
@@ -503,6 +503,7 @@ export const ChannelTexts = {
     grandTotal: number,
     details: { cardNumber?: string | null; cardHolderName?: string | null; shebaNumber?: string | null; shebaHolderName?: string | null } = {},
     currency?: string,
+    shippingCost = 0,
   ) => {
     const paymentLines: string[] = [];
     if (details.cardNumber) {
@@ -523,6 +524,7 @@ export const ChannelTexts = {
       : "لطفاً مبلغ فوق را طبق مشخصات پرداخت اعلام‌شده واریز کنید";
 
     return `💳 *پرداخت سفارش #${orderId}*\n\n` +
+      `🚚 هزینه ارسال: ${shippingCost ? formatPrice(shippingCost) : 'رایگان'}\n` +
       `مبلغ قابل پرداخت: *${formatPrice(grandTotal)}${currency && currency !== "IRR" ? ` ${currency}` : ""}*\n\n` +
       destinationText +
       `${instruction} ` +

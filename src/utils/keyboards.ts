@@ -568,12 +568,11 @@ export const ManagerKeyboards = {
   receiptList: (receipts: { id: number; orderId: number; user: { id: number; username: string | null } }[], page: number = 0, totalPages: number = 1) => {
     const kb = new InlineKeyboard();
 
-    receipts.forEach((r, i) => {
+    receipts.forEach((r) => {
       const name = r.user.username || `کاربر ${r.user.id}`;
-      kb.text(`👤 ${name}`, `mgr:receipt:view:${r.id}`);
-      if (i % 2 === 1) kb.row();
+      kb.text(`🧾 ${name}`, `mgr:receipt:view:${r.id}`)
+        .text(`👤 #${r.user.id}`, `mgr:user:${r.user.id}`).row();
     });
-    if (receipts.length % 2 !== 0) kb.row();
 
     // Pagination
     if (totalPages > 1) {
@@ -588,14 +587,14 @@ export const ManagerKeyboards = {
   },
 
   /** Receipt actions (approve/reject/view order) */
-  receiptActions: (receiptId: number, orderId: number) => {
-    return new InlineKeyboard()
+  receiptActions: (receiptId: number, orderId: number, userId?: number) => {
+    const kb = new InlineKeyboard()
       .text("✅ تأیید رسید", `mgr:receipt:approve:${receiptId}`)
       .text("❌ رد رسید", `mgr:receipt:reject:${receiptId}`)
       .row()
-      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`)
-      .row()
-      .text("« بازگشت به رسیدها", "mgr:receipts");
+      .text("📋 مشاهده سفارش", `mgr:order:${orderId}`);
+    if (userId) kb.text("👤 مشاهده مشتری", `mgr:user:${userId}`);
+    return kb.row().text("« بازگشت به رسیدها", "mgr:receipts");
   },
 
   receiptApprovalMenu: (receiptId: number) => {
@@ -628,11 +627,12 @@ export const ManagerKeyboards = {
       .text("« رسیدها", "mgr:receipts");
   },
 
-  supportInbox: (conversations: { id: number; userLabel: string; lastMessageAtLabel: string }[], page: number = 0, totalPages: number = 1) => {
+  supportInbox: (conversations: { id: number; userId: number; userLabel: string; lastMessageAtLabel: string }[], page: number = 0, totalPages: number = 1) => {
     const kb = new InlineKeyboard();
 
     conversations.forEach((c) => {
-      kb.text(`${c.userLabel} · ${c.lastMessageAtLabel}`, `mgr:support:conv:${c.id}`).row();
+      kb.text(`${c.userLabel} · ${c.lastMessageAtLabel}`, `mgr:support:conv:${c.id}`)
+        .text(`👤 #${c.userId}`, `mgr:user:${c.userId}`).row();
     });
 
     if (totalPages > 1) {
@@ -646,12 +646,12 @@ export const ManagerKeyboards = {
     return kb;
   },
 
-  supportConversationActions: (conversationId: number) => {
-    return new InlineKeyboard()
+  supportConversationActions: (conversationId: number, userId?: number) => {
+    const kb = new InlineKeyboard()
       .text("✍️ پاسخ", `mgr:support:reply:${conversationId}`)
-      .text("✅ بستن", `mgr:support:close:${conversationId}`)
-      .row()
-      .text("« بازگشت به صندوق", "mgr:support");
+      .text("✅ بستن", `mgr:support:close:${conversationId}`);
+    if (userId) kb.row().text("👤 مشاهده مشتری", `mgr:user:${userId}`);
+    return kb.row().text("« بازگشت به صندوق", "mgr:support");
   },
 
   /** Inline actions for receipt notification — approve/reject directly */

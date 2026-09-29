@@ -9,7 +9,7 @@ function depsWithReferral(referredBy: { id: number; username: string | null; fir
     manager: { findMany: vi.fn().mockResolvedValue([{ tgUserId: BigInt(1000), isActive: true }]) },
     order: {
       findUnique: vi.fn().mockResolvedValue({
-        user: { referredBy, usedReferralCode: { createdByManagerId } },
+        user: { id: 42, referredBy, usedReferralCode: { createdByManagerId } },
       }),
     },
   } as unknown as PrismaClient;
@@ -33,6 +33,7 @@ describe("NotificationService manager order referral context", () => {
     const [, text, options] = sendMessage.mock.calls[0];
     expect(text).toContain("👤 معرف: parent\\_user (#9)");
     expect(JSON.stringify(options)).toContain("mgr:user:9");
+    expect(JSON.stringify(options)).toContain("mgr:user:42");
     expect(JSON.stringify(options)).toContain("mgr:ref:node:9:0");
   });
 

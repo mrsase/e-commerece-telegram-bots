@@ -27,6 +27,7 @@
 #        20260819090000_add_announcement_media
 #        20260824120000_add_referral_query_indexes
 #        20260919120000_backfill_usernames
+#        20260929120000_add_order_shipping_cost
 #      It aborts if:
 #        - any historical migration is missing from the database (unapplied),
 #        - any DB-applied migration file is missing locally,
@@ -78,6 +79,7 @@
 #                        20260819090000_add_announcement_media and
 #                        20260824120000_add_referral_query_indexes, and
 #                        20260919120000_backfill_usernames.
+#                        20260929120000_add_order_shipping_cost.
 #                        Set explicitly for future releases (or for a fresh
 #                        database bootstrapping all migrations at once).
 #   ALLOW_NOOP           Any non-empty value allows the otherwise-aborted
@@ -107,7 +109,7 @@ TIMESTAMP=$(date -u '+%Y%m%dT%H%M%SZ')
 # Migration alignment guard configuration. Safe default: pending migrations
 # may only come from this release's known migrations. This safely supports a
 # target where any earlier migration in the set is already applied.
-EXPECTED_PENDING_MIGRATIONS="${EXPECTED_PENDING_MIGRATIONS:-20260819090000_add_announcement_media 20260824120000_add_referral_query_indexes 20260919120000_backfill_usernames}"
+EXPECTED_PENDING_MIGRATIONS="${EXPECTED_PENDING_MIGRATIONS:-20260819090000_add_announcement_media 20260824120000_add_referral_query_indexes 20260919120000_backfill_usernames 20260929120000_add_order_shipping_cost}"
 NOOP=0
 
 # Work from the project root: the Prisma CLI discovers schema.prisma, .env
