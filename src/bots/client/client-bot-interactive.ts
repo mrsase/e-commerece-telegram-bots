@@ -1,4 +1,4 @@
-import { Bot, Context, Keyboard } from "grammy";
+import { Bot, Context, InlineKeyboard, Keyboard } from "grammy";
 import type { PrismaClient, SupportConversation, User } from "@prisma/client";
 import { CartState, OrderStatus, ReceiptReviewStatus, SupportConversationStatus, SupportSenderType } from "@prisma/client";
 import { ClientTexts, ChannelTexts } from "../../i18n/index.js";
@@ -122,6 +122,13 @@ export function referralCodeFromStartMessage(text: string): string | undefined {
   return match?.[1]?.toUpperCase();
 }
 
+/** The single access rule for every customer-facing feature. */
+export function hasVerifiedClientAccess(
+  user: Pick<User, "isActive" | "isVerified"> | null | undefined,
+): boolean {
+  return user?.isActive === true && user.isVerified === true;
+}
+
 /**
  * Get or create user, checking referral status
  */
@@ -201,11 +208,11 @@ export async function validateAndUseReferralCode(
 
       const targetUser = await tx.user.findUnique({
         where: { id: userId },
-        select: { isVerified: true, usedReferralCodeId: true },
+        select: { isActive: true, isVerified: true, usedReferralCodeId: true },
       });
       // Parentage is immutable after verification. Keep this guard inside the
       // transaction so future entry points cannot re-parent an existing user.
-      if (!targetUser || targetUser.isVerified || targetUser.usedReferralCodeId !== null) return false;
+      if (!targetUser || !targetUser.isActive || targetUser.isVerified || targetUser.usedReferralCodeId !== null) return false;
 
       // Referral access codes are one-time tokens. Claim and expire immediately.
       const claimResult = await tx.referralCode.updateMany({
@@ -572,6 +579,30 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     });
   };
 
+  /**
+   * Re-check persistent access before any state-driven message handler. This
+   * prevents a stale in-memory checkout/support session from outliving a block
+   * or from authorizing an unverified account.
+   */
+  const requireVerifiedAccessForMessage = async (ctx: Context): Promise<User | null> => {
+    if (!ctx.from) return null;
+    const user = await prisma.user.findUnique({
+      where: { tgUserId: BigInt(ctx.from.id) },
+    });
+    if (hasVerifiedClientAccess(user)) return user;
+
+    userSessions.delete(ctx.from.id);
+    if (!user) return null;
+    if (!user.isActive) {
+      await ctx.reply(ClientTexts.userBlocked(), { reply_markup: { remove_keyboard: true } });
+      return null;
+    }
+
+    userSessions.set(ctx.from.id, { state: "awaiting_referral" });
+    await ctx.reply(ClientTexts.welcomeNewUser(), { reply_markup: { remove_keyboard: true } });
+    return null;
+  };
+
   // Global error handler to prevent crashes
   bot.catch((err) => {
     console.error("Client bot error:", err.message || err);
@@ -584,7 +615,7 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
     const { user, needsReferral } = await getOrCreateUser(ctx, prisma);
 
     if (!user) {
-      await ctx.reply(ClientTexts.userBlocked());
+      await ctx.reply(ClientTexts.userBlocked(), { reply_markup: { remove_keyboard: true } });
       return;
     }
 
@@ -597,12 +628,12 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
           await requestMandatoryLocation(ctx, "onboarding");
           return;
         }
-        await ctx.reply(ClientTexts.invalidReferralCode());
+        await ctx.reply(ClientTexts.invalidReferralCode(), { reply_markup: { remove_keyboard: true } });
         return;
       }
 
       userSessions.set(ctx.from!.id, { state: "awaiting_referral" });
-      await ctx.reply(ClientTexts.welcomeNewUser());
+      await ctx.reply(ClientTexts.welcomeNewUser(), { reply_markup: { remove_keyboard: true } });
       return;
     }
 
@@ -630,8 +661,53 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   bot.on("message:text", async (ctx) => {
     const session = userSessions.get(ctx.from.id);
     const incomingText = ctx.message.text.trim();
+    const accessUser = await prisma.user.findUnique({
+      where: { tgUserId: BigInt(ctx.from.id) },
+    });
 
-    if (session && session.state !== "awaiting_referral" && (incomingText === "/cancel" || incomingText === "انصراف")) {
+    if (session?.state === "awaiting_referral") {
+      if (!accessUser) {
+        userSessions.delete(ctx.from.id);
+        return;
+      }
+      if (!accessUser.isActive) {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply(ClientTexts.userBlocked(), { reply_markup: { remove_keyboard: true } });
+        return;
+      }
+      if (accessUser.isVerified) {
+        userSessions.delete(ctx.from.id);
+        await ctx.reply(ClientTexts.welcome(), { reply_markup: ClientKeyboards.mainMenu() });
+        return;
+      }
+
+      const valid = await validateAndUseReferralCode(accessUser.id, incomingText, prisma);
+      if (!valid) {
+        await ctx.reply(ClientTexts.invalidReferralCode(), { reply_markup: { remove_keyboard: true } });
+        return;
+      }
+
+      userSessions.delete(ctx.from.id);
+      await ctx.reply(ClientTexts.referralCodeAccepted());
+      await requestMandatoryLocation(ctx, "onboarding");
+      return;
+    }
+
+    // All non-referral text flows are denied unless the database says the user
+    // is both active and verified. Session state alone is never authorization.
+    if (!hasVerifiedClientAccess(accessUser)) {
+      userSessions.delete(ctx.from.id);
+      if (!accessUser) return;
+      if (!accessUser.isActive) {
+        await ctx.reply(ClientTexts.userBlocked(), { reply_markup: { remove_keyboard: true } });
+        return;
+      }
+      userSessions.set(ctx.from.id, { state: "awaiting_referral" });
+      await ctx.reply(ClientTexts.welcomeNewUser(), { reply_markup: { remove_keyboard: true } });
+      return;
+    }
+
+    if (session && (incomingText === "/cancel" || incomingText === "انصراف")) {
       // The mandatory onboarding location gate cannot be cancelled — re-prompt it.
       if (isInMandatoryOnboarding(session)) {
         await requestMandatoryLocation(ctx, "onboarding");
@@ -644,31 +720,6 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       await ctx.reply(ClientTexts.welcome(), {
         reply_markup: ClientKeyboards.mainMenu(),
       });
-      return;
-    }
-    
-    if (session?.state === "awaiting_referral") {
-      const code = incomingText;
-      
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
-
-      if (!user) {
-        await ctx.reply(ClientTexts.unableToIdentify());
-        return;
-      }
-
-      const valid = await validateAndUseReferralCode(user.id, code, prisma);
-
-      if (!valid) {
-        await ctx.reply(ClientTexts.invalidReferralCode());
-        return;
-      }
-
-      userSessions.delete(ctx.from.id);
-      await ctx.reply(ClientTexts.referralCodeAccepted());
-      await requestMandatoryLocation(ctx, "onboarding");
       return;
     }
 
@@ -874,6 +925,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   // CONTACT MESSAGE HANDLER - For phone number
   // ===========================================
   bot.on("message:contact", async (ctx) => {
+    const user = await requireVerifiedAccessForMessage(ctx);
+    if (!user) return;
     const session = userSessions.get(ctx.from.id);
     
     if (session?.state === "checkout_phone") {
@@ -883,15 +936,6 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
         return;
       }
       
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
-
-      if (!user) {
-        await ctx.reply(ClientTexts.unableToIdentify());
-        return;
-      }
-
       const phone = normalizeIranianPhone(contact.phone_number);
       if (!phone) {
         await ctx.reply(ClientTexts.invalidPhone());
@@ -920,17 +964,10 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   // ===========================================
   const saveSharedLocation = async (ctx: Context, latitude: number, longitude: number): Promise<void> => {
     if (!ctx.from) return;
+    const user = await requireVerifiedAccessForMessage(ctx);
+    if (!user) return;
     const session = userSessions.get(ctx.from.id);
     if (session?.state !== "checkout_location") return;
-
-    const user = await prisma.user.findUnique({
-      where: { tgUserId: BigInt(ctx.from.id) },
-    });
-
-    if (!user) {
-      await ctx.reply(ClientTexts.unableToIdentify());
-      return;
-    }
 
     await prisma.user.update({
       where: { id: user.id },
@@ -968,6 +1005,8 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
   // ===========================================
   bot.on("message:photo", async (ctx) => {
     try {
+      const user = await requireVerifiedAccessForMessage(ctx);
+      if (!user) return;
       const session = userSessions.get(ctx.from.id);
 
       // Only accept receipt photos when user has explicitly selected an order
@@ -977,15 +1016,6 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       }
 
       const orderId = session.orderId;
-
-      const user = await prisma.user.findUnique({
-        where: { tgUserId: BigInt(ctx.from.id) },
-      });
-
-      if (!user) {
-        await ctx.reply(ClientTexts.unableToIdentify());
-        return;
-      }
 
       const order = await prisma.order.findUnique({
         where: { id: orderId },
@@ -1078,9 +1108,11 @@ export function registerInteractiveClientBot(bot: Bot, deps: ClientBotDeps): voi
       return;
     }
 
-    if (needsReferral && !data.startsWith("noop")) {
+    if (needsReferral) {
       userSessions.set(ctx.from.id, { state: "awaiting_referral" });
-      await safeRender(ctx, ClientTexts.welcomeNewUser());
+      await safeRender(ctx, ClientTexts.welcomeNewUser(), {
+        reply_markup: new InlineKeyboard(),
+      });
       return;
     }
 

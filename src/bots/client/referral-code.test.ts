@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { validateAndUseReferralCode } from "./client-bot-interactive.js";
+import { hasVerifiedClientAccess, validateAndUseReferralCode } from "./client-bot-interactive.js";
 
 let prisma: PrismaClient;
 
@@ -13,12 +13,12 @@ beforeEach(async () => {
   await prisma.user.deleteMany({
     where: {
       referralCode: {
-        in: ["REF_USER_1", "REF_USER_2", "REF_SELF_USER", "REF_VERIFIED_USER", "REF_PARENT_USER"],
+        in: ["REF_USER_1", "REF_USER_2", "REF_SELF_USER", "REF_VERIFIED_USER", "REF_PARENT_USER", "REF_BLOCKED_USER"],
       },
     },
   });
   await prisma.referralCode.deleteMany({
-    where: { code: { in: ["ONE_TIME_CODE", "SELF_REF_CODE", "VERIFIED_REF_CODE"] } },
+    where: { code: { in: ["ONE_TIME_CODE", "SELF_REF_CODE", "VERIFIED_REF_CODE", "BLOCKED_REF_CODE"] } },
   });
 });
 
@@ -27,6 +27,13 @@ afterAll(async () => {
 });
 
 describe("validateAndUseReferralCode", () => {
+  it("defines access as both active and referral-verified", () => {
+    expect(hasVerifiedClientAccess({ isActive: true, isVerified: true })).toBe(true);
+    expect(hasVerifiedClientAccess({ isActive: true, isVerified: false })).toBe(false);
+    expect(hasVerifiedClientAccess({ isActive: false, isVerified: true })).toBe(false);
+    expect(hasVerifiedClientAccess(null)).toBe(false);
+  });
+
   it("allows a referral code once and expires it immediately", async () => {
     const firstUser = await prisma.user.create({
       data: {
@@ -90,6 +97,31 @@ describe("validateAndUseReferralCode", () => {
       prisma.referralCode.findUniqueOrThrow({ where: { id: code.id } }),
     ]);
     expect(freshUser.referredById).toBeNull();
+    expect(freshUser.isVerified).toBe(false);
+    expect(freshCode.usedCount).toBe(0);
+    expect(freshCode.isActive).toBe(true);
+  });
+
+  it("does not verify a blocked account or consume its referral code", async () => {
+    const user = await prisma.user.create({
+      data: {
+        tgUserId: BigInt(900006),
+        referralCode: "REF_BLOCKED_USER",
+        isActive: false,
+      },
+    });
+    const code = await prisma.referralCode.create({
+      data: {
+        code: "BLOCKED_REF_CODE",
+        isActive: true,
+      },
+    });
+
+    await expect(validateAndUseReferralCode(user.id, code.code, prisma)).resolves.toBe(false);
+    const [freshUser, freshCode] = await Promise.all([
+      prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
+      prisma.referralCode.findUniqueOrThrow({ where: { id: code.id } }),
+    ]);
     expect(freshUser.isVerified).toBe(false);
     expect(freshCode.usedCount).toBe(0);
     expect(freshCode.isActive).toBe(true);

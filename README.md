@@ -16,6 +16,12 @@ The application starts three bots in one Node.js process:
 Telegram updates are received exclusively through long polling. There is no
 webhook server, Redis, BullMQ, or PostgreSQL dependency.
 
+Customer access is private. Every client-bot entry point checks the persisted
+`isActive` and `isVerified` flags before showing menus or accepting state-based
+input. Unverified accounts can only submit a one-time referral code; stale
+buttons and checkout, support, contact, location, and receipt inputs remain
+locked.
+
 ## Requirements
 
 - Node.js 20 or newer
